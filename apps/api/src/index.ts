@@ -10,16 +10,17 @@ import { connectDb, closeDb } from "./db";
 import { connectRedis, redis } from "./lib/redis";
 import { payoutQueue } from "./queues/payout.queue";
 import { logger } from "./lib/logger";
+import { config } from "./lib/config";
 
 const app = express();
-const PORT = parseInt(process.env.PORT ?? "3000", 10);
+const PORT = config.PORT;
 let isShuttingDown = false;
 
 // ── Security & Parsing ─────────────────────────────────────────────────────
 app.use(helmet());
 app.use(
   cors({
-    origin: process.env.WEB_URL ?? "http://localhost:3000",
+    origin: config.WEB_URL,
     credentials: true,
   })
 );
@@ -53,7 +54,7 @@ async function start(): Promise<void> {
   await connectRedis();
 
   const server = app.listen(PORT, () => {
-    logger.info(`API running on port ${PORT}`, { env: process.env.NODE_ENV });
+    logger.info(`API running on port ${PORT}`, { env: config.NODE_ENV });
   });
 
   // ── Graceful shutdown ──────────────────────────────────────────────────
@@ -82,7 +83,7 @@ async function start(): Promise<void> {
   process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
-if (process.env.NODE_ENV !== "test") {
+if (config.NODE_ENV !== "test") {
   start().catch((err) => {
     logger.error("Failed to start API", { err });
     process.exit(1);

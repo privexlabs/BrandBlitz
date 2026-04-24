@@ -5,6 +5,7 @@ import { findUserByGoogleId, upsertUser } from "../db/queries/users";
 import { createError } from "../middleware/error";
 import { authLimiter } from "../middleware/rate-limit";
 import { authenticate } from "../middleware/authenticate";
+import { config } from "../lib/config";
 
 const router = Router();
 
@@ -32,7 +33,7 @@ router.post("/google/callback", authLimiter, async (req, res) => {
 
   const token = jwt.sign(
     { sub: user.id, email: user.email },
-    process.env.JWT_SECRET!,
+    config.JWT_SECRET,
     { expiresIn: "7d" }
   );
 
@@ -56,7 +57,7 @@ router.get("/me", authenticate, async (req, res) => {
 router.post("/refresh", authenticate, (req, res) => {
   const token = jwt.sign(
     { sub: req.user!.sub, email: req.user!.email },
-    process.env.JWT_SECRET!,
+    config.JWT_SECRET,
     { expiresIn: "7d" }
   );
   res.json({ token });

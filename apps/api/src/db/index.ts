@@ -1,8 +1,9 @@
 import { Pool, type QueryResult, type QueryResultRow } from "pg";
 import { logger } from "../lib/logger";
+import { config } from "../lib/config";
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: config.DATABASE_URL,
   max: 20,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,

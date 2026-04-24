@@ -5,6 +5,7 @@ import { createPayout, updatePayoutStatus } from "../db/queries/payouts";
 import { calculatePayoutShare, rankWinners } from "./scoring";
 import { payoutQueue } from "../queues/payout.queue";
 import { logger } from "../lib/logger";
+import { config } from "../lib/config";
 import type { NetworkName } from "@brandblitz/stellar";
 
 /**
@@ -76,10 +77,10 @@ export async function processPayout(challengeId: string): Promise<void> {
     payoutRecords.push({ id: payout.id, address: winner.stellarAddress, amount });
   }
 
-  const network = (process.env.STELLAR_NETWORK ?? "testnet") as NetworkName;
+  const network = config.STELLAR_NETWORK as NetworkName;
   const results = await submitBatchPayout(
     recipients,
-    process.env.HOT_WALLET_SECRET!,
+    config.HOT_WALLET_SECRET,
     challengeId,
     network
   );

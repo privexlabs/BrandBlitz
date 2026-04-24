@@ -15,6 +15,7 @@ import { generateChallengeQuestions } from "../services/questions";
 import { optimizeImage } from "@brandblitz/storage";
 import { authenticate } from "../middleware/authenticate";
 import { createError } from "../middleware/error";
+import { config } from "../lib/config";
 
 const router = Router();
 
@@ -129,7 +130,7 @@ router.post("/challenges", authenticate, async (req, res) => {
   res.status(201).json({
     challenge,
     depositInstructions: {
-      hotWalletAddress: process.env.HOT_WALLET_PUBLIC_KEY,
+      hotWalletAddress: config.HOT_WALLET_PUBLIC_KEY,
       memo: challengeId,
       amount: body.poolAmountUsdc,
       asset: "USDC",

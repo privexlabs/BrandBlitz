@@ -4,6 +4,7 @@ import {
   updateChallengeStatus,
 } from "../db/queries/challenges";
 import { logger } from "../lib/logger";
+import { config } from "../lib/config";
 
 const router = Router();
 
@@ -17,7 +18,7 @@ const router = Router();
  */
 router.post("/stellar/deposit", async (req, res) => {
   const secret = req.headers["x-webhook-secret"];
-  if (secret !== process.env.WEBHOOK_SECRET) {
+  if (secret !== config.WEBHOOK_SECRET) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

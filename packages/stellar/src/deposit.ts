@@ -1,5 +1,5 @@
 import { rpc as SorobanRpc } from "@stellar/stellar-sdk";
-import { getRpcServer, getUsdcAsset, type NetworkName } from "./client";
+import { getRpcServer, getUsdcAsset, getNetworkConfig, type NetworkName } from "./client";
 import { DEPOSIT_POLL_INTERVAL_MS } from "./constants";
 
 export interface DepositEvent {
@@ -25,6 +25,7 @@ export async function fetchDepositEvents(
 ): Promise<{ events: DepositEvent[]; latestLedger: number }> {
   const rpc = getRpcServer(network);
   const usdc = getUsdcAsset(network);
+  const { networkPassphrase } = getNetworkConfig(network);
 
   const response = await rpc.getEvents({
     startLedger: fromLedger,
@@ -32,7 +33,7 @@ export async function fetchDepositEvents(
       {
         type: "contract",
         // SAC (Stellar Asset Contract) transfer events for USDC
-        contractIds: [usdc.contractId(network === "testnet" ? "Test SDF Network ; September 2015" : "Public Global Stellar Network ; September 2015")],
+        contractIds: [usdc.contractId(networkPassphrase)],
         topics: [
           ["transfer", "*", hotWalletAddress],
         ],
