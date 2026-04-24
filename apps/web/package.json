@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "next": "16.2.1",
@@ -31,6 +32,9 @@
     "@types/node": "25.5.0",
     "@types/react": "19.1.8",
     "@types/react-dom": "19.1.6",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.0",
+    "jsdom": "27.0.1",
     "tailwindcss": "4.2.2",
     "typescript": "6.0.2",
     "postcss": "8.5.8",
@@ -38,6 +42,7 @@
     "prettier": "3.8.1",
     "prettier-plugin-tailwindcss": "0.6.12",
     "eslint": "10.1.0",
-    "eslint-config-next": "16.2.1"
+    "eslint-config-next": "16.2.1",
+    "vitest": "4.1.2"
   }
 }
