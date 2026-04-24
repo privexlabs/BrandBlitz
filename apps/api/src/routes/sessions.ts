@@ -46,7 +46,9 @@ router.post(
     const session = await createSession({
       userId: req.user!.sub,
       challengeId: challenge.id,
-      deviceId: req.headers["x-visitor-id"] as string | undefined,
+      deviceId:
+        (req.headers["x-device-id"] as string | undefined) ??
+        (req.headers["x-visitor-id"] as string | undefined),
       isPractice: req.body.isPractice === true,
     });
 
@@ -140,6 +142,16 @@ router.post(
     if (!session) throw createError("Session not found", 404);
     if (session.user_id !== req.user!.sub) throw createError("Forbidden", 403);
     if (!session.challenge_started_at) throw createError("Challenge not started", 400);
+
+    // Edge Cases
+    if (session.completed_at) throw createError("Session already completed", 409);
+    if (session.is_flagged) throw createError("Session flagged for review", 403);
+    
+    // Double answer check
+    const existingScores = (session as any).scores || []; // Assume scores are joined or we need to check DB
+    if (existingScores.some((s: any) => s.round === round)) {
+      throw createError("Round already answered", 400);
+    }
 
     // Get the server-stored question for this round
     const questions = await getChallengeQuestions(challenge.id);

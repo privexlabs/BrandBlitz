@@ -1,0 +1,216 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import request from "supertest";
+import express from "express";
+import sessionsRouter from "./sessions";
+import { errorHandler } from "../middleware/error";
+
+// Mock dependencies
+vi.mock("../db/queries/challenges");
+vi.mock("../db/queries/sessions");
+vi.mock("../services/scoring");
+vi.mock("../lib/redis", () => ({
+  redis: {
+    set: vi.fn(),
+    get: vi.fn(),
+    del: vi.fn(),
+  },
+}));
+vi.mock("../middleware/authenticate", () => ({
+  authenticate: (req: any, res: any, next: any) => {
+    req.user = { sub: "user123", email: "test@example.com" };
+    next();
+  },
+}));
+vi.mock("../middleware/anti-cheat", () => ({
+  enforceOneSessionPerChallenge: (req: any, res: any, next: any) => next(),
+  validateReactionTime: (req: any, res: any, next: any) => next(),
+  validateDeviceFingerprint: (req: any, res: any, next: any) => next(),
+}));
+vi.mock("../middleware/rate-limit", () => ({
+  challengeStartLimiter: (req: any, res: any, next: any) => next(),
+}));
+
+import * as challengeQueries from "../db/queries/challenges";
+import * as sessionQueries from "../db/queries/sessions";
+import { redis } from "../lib/redis";
+import * as scoringService from "../services/scoring";
+
+const app = express();
+app.use(express.json());
+app.use("/sessions", sessionsRouter);
+app.use(errorHandler);
+
+describe("Sessions API", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("POST /sessions/:challengeId/warmup-start", () => {
+    it("should start warmup happy path", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1", status: "active" });
+      (sessionQueries.createSession as any).mockResolvedValue({ id: "s1" });
+
+      const res = await request(app)
+        .post("/sessions/c1/warmup-start")
+        .send({ isPractice: false });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty("sessionId", "s1");
+      expect(redis.set).toHaveBeenCalled();
+    });
+
+    it("should 404 if challenge not available", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue(null);
+
+      const res = await request(app).post("/sessions/c1/warmup-start");
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("POST /sessions/:challengeId/warmup-complete", () => {
+    it("should complete warmup happy path", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.getSession as any).mockResolvedValue({ id: "s1", user_id: "user123" });
+      (redis.get as any).mockResolvedValue((Date.now() - 1000).toString()); // already passed
+
+      const res = await request(app).post("/sessions/c1/warmup-complete");
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty("challengeToken");
+    });
+
+    it("should 400 if warmup too fast", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.getSession as any).mockResolvedValue({ id: "s1", user_id: "user123" });
+      (redis.get as any).mockResolvedValue((Date.now() + 10000).toString()); // still in future
+
+      const res = await request(app).post("/sessions/c1/warmup-complete");
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe("WARMUP_TOO_FAST");
+    });
+  });
+
+  describe("POST /sessions/:challengeId/start", () => {
+    it("should start challenge happy path", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (redis.get as any).mockResolvedValue("s1");
+      (sessionQueries.getSession as any).mockResolvedValue({ id: "s1", user_id: "user123" });
+
+      const res = await request(app)
+        .post("/sessions/c1/start")
+        .send({ challengeToken: "valid-token" });
+
+      expect(res.status).toBe(200);
+      expect(sessionQueries.markChallengeStarted).toHaveBeenCalledWith("s1");
+    });
+
+    it("should 401 if invalid token", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (redis.get as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post("/sessions/c1/start")
+        .send({ challengeToken: "invalid-token" });
+
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe("POST /sessions/:challengeId/answer/:round", () => {
+    it("should record answer happy path", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.getSession as any).mockResolvedValue({
+        id: "s1",
+        user_id: "user123",
+        challenge_started_at: new Date(),
+      });
+      (challengeQueries.getChallengeQuestions as any).mockResolvedValue([
+        { round: 1, correct_option: "A" },
+      ]);
+      (scoringService.calculateRoundScore as any).mockReturnValue(100);
+      (scoringService.validateAnswer as any).mockReturnValue(true);
+
+      const res = await request(app)
+        .post("/sessions/c1/answer/1")
+        .send({ selectedOption: "A", reactionTimeMs: 500 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.score).toBe(100);
+      expect(sessionQueries.recordRoundScore).toHaveBeenCalledWith("s1", 1, 100);
+    });
+
+    it("should finalize session on round 3", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.getSession as any).mockResolvedValue({
+        id: "s1",
+        user_id: "user123",
+        challenge_started_at: new Date(),
+      });
+      (challengeQueries.getChallengeQuestions as any).mockResolvedValue([
+        { round: 3, correct_option: "B" },
+      ]);
+
+      const res = await request(app)
+        .post("/sessions/c1/answer/3")
+        .send({ selectedOption: "B", reactionTimeMs: 400 });
+
+      expect(res.status).toBe(200);
+      expect(sessionQueries.finishSession).toHaveBeenCalledWith("s1");
+    });
+
+    it("should 409 if session already completed", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.getSession as any).mockResolvedValue({
+        id: "s1",
+        user_id: "user123",
+        challenge_started_at: new Date(),
+        completed_at: new Date(),
+      });
+
+      const res = await request(app)
+        .post("/sessions/c1/answer/1")
+        .send({ selectedOption: "A", reactionTimeMs: 500 });
+
+      expect(res.status).toBe(409);
+    });
+
+    it("should 403 if session is flagged", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.getSession as any).mockResolvedValue({
+        id: "s1",
+        user_id: "user123",
+        challenge_started_at: new Date(),
+        is_flagged: true,
+      });
+
+      const res = await request(app)
+        .post("/sessions/c1/answer/1")
+        .send({ selectedOption: "A", reactionTimeMs: 500 });
+
+      expect(res.status).toBe(403);
+    });
+
+    it("should 400 for double answer", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.getSession as any).mockResolvedValue({
+        id: "s1",
+        user_id: "user123",
+        challenge_started_at: new Date(),
+        scores: [{ round: 1, score: 100 }],
+      });
+
+      const res = await request(app)
+        .post("/sessions/c1/answer/1")
+        .send({ selectedOption: "A", reactionTimeMs: 500 });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("should 400 for invalid round", async () => {
+      const res = await request(app)
+        .post("/sessions/c1/answer/4")
+        .send({ selectedOption: "A", reactionTimeMs: 500 });
+      expect(res.status).toBe(400);
+    });
+  });
+});

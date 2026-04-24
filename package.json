@@ -6,17 +6,20 @@
   "scripts": {
     "dev": "turbo run dev --parallel",
     "build": "turbo run build",
-    "test": "turbo run test",
+    "test": "vitest run --config vitest.config.ts",
+    "test:coverage": "vitest run --config vitest.config.ts --coverage",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
     "clean": "turbo run clean && rm -rf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\" --ignore-path .gitignore"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "4.1.2",
     "eslint": "10.1.0",
     "prettier": "3.8.1",
     "prettier-plugin-tailwindcss": "0.6.12",
     "turbo": "2.8.21",
-    "typescript": "6.0.2"
+    "typescript": "6.0.2",
+    "vitest": "4.1.2"
   }
 }

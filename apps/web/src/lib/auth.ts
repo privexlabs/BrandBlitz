@@ -10,19 +10,19 @@ export const authOptions: NextAuthOptions = {
   ],
 
   callbacks: {
-    async signIn({ user, account, profile }) {
+    async signIn({ user, account }) {
       // After Google OAuth, register user in our API and get a JWT
       try {
+        const idToken = (account as { id_token?: string } | null)?.id_token;
+        if (!idToken) return false;
+
         const response = await fetch(
           `${process.env.NEXTAUTH_API_URL ?? process.env.NEXT_PUBLIC_API_URL}/auth/google/callback`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              googleId: profile?.sub ?? account?.providerAccountId,
-              email: user.email,
-              name: user.name,
-              avatarUrl: user.image,
+              idToken,
             }),
           }
         );

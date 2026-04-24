@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, use } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { WarmupPhase } from "@/components/game/warmup-phase";
@@ -16,10 +16,10 @@ interface PageProps {
 }
 
 export default function ChallengePage({ params }: PageProps) {
+  const { id: challengeId } = use(params);
   const { data: session } = useSession();
   const router = useRouter();
 
-  const [challengeId, setChallengeId] = useState<string>("");
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [questions, setQuestions] = useState<ChallengeQuestion[]>([]);
   const [phase, setPhase] = useState<GamePhase>("loading");
@@ -27,12 +27,6 @@ export default function ChallengePage({ params }: PageProps) {
   const [challengeToken, setChallengeToken] = useState("");
   const [sessionId, setSessionId] = useState("");
   const [scores, setScores] = useState<number[]>([]);
-
-  useEffect(() => {
-    params.then(({ id }) => {
-      setChallengeId(id);
-    });
-  }, [params]);
 
   useEffect(() => {
     if (!challengeId) return;

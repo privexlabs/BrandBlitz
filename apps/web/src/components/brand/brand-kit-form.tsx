@@ -21,10 +21,9 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
   const [fields, setFields] = useState({
     name: "",
     tagline: "",
-    description: "",
+    brandStory: "",
     primaryColor: "#6366f1",
     secondaryColor: "#a5b4fc",
-    websiteUrl: "",
     poolAmountUsdc: "",
     durationHours: "72",
   });
@@ -44,31 +43,40 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
 
     try {
       const api = createApiClient(apiToken);
+      const [productImage1Key, productImage2Key] = productImageKeys;
 
       // 1. Create brand kit
       const brandRes = await api.post("/brands", {
         name: fields.name,
         tagline: fields.tagline,
-        description: fields.description,
+        brandStory: fields.brandStory,
         primaryColor: fields.primaryColor,
         secondaryColor: fields.secondaryColor,
-        websiteUrl: fields.websiteUrl || undefined,
         logoKey,
-        productImageKeys,
+        productImage1Key,
+        productImage2Key,
       });
 
       const brandId = brandRes.data.brand.id;
+      const parsedDurationHours = Number.parseInt(fields.durationHours, 10);
+      const durationHours = Number.isFinite(parsedDurationHours) && parsedDurationHours > 0
+        ? parsedDurationHours
+        : 72;
+      const endsAt = new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
 
       // 2. Create challenge
-      const challengeRes = await api.post(`/brands/${brandId}/challenges`, {
+      const challengeRes = await api.post("/brands/challenges", {
+        brandId,
         poolAmountUsdc: fields.poolAmountUsdc,
-        durationHours: parseInt(fields.durationHours, 10),
+        endsAt,
       });
 
-      const { depositAddress, memo } = challengeRes.data;
+      const { hotWalletAddress, memo } = challengeRes.data.depositInstructions;
 
       // Redirect to brand page to show deposit instructions
-      router.push(`/brand/${brandId}?depositAddress=${depositAddress}&memo=${memo}`);
+      router.push(
+        `/brand/${brandId}?depositAddress=${encodeURIComponent(hotWalletAddress ?? "")}&memo=${encodeURIComponent(memo ?? "")}`
+      );
     } catch (err: any) {
       setError(err?.response?.data?.message ?? "Failed to create brand. Please try again.");
       setSubmitting(false);
@@ -108,11 +116,11 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="description">Brand Story</Label>
+            <Label htmlFor="brandStory">Brand Story</Label>
             <textarea
-              id="description"
-              value={fields.description}
-              onChange={set("description")}
+              id="brandStory"
+              value={fields.brandStory}
+              onChange={set("brandStory")}
               placeholder="What makes your brand unique? (used to generate quiz questions)"
               rows={4}
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] resize-none"
@@ -158,16 +166,6 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="websiteUrl">Website URL</Label>
-            <Input
-              id="websiteUrl"
-              type="url"
-              value={fields.websiteUrl}
-              onChange={set("websiteUrl")}
-              placeholder="https://yoursite.com"
-            />
-          </div>
         </CardContent>
       </Card>
 
@@ -194,10 +192,17 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
               accept="image/*"
               uploadType="product-image"
               apiToken={apiToken}
-              onUploaded={(key) => setProductImageKeys((prev) => [...prev, key])}
+              onUploaded={(key) =>
+                setProductImageKeys((prev) => {
+                  if (prev.length >= 2) return prev;
+                  return [...prev, key];
+                })
+              }
             />
             {productImageKeys.length > 0 && (
-              <p className="text-xs text-green-600">{productImageKeys.length} image(s) uploaded</p>
+              <p className="text-xs text-green-600">
+                {productImageKeys.length}/2 image(s) uploaded
+              </p>
             )}
           </div>
         </CardContent>

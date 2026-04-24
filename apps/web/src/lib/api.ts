@@ -51,3 +51,20 @@ export interface LeaderboardEntry {
   totalScore: number;
   endedAt: string | null;
 }
+
+export interface UserProfile {
+  displayName: string;
+  username: string;
+  league: "bronze" | "silver" | "gold" | null;
+  totalEarned: string;
+  totalChallenges: number;
+  avatarUrl: string | null;
+  bestScore?: number;
+  recentSessions?: Array<{
+    id: string;
+    brandName: string;
+    totalScore: number;
+    rank?: number;
+    completedAt: string;
+  }>;
+}

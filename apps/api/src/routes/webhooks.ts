@@ -6,8 +6,9 @@ import {
   updateChallengeStatus,
 } from "../db/queries/challenges";
 import { findPayoutByTxHash } from "../db/queries/payouts";
-import { apiLimiter } from "../middleware/rate-limit";
+import { webhookLimiter } from "../middleware/rate-limit";
 import { logger } from "../lib/logger";
+import { config } from "../lib/config";
 
 const router = Router();
 
@@ -24,9 +25,9 @@ const DepositWebhookSchema = z
  * Internal webhook: called by the deposit monitor when a matching USDC
  * payment is detected on-chain. Activates the challenge.
  */
-router.post("/stellar/deposit", apiLimiter, async (req, res) => {
+router.post("/stellar/deposit", webhookLimiter, async (req, res) => {
   const secret = req.headers["x-webhook-secret"];
-  if (secret !== process.env.WEBHOOK_SECRET) {
+  if (secret !== config.WEBHOOK_SECRET) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -46,7 +47,7 @@ router.post("/stellar/deposit", apiLimiter, async (req, res) => {
       memo: body.memo,
       txHash: body.txHash,
     });
-    res.json({ status: "unknown_memo" });
+    res.status(404).json({ error: "Unknown memo" });
     return;
   }
 
@@ -56,7 +57,6 @@ router.post("/stellar/deposit", apiLimiter, async (req, res) => {
   }
 
   await updateChallengeStatus(challenge.id, "active", { depositTx: body.txHash });
-
   logger.info("Challenge activated via deposit", {
     challengeId: challenge.id,
     txHash: body.txHash,

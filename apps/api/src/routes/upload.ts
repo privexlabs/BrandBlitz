@@ -26,6 +26,7 @@ const ALLOWED_CONTENT_TYPES = [
 const PresignSchema = z.object({
   type: z.enum(["brand-logo", "product-image", "user-avatar"]),
   contentType: z.enum(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]),
+  contentLength: z.number().int().positive(),
 });
 
 /**
@@ -34,16 +35,23 @@ const PresignSchema = z.object({
  * Files NEVER pass through the API server — no memory pressure.
  */
 router.post("/presign", authenticate, uploadLimiter, async (req, res) => {
-  const { type, contentType } = PresignSchema.parse(req.body);
+  const { type, contentType, contentLength } = PresignSchema.parse(req.body);
 
   const config = ALLOWED_UPLOAD_TYPES[type];
+  if (contentLength > config.maxMb * 1024 * 1024) {
+    throw createError(
+      `Content length exceeds maximum of ${config.maxMb}MB for ${type}`,
+      400
+    );
+  }
+
   const key = `${config.prefix}${randomUUID()}`;
 
   const command = new PutObjectCommand({
     Bucket: config.bucket,
     Key: key,
     ContentType: contentType,
-    ContentLength: config.maxMb * 1024 * 1024,
+    ContentLength: contentLength,
   });
 
   const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 60 });

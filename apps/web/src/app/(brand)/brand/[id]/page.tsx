@@ -7,9 +7,29 @@ import Link from "next/link";
 import { createApiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { formatScore, formatUsdc } from "@/lib/utils";
 import type { LeaderboardEntry } from "@/lib/api";
+
+function normalizeBrand(brand: any) {
+  if (!brand) return null;
+
+  return {
+    ...brand,
+    logoUrl: brand.logoUrl ?? brand.logo_url ?? null,
+    primaryColor: brand.primaryColor ?? brand.primary_color ?? null,
+    secondaryColor: brand.secondaryColor ?? brand.secondary_color ?? null,
+  };
+}
+
+function normalizeChallenge(challenge: any) {
+  if (!challenge) return null;
+
+  return {
+    ...challenge,
+    poolAmountUsdc: challenge.poolAmountUsdc ?? challenge.pool_amount_usdc ?? "0",
+    participantCount: challenge.participantCount ?? challenge.participant_count ?? 0,
+  };
+}
 
 export default function BrandAnalyticsPage() {
   const { data: session, status } = useSession();
@@ -36,14 +56,14 @@ export default function BrandAnalyticsPage() {
       api.get(`/challenges?brandId=${brandId}&limit=1`).catch(() => ({ data: { challenges: [] } })),
     ])
       .then(([brandRes, challengeRes]) => {
-        setBrand(brandRes.data.brand);
-        const latestChallenge = challengeRes.data.challenges[0];
+        setBrand(normalizeBrand(brandRes.data.brand));
+        const latestChallenge = normalizeChallenge(challengeRes.data.challenges[0]);
         setChallenge(latestChallenge ?? null);
 
         if (latestChallenge) {
           return api
-            .get(`/leaderboard/${latestChallenge.id}`)
-            .then((r) => setLeaderboard(r.data.leaderboard))
+            .get(`/challenges/${latestChallenge.id}/leaderboard`)
+            .then((r) => setLeaderboard(r.data.sessions))
             .catch(() => {});
         }
       })
@@ -125,16 +145,16 @@ export default function BrandAnalyticsPage() {
                   <tbody>
                     {leaderboard.slice(0, 10).map((entry) => (
                       <tr
-                        key={entry.userId}
+                        key={`${entry.rank}-${entry.username}`}
                         className="border-b border-[var(--border)] last:border-0"
                       >
                         <td className="px-6 py-3 font-bold">#{entry.rank}</td>
-                        <td className="px-6 py-3">{entry.displayName}</td>
+                        <td className="px-6 py-3">{entry.username}</td>
                         <td className="px-6 py-3 text-right font-mono">
                           {formatScore(entry.totalScore)}
                         </td>
                         <td className="px-6 py-3 text-right text-green-600">
-                          {entry.totalEarned ? `${formatUsdc(entry.totalEarned)} USDC` : "—"}
+                          {"—"}
                         </td>
                       </tr>
                     ))}

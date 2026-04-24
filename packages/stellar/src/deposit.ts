@@ -1,5 +1,5 @@
 import { rpc as SorobanRpc } from "@stellar/stellar-sdk";
-import { getRpcServer, getUsdcAsset, type NetworkName } from "./client";
+import { getRpcServer, getUsdcAsset, getNetworkConfig, type NetworkName } from "./client";
 import { DEPOSIT_POLL_INTERVAL_MS } from "./constants";
 
 export interface DepositEvent {
@@ -25,6 +25,7 @@ export async function fetchDepositEvents(
 ): Promise<{ events: DepositEvent[]; latestLedger: number }> {
   const rpc = getRpcServer(network);
   const usdc = getUsdcAsset(network);
+  const { networkPassphrase } = getNetworkConfig(network);
 
   const response = await rpc.getEvents({
     startLedger: fromLedger,
@@ -32,7 +33,7 @@ export async function fetchDepositEvents(
       {
         type: "contract",
         // SAC (Stellar Asset Contract) transfer events for USDC
-        contractIds: [usdc.contractId(network === "testnet" ? "Test SDF Network ; September 2015" : "Public Global Stellar Network ; September 2015")],
+        contractIds: [usdc.contractId(networkPassphrase)],
         topics: [
           ["transfer", "*", hotWalletAddress],
         ],
@@ -44,21 +45,33 @@ export async function fetchDepositEvents(
   const events: DepositEvent[] = [];
 
   for (const event of response.events) {
-    const txMeta = await rpc.getTransaction(event.txHash);
-    if (txMeta.status !== SorobanRpc.Api.GetTransactionStatus.SUCCESS) continue;
+    try {
+      const txMeta = await rpc.getTransaction(event.txHash);
+      if (txMeta.status !== SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+        console.warn(`Skipping unsuccessful transaction: ${event.txHash}`, { status: txMeta.status });
+        continue;
+      }
 
-    const tx = txMeta.returnValue;
-    const memo = (txMeta as any).memo?.text ?? "";
-    const amount = event.value?.toString() ?? "0";
+      if (!event.ledgerClosedAt) {
+        console.warn(`Skipping event with missing ledgerClosedAt: ${event.txHash}`);
+        continue;
+      }
 
-    events.push({
-      txHash: event.txHash,
-      amount,
-      memo,
-      to: hotWalletAddress,
-      ledger: event.ledger,
-      createdAt: new Date(event.ledgerClosedAt).toISOString(),
-    });
+      const memo = (txMeta as any).memo?.text ?? "";
+      const amount = event.value?.toString() ?? "0";
+
+      events.push({
+        txHash: event.txHash,
+        amount,
+        memo,
+        to: hotWalletAddress,
+        ledger: event.ledger,
+        createdAt: new Date(event.ledgerClosedAt).toISOString(),
+      });
+    } catch (err) {
+      console.warn(`Error processing deposit event ${event.txHash}:`, err);
+      continue;
+    }
   }
 
   return {

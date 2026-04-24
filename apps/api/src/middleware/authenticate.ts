@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { config } from "../lib/config";
 
 export interface AuthPayload {
   sub: string;   // user ID
@@ -26,7 +27,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
   }
 
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET!) as AuthPayload;
+    const payload = jwt.verify(token, config.JWT_SECRET) as AuthPayload;
     req.user = payload;
     next();
   } catch {
@@ -40,7 +41,7 @@ export function optionalAuth(req: Request, _res: Response, next: NextFunction): 
 
   if (token) {
     try {
-      req.user = jwt.verify(token, process.env.JWT_SECRET!) as AuthPayload;
+      req.user = jwt.verify(token, config.JWT_SECRET) as AuthPayload;
     } catch {
       // ignore — optional auth
     }

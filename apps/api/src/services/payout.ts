@@ -4,9 +4,9 @@ import { getLeaderboard } from "../db/queries/sessions";
 import { getChallengeById, updateChallengeStatus } from "../db/queries/challenges";
 import { createPayout, updatePayoutStatus } from "../db/queries/payouts";
 import { calculatePayoutShare, rankWinners } from "./scoring";
-import { payoutQueue } from "../queues/payout.queue";
-import { emitCounterMetric, stellarSequenceStore } from "../lib/redis";
+import { payoutJobOptions, payoutQueue } from "../queues/payout.queue";
 import { logger } from "../lib/logger";
+import { config } from "../lib/config";
 
 /**
  * Enqueue a payout job for a completed challenge.
@@ -16,12 +16,7 @@ export async function enqueuePayout(challengeId: string): Promise<void> {
   await payoutQueue.add(
     "process-payout",
     { challengeId },
-    {
-      attempts: 3,
-      backoff: { type: "exponential", delay: 5000 },
-      removeOnComplete: { count: 100 },
-      removeOnFail: { count: 50 },
-    }
+    payoutJobOptions
   );
   logger.info("Payout job enqueued", { challengeId });
 }
@@ -34,7 +29,7 @@ export async function processPayout(challengeId: string): Promise<void> {
   const challenge = await getChallengeById(challengeId);
   if (!challenge) throw new Error(`Challenge ${challengeId} not found`);
   if (challenge.status !== "ended") {
-    logger.warn("Payout skipped — challenge not in ended state", { challengeId });
+    logger.warn("Payout skipped - challenge not in ended state", { challengeId });
     return;
   }
 
@@ -47,17 +42,28 @@ export async function processPayout(challengeId: string): Promise<void> {
   const ranked = rankWinners(
     sessions.map((s) => ({
       userId: s.user_id,
-      stellarAddress: s.stellar_address ?? "",
+      stellarAddress: (s.stellar_address ?? "").trim(),
       totalScore: s.total_score,
       endedAt: s.challenge_ended_at ?? s.created_at,
     }))
-  ).filter((session) => session.stellarAddress);
+  );
 
-  const totalPoints = ranked.reduce((acc, session) => acc + session.totalScore, 0);
+  const eligibleWinners = ranked.filter((winner) => {
+    if (winner.stellarAddress) return true;
+
+    logger.error("Winner missing Stellar address on file; skipping payout", {
+      challengeId,
+      userId: winner.userId,
+    });
+
+    return false;
+  });
+
+  const totalPoints = eligibleWinners.reduce((acc, s) => acc + s.totalScore, 0);
   const recipients: PayoutRecipient[] = [];
   const payoutRecords: { id: string; address: string; amount: string }[] = [];
 
-  for (const winner of ranked) {
+  for (const winner of eligibleWinners) {
     const amount = calculatePayoutShare(
       winner.totalScore,
       totalPoints,
@@ -80,27 +86,21 @@ export async function processPayout(challengeId: string): Promise<void> {
   }
 
   if (recipients.length === 0) {
+    logger.error("No payout recipients available after ranking", {
+      challengeId,
+      rankedCount: ranked.length,
+    });
     await updateChallengeStatus(challengeId, "settled");
     return;
   }
 
-  const network = (process.env.STELLAR_NETWORK ?? "testnet") as NetworkName;
-  const hotWalletSecret = process.env.STELLAR_HOT_WALLET_SECRET ?? process.env.HOT_WALLET_SECRET;
-  if (!hotWalletSecret) {
-    throw new Error("STELLAR_HOT_WALLET_SECRET is required");
-  }
-
-  const results = await submitBatchPayout(recipients, hotWalletSecret, challengeId, network, {
-    sequenceStore: stellarSequenceStore,
-    onSequenceReset: (info) => {
-      emitCounterMetric("stellar.seq.reset_total", 1, {
-        challengeId,
-        keyPrefix: info.keyPrefix,
-        reason: info.reason,
-        network,
-      });
-    },
-  });
+  const network = config.STELLAR_NETWORK as NetworkName;
+  const results = await submitBatchPayout(
+    recipients,
+    config.HOT_WALLET_SECRET,
+    challengeId,
+    network
+  );
 
   const txHashes: string[] = [];
   let hasFailure = false;

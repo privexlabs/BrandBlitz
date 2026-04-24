@@ -3,10 +3,12 @@ import { z } from "zod";
 import {
   getActiveChallenges,
   getChallengeById,
+  getChallengesByBrandId,
   getChallengeQuestions,
 } from "../db/queries/challenges";
+import { getBrandById } from "../db/queries/brands";
 import { getLeaderboard } from "../db/queries/sessions";
-import { authenticate, optionalAuth } from "../middleware/authenticate";
+import { optionalAuth } from "../middleware/authenticate";
 import { createError } from "../middleware/error";
 
 const router = Router();
@@ -14,6 +16,7 @@ const router = Router();
 const PaginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
+  brandId: z.string().uuid().optional(),
 });
 
 /**
@@ -21,7 +24,24 @@ const PaginationSchema = z.object({
  * List active challenges (public).
  */
 router.get("/", optionalAuth, async (req, res) => {
-  const { limit, offset } = PaginationSchema.parse(req.query);
+  const parsed = PaginationSchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw createError("Invalid query parameters", 400, "INVALID_QUERY");
+  }
+
+  const { brandId, limit, offset } = parsed.data;
+
+  if (brandId) {
+    const brand = await getBrandById(brandId);
+    if (!brand || brand.owner_user_id !== req.user?.sub) {
+      throw createError("Forbidden", 403);
+    }
+
+    const challenges = await getChallengesByBrandId(brandId, limit, offset);
+    res.json({ challenges });
+    return;
+  }
+
   const challenges = await getActiveChallenges(limit, offset);
   res.json({ challenges });
 });

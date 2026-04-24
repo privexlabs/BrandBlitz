@@ -110,25 +110,25 @@ CREATE TABLE game_sessions (
   ip_address            INET,
   status                TEXT NOT NULL DEFAULT 'warmup'
                           CHECK (status IN ('warmup', 'active', 'completed', 'flagged')),
+  is_practice           BOOLEAN NOT NULL DEFAULT FALSE,
   warmup_started_at     TIMESTAMPTZ,
   warmup_completed_at   TIMESTAMPTZ,
   challenge_started_at  TIMESTAMPTZ,
+  challenge_ended_at    TIMESTAMPTZ,
   completed_at          TIMESTAMPTZ,
   round_1_answer        CHAR(1) CHECK (round_1_answer IN ('A', 'B', 'C', 'D')),
-  round_1_score         INTEGER,
+  round_1_score         INTEGER NOT NULL DEFAULT 0,
   round_1_reaction_ms   INTEGER,
   round_2_answer        CHAR(1) CHECK (round_2_answer IN ('A', 'B', 'C', 'D')),
-  round_2_score         INTEGER,
+  round_2_score         INTEGER NOT NULL DEFAULT 0,
   round_2_reaction_ms   INTEGER,
   round_3_answer        CHAR(1) CHECK (round_3_answer IN ('A', 'B', 'C', 'D')),
-  round_3_score         INTEGER,
+  round_3_score         INTEGER NOT NULL DEFAULT 0,
   round_3_reaction_ms   INTEGER,
-  total_score           INTEGER GENERATED ALWAYS AS (
-                          COALESCE(round_1_score, 0) +
-                          COALESCE(round_2_score, 0) +
-                          COALESCE(round_3_score, 0)
-                        ) STORED,
+  total_score           INTEGER NOT NULL DEFAULT 0,
   rank                  INTEGER,
+  flagged               BOOLEAN NOT NULL DEFAULT FALSE,
+  flag_reasons          TEXT[]  NOT NULL DEFAULT '{}',
   fraud_flags           TEXT[]  NOT NULL DEFAULT '{}',
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, challenge_id)
@@ -139,6 +139,18 @@ CREATE INDEX idx_game_sessions_user_id      ON game_sessions (user_id);
 CREATE INDEX idx_game_sessions_status       ON game_sessions (status);
 CREATE INDEX idx_game_sessions_total_score  ON game_sessions (challenge_id, total_score DESC NULLS LAST)
   WHERE status = 'completed';
+
+CREATE TABLE session_round_scores (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id  UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+  round       INTEGER NOT NULL CHECK (round IN (1, 2, 3)),
+  score       INTEGER NOT NULL CHECK (score >= 0),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (session_id, round)
+);
+
+CREATE INDEX idx_session_round_scores_session_id ON session_round_scores (session_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- PAYOUTS

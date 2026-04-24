@@ -7,18 +7,34 @@ export interface User {
   display_name: string;
   username: string | null;
   avatar_url: string | null;
-  stellar_address: string | null;
-  muxed_id: string | null;
+  role: string;
   phone_hash: string | null;
   phone_verified: boolean;
   phone_verified_at: string | null;
+  age_verified: boolean;
+  kyc_complete: boolean;
+  stellar_address: string | null;
+  embedded_wallet_address: string | null;
   league: "bronze" | "silver" | "gold" | null;
   total_score: number;
   total_earned_usdc: string;
   challenges_played: number;
-  role: "player" | "brand" | "admin";
+  state_code: string | null;
+  streak: number;
+  last_play_day: string | null;
+  streak_repairs_this_month: number;
+  streak_repair_available: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface PublicUser {
+  display_name: string;
+  username: string;
+  league: "bronze" | "silver" | "gold" | null;
+  total_earned_usdc: string;
+  challenges_played: number;
+  avatar_url: string | null;
 }
 
 export async function findUserByEmail(email: string): Promise<User | null> {
@@ -41,6 +57,16 @@ export async function findUserByPhoneHash(phoneHash: string): Promise<User | nul
   return result.rows[0] ?? null;
 }
 
+export async function getUserPublicProfileByUsername(username: string): Promise<PublicUser | null> {
+  const result = await query<PublicUser>(
+    `SELECT display_name, username, league, total_earned_usdc, challenges_played, avatar_url
+     FROM users
+     WHERE username = $1`,
+    [username]
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function upsertUser(data: {
   email: string;
   googleId: string;
@@ -54,13 +80,12 @@ export async function upsertUser(data: {
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (google_id) DO UPDATE
        SET email = EXCLUDED.email,
-           display_name = EXCLUDED.display_name,
+           display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), users.display_name),
            avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
            updated_at = NOW()
      RETURNING *`,
     [data.email, data.googleId, displayName, data.avatarUrl ?? null]
   );
-
   return result.rows[0];
 }
 

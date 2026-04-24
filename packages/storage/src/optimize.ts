@@ -10,6 +10,15 @@ const SPECS: Record<ImageType, { width: number; height: number; fit: "contain" |
   "user-avatar":   { width: 200, height: 200, fit: "cover" },
 };
 
+export class StorageError extends Error {
+  public code: string;
+  constructor(message: string, public key: string, public bucket: string) {
+    super(message);
+    this.name = "StorageError";
+    this.code = "STORAGE_BODY_EMPTY";
+  }
+}
+
 /**
  * Fetch the original image from storage, resize + convert to WebP, overwrite in place.
  * Called after brand kit form submission — not at presign time (keeps presign flow fast).
@@ -23,7 +32,15 @@ export async function optimizeImage(key: string, type: ImageType): Promise<strin
     new GetObjectCommand({ Bucket: BUCKETS.BRAND_ASSETS, Key: key })
   );
 
-  const buffer = Buffer.from(await original.Body!.transformToByteArray());
+  if (!original.Body) {
+    throw new StorageError(
+      `Failed to retrieve original image from storage for key: ${key}. Body is empty or missing.`,
+      key,
+      BUCKETS.BRAND_ASSETS
+    );
+  }
+
+  const buffer = Buffer.from(await original.Body.transformToByteArray());
 
   const optimized = await sharp(buffer)
     .resize(spec.width, spec.height, {

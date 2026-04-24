@@ -1,15 +1,20 @@
 import { createHmac } from "crypto";
 import twilio from "twilio";
 import { createError } from "../middleware/error";
+import { config } from "../lib/config";
+
+// ── Constants ──────────────────────────────────────────────────────────────────
 
 export const PHONE_HASH_ALGORITHM = "sha256";
 
+// ── Twilio client (lazy, per-request) ─────────────────────────────────────────
+
 function getTwilioClient() {
-  return twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  return twilio(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN);
 }
 
 function getVerifyServiceSid(): string {
-  const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID ?? process.env.TWILIO_SERVICE_SID;
+  const serviceSid = config.TWILIO_VERIFY_SERVICE_SID ?? config.TWILIO_SERVICE_SID;
   if (!serviceSid) {
     throw new Error("TWILIO_VERIFY_SERVICE_SID is required");
   }
@@ -23,6 +28,8 @@ function getPhoneHashSalt(): string {
   }
   return salt;
 }
+
+// ── Phone normalization & hashing ─────────────────────────────────────────────
 
 export function normalizePhoneNumber(phoneNumber: string): string {
   const trimmed = phoneNumber.trim();
@@ -42,23 +49,29 @@ export function hashPhoneNumber(phoneNumber: string): string {
   return createHmac(PHONE_HASH_ALGORITHM, getPhoneHashSalt()).update(normalized).digest("hex");
 }
 
+// ── Twilio Verify ─────────────────────────────────────────────────────────────
+
 export async function sendVerificationCode(phoneNumber: string): Promise<void> {
-  await getTwilioClient().verify.v2.services(getVerifyServiceSid()).verifications.create({
-    to: normalizePhoneNumber(phoneNumber),
-    channel: "sms",
-  });
+  await getTwilioClient()
+    .verify.v2.services(getVerifyServiceSid())
+    .verifications.create({
+      to: normalizePhoneNumber(phoneNumber),
+      channel: "sms",
+    });
 }
 
 export async function checkVerificationCode(
   phoneNumber: string,
   code: string
 ): Promise<boolean> {
-  const result = await getTwilioClient().verify.v2
-    .services(getVerifyServiceSid())
+  const result = await getTwilioClient()
+    .verify.v2.services(getVerifyServiceSid())
     .verificationChecks.create({ to: normalizePhoneNumber(phoneNumber), code });
 
   return result.status === "approved";
 }
+
+// ── Guards ────────────────────────────────────────────────────────────────────
 
 export async function requirePhoneVerified(
   userId: string,

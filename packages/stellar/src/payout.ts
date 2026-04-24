@@ -145,8 +145,12 @@ export async function submitBatchPayout(
   return results;
 }
 
+/**
+ * Build a deterministic payout memo that respects Stellar's 28-byte text memo limit.
+ */
 function buildPayoutMemo(challengeId: string, batchIndex: number): string {
-  return `bb-${challengeId.slice(0, 20)}-${batchIndex}`;
+  const challengeTag = challengeId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 20);
+  return `bb-${challengeTag}-${batchIndex}`;
 }
 
 function isBadSequenceError(err: unknown): boolean {

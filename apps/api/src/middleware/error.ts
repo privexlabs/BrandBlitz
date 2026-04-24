@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import { logger } from "../lib/logger";
+import { BadRequestError } from "@stellar/stellar-sdk";
 
 export interface ApiError extends Error {
   statusCode?: number;
@@ -19,21 +20,24 @@ export function errorHandler(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _next: NextFunction
 ): void {
+  let statusCode = err.statusCode;
+  let message = err.message;
+
   if (err instanceof ZodError) {
-    res.status(400).json({
-      error: err.issues[0]?.message ?? "Invalid request",
-      issues: err.issues.map((issue) => ({
-        path: issue.path.join("."),
-        message: issue.message,
-      })),
-    });
-    return;
+    statusCode = 400;
+    message = "Validation Error";
+  } else if (err instanceof BadRequestError) {
+    statusCode = 400;
   }
 
-  const statusCode = err.statusCode ?? 500;
-  const message = statusCode < 500 ? err.message : "Internal server error";
+  statusCode = statusCode ?? 500;
+  const isServerError = statusCode >= 500;
 
-  if (statusCode >= 500) {
+  if (isServerError) {
+    message = "Internal Server Error";
+  }
+
+  if (isServerError) {
     logger.error("Unhandled error", {
       err: err.message,
       stack: err.stack,
@@ -42,10 +46,27 @@ export function errorHandler(
     });
   }
 
-  res.status(statusCode).json({
+  const payload: Record<string, unknown> = {
     error: message,
-    code: err.code,
-  });
+  };
+
+  if (err.code) {
+    payload.code = err.code;
+  }
+
+  if (err instanceof ZodError) {
+    payload.details = err.issues.map((issue) => ({
+      path: issue.path,
+      message: issue.message,
+      code: issue.code,
+    }));
+  }
+
+  if (process.env.NODE_ENV === "development" && err.stack) {
+    payload.stack = err.stack;
+  }
+
+  res.status(statusCode).json(payload);
 }
 
 export function createError(message: string, statusCode: number, code?: string): ApiError {
