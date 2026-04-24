@@ -25,6 +25,7 @@ export interface Challenge {
   ends_at: string | null;
   // joined fields
   brand_name?: string;
+  tagline?: string;
   logo_url?: string;
   primary_color?: string;
   secondary_color?: string;

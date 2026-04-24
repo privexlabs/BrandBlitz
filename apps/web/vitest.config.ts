@@ -14,7 +14,10 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       all: true,
-      include: ["src/components/game/result-screen.tsx"],
+      include: [
+        "src/components/game/result-screen.tsx",
+        "src/components/game/warmup-phase.tsx",
+      ],
       reporter: ["text", "lcov"],
       statements: 85,
       branches: 85,
