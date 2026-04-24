@@ -1,6 +1,8 @@
 import { query } from "../index";
 
 export interface User {
+  username: any;
+  display_name: any;
   id: string;
   email: string;
   google_id: string | null;

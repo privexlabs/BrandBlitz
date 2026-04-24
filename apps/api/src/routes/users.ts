@@ -13,7 +13,7 @@ import { createError } from "../middleware/error";
 import { redis } from "../lib/redis";
 import { apiLimiter } from "../middleware/rate-limit";
 
-const router = Router();
+const router: Router = Router();
 
 /**
  * GET /users/me
@@ -22,7 +22,28 @@ const router = Router();
 router.get("/me", authenticate, async (req, res) => {
   const user = await findUserById(req.user!.sub);
   if (!user) throw createError("User not found", 404);
-  res.json({ user });
+
+  const safeUser = {
+    id: user.id,
+    email: user.email,
+    display_name: user.display_name,
+    username: user.username,
+    avatar_url: user.avatar_url,
+    stellar_address: user.stellar_address,
+    embedded_wallet_address: user.embedded_wallet_address,
+    phone_verified: user.phone_verified,
+    age_verified: user.age_verified,
+    kyc_complete: user.kyc_complete,
+    state_code: user.state_code,
+    streak: user.streak,
+    last_play_day: user.last_play_day,
+    streak_repairs_this_month: user.streak_repairs_this_month,
+    streak_repair_available: user.streak_repair_available,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+  };
+
+  res.json({ user: safeUser });
 });
 
 /**
@@ -68,10 +89,10 @@ router.patch("/me/wallet", authenticate, async (req, res) => {
 router.post("/me/phone/send", authenticate, async (req, res) => {
   const { phone } = z.object({ phone: z.string().min(10) }).parse(req.body);
 
-  // Rate limit: 3 sends per phone per 10 minutes
+  // Rate limit: 3 sends per phone per 5 minutes
   const key = `phone:send:${phone}`;
   const sends = await redis.incr(key);
-  if (sends === 1) await redis.expire(key, 600);
+  if (sends === 1) await redis.expire(key, 300);
   if (sends > 3) throw createError("Too many verification attempts", 429);
 
   await sendVerificationCode(phone);
@@ -96,10 +117,16 @@ router.post("/me/phone/verify", authenticate, async (req, res) => {
   }
 
   const approved = await checkVerificationCode(phone, code);
-  if (!approved) throw createError("Invalid verification code", 400);
+  if (!approved) {
+    const attemptsKey = `phone:verify:${phoneHash}`;
+    const attempts = await redis.incr(attemptsKey);
+    if (attempts === 1) await redis.expire(attemptsKey, 300);
+    throw createError("Invalid verification code", 400);
+  }
 
   await markPhoneVerified(req.user!.sub, phoneHash);
   await redis.set(existingKey, req.user!.sub, "EX", 86400 * 365);
+  await redis.del(`phone:verify:${phoneHash}`);
 
   res.json({ success: true });
 });

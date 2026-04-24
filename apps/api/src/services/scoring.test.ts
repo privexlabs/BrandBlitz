@@ -1,0 +1,190 @@
+import { describe, expect, it } from "vitest";
+import {
+  calculateRoundScore,
+  validateAnswer,
+  calculatePayoutShare,
+  rankWinners,
+  SessionSummary,
+} from "./scoring";
+
+describe("scoring service", () => {
+  /**
+   * ---------------------------
+   * calculateRoundScore tests
+   * ---------------------------
+   */
+  describe("calculateRoundScore", () => {
+    const base = {
+      correctOption: "A" as const,
+      selectedOption: "A" as const,
+    };
+
+    it("returns 150 for instant correct answer (0ms)", () => {
+      expect(
+        calculateRoundScore({ ...base, reactionTimeMs: 0 })
+      ).toBe(150);
+    });
+
+    it("returns 125 for ~7.5s", () => {
+      expect(
+        calculateRoundScore({ ...base, reactionTimeMs: 7500 })
+      ).toBe(125);
+    });
+
+    it("returns 100 for 15s boundary", () => {
+      expect(
+        calculateRoundScore({ ...base, reactionTimeMs: 15000 })
+      ).toBe(100);
+    });
+
+    it("returns 100 for slow answers beyond 15s", () => {
+      expect(
+        calculateRoundScore({ ...base, reactionTimeMs: 30000 })
+      ).toBe(100);
+    });
+
+    it("returns 0 for wrong answer", () => {
+      expect(
+        calculateRoundScore({
+          selectedOption: "B",
+          correctOption: "A",
+          reactionTimeMs: 0,
+        })
+      ).toBe(0);
+    });
+  });
+
+  /**
+   * ---------------------------
+   * validateAnswer tests
+   * ---------------------------
+   */
+  describe("validateAnswer", () => {
+    const question = {
+      correct_option: "C",
+    } as any;
+
+    it("returns true for correct match", () => {
+      expect(validateAnswer(question, "C")).toBe(true);
+    });
+
+    it("returns false for wrong answer", () => {
+      expect(validateAnswer(question, "A")).toBe(false);
+    });
+
+    it("is case-sensitive", () => {
+      expect(validateAnswer(question, "c" as any)).toBe(false);
+    });
+
+    it("rejects invalid values", () => {
+      expect(validateAnswer(question, "E" as any)).toBe(false);
+    });
+  });
+
+  /**
+   * ---------------------------
+   * calculatePayoutShare tests
+   * ---------------------------
+   */
+  describe("calculatePayoutShare", () => {
+    it("returns correct proportional share", () => {
+      const result = calculatePayoutShare(50, 100, "100");
+      expect(result).toBe("50.0000000");
+    });
+
+    it("handles zero total points", () => {
+      expect(calculatePayoutShare(50, 0, "100")).toBe("0.0000000");
+    });
+
+    it("rounds to 7 decimal places", () => {
+      const result = calculatePayoutShare(1, 3, "10");
+      expect(result).toMatch(/\d+\.\d{7}/);
+    });
+  });
+
+  /**
+   * ---------------------------
+   * rankWinners tests
+   * ---------------------------
+   */
+  describe("rankWinners", () => {
+    const sessions: SessionSummary[] = [
+      {
+        userId: "b",
+        stellarAddress: "addr2",
+        totalScore: 100,
+        endedAt: "2024-01-01T10:00:00Z",
+      },
+      {
+        userId: "a",
+        stellarAddress: "addr1",
+        totalScore: 100,
+        endedAt: "2024-01-01T09:00:00Z",
+      },
+      {
+        userId: "c",
+        stellarAddress: "addr3",
+        totalScore: 200,
+        endedAt: "2024-01-01T11:00:00Z",
+      },
+    ];
+
+    it("sorts by score descending", () => {
+      const result = rankWinners(sessions);
+      expect(result[0].userId).toBe("c");
+    });
+
+    it("uses endedAt as tiebreaker", () => {
+      const result = rankWinners(sessions);
+      expect(result[1].userId).toBe("a");
+    });
+
+    it("uses lexicographic userId order when score and endedAt are tied", () => {
+      const tiedSessions: SessionSummary[] = [
+        {
+          userId: "b",
+          stellarAddress: "addr2",
+          totalScore: 100,
+          endedAt: "2024-01-01T10:00:00Z",
+        },
+        {
+          userId: "a",
+          stellarAddress: "addr1",
+          totalScore: 100,
+          endedAt: "2024-01-01T10:00:00Z",
+        },
+      ];
+
+      const result = rankWinners(tiedSessions);
+      expect(result[0].userId).toBe("a");
+      expect(result[1].userId).toBe("b");
+    });
+
+    it("respects topN limit", () => {
+      const result = rankWinners(sessions, 2);
+      expect(result.length).toBe(2);
+    });
+  });
+
+  /**
+   * ---------------------------
+   * Fuzz test (VERY IMPORTANT)
+   * ---------------------------
+   */
+  describe("fuzz testing safety checks", () => {
+    it("never produces NaN or negative values", () => {
+      for (let i = 0; i < 1000; i++) {
+        const score = calculateRoundScore({
+          selectedOption: (["A", "B", "C", "D"] as const)[
+            Math.floor(Math.random() * 4)
+          ],
+          correctOption: "A",
+          reactionTimeMs: Math.random() * 50000,
+        });
+
+        expect(Number.isNaN(score)).toBe(false);
+        expect(score >= 0).toBe(true);
+      }
+    });
+  });
+});

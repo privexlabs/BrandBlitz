@@ -70,7 +70,12 @@ export function rankWinners(
 ): SessionSummary[] {
   const sorted = [...sessions].sort((a, b) => {
     if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
-    return new Date(a.endedAt).getTime() - new Date(b.endedAt).getTime();
+
+    const endedAtA = new Date(a.endedAt).getTime();
+    const endedAtB = new Date(b.endedAt).getTime();
+    if (endedAtA !== endedAtB) return endedAtA - endedAtB;
+
+    return a.userId.localeCompare(b.userId);
   });
 
   return topN ? sorted.slice(0, topN) : sorted;
