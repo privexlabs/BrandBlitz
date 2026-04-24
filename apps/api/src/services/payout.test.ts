@@ -1,0 +1,182 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Challenge } from "../db/queries/challenges";
+import type { LeaderboardSession } from "../db/queries/sessions";
+
+const mocks = vi.hoisted(() => ({
+  getChallengeById: vi.fn(),
+  updateChallengeStatus: vi.fn(),
+  getLeaderboard: vi.fn(),
+  createPayout: vi.fn(),
+  updatePayoutStatus: vi.fn(),
+  submitBatchPayout: vi.fn(),
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
+vi.mock("../db/queries/challenges", () => ({
+  getChallengeById: mocks.getChallengeById,
+  updateChallengeStatus: mocks.updateChallengeStatus,
+}));
+
+vi.mock("../db/queries/sessions", () => ({
+  getLeaderboard: mocks.getLeaderboard,
+}));
+
+vi.mock("../db/queries/payouts", () => ({
+  createPayout: mocks.createPayout,
+  updatePayoutStatus: mocks.updatePayoutStatus,
+}));
+
+vi.mock("@brandblitz/stellar", () => ({
+  submitBatchPayout: mocks.submitBatchPayout,
+}));
+
+vi.mock("../queues/payout.queue", () => ({
+  payoutQueue: {
+    add: vi.fn(),
+  },
+}));
+
+vi.mock("../lib/logger", () => ({
+  logger: mocks.logger,
+}));
+
+import { processPayout } from "./payout";
+
+const challengeFixture: Challenge = {
+  id: "challenge-1",
+  brand_id: "brand-1",
+  challenge_id: "memo-1",
+  pool_amount_usdc: "90.0000000",
+  status: "ended",
+  stellar_deposit_tx: null,
+  payout_tx_hashes: null,
+  max_players: null,
+  starts_at: "2026-04-24T10:00:00.000Z",
+  ends_at: "2026-04-24T11:00:00.000Z",
+  created_at: "2026-04-24T09:00:00.000Z",
+};
+
+function buildLeaderboardSession(
+  overrides: Partial<LeaderboardSession> = {}
+): LeaderboardSession {
+  return {
+    id: "session-1",
+    user_id: "user-1",
+    challenge_id: "challenge-1",
+    device_id: null,
+    warmup_started_at: null,
+    warmup_completed_at: null,
+    challenge_started_at: null,
+    challenge_ended_at: "2026-04-24T10:30:00.000Z",
+    round_1_score: 100,
+    round_2_score: 100,
+    round_3_score: 100,
+    total_score: 300,
+    flagged: false,
+    flag_reasons: null,
+    is_practice: false,
+    created_at: "2026-04-24T10:00:00.000Z",
+    username: "player@example.com",
+    avatar_url: "https://example.com/avatar.png",
+    stellar_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    ...overrides,
+  };
+}
+
+describe("processPayout", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    process.env.HOT_WALLET_SECRET = "SBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    process.env.STELLAR_NETWORK = "testnet";
+
+    mocks.getChallengeById.mockResolvedValue(challengeFixture);
+    mocks.createPayout.mockImplementation(async ({ userId }: { userId: string }) => ({
+      id: `payout-${userId}`,
+    }));
+    mocks.submitBatchPayout.mockImplementation(
+      async (
+        recipients: Array<{ address: string; amount: string }>
+      ) => [
+        {
+          txHash: "tx-test-1",
+          recipients,
+          success: true,
+        },
+      ]
+    );
+  });
+
+  it("builds a non-empty recipients list from ranked winners", async () => {
+    mocks.getLeaderboard.mockResolvedValue([
+      buildLeaderboardSession({
+        id: "session-1",
+        user_id: "user-1",
+        total_score: 300,
+        challenge_ended_at: "2026-04-24T10:10:00.000Z",
+        stellar_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      }),
+      buildLeaderboardSession({
+        id: "session-2",
+        user_id: "user-2",
+        total_score: 150,
+        challenge_ended_at: "2026-04-24T10:20:00.000Z",
+        stellar_address: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBQ2",
+      }),
+    ]);
+
+    await processPayout("challenge-1");
+
+    expect(mocks.submitBatchPayout).toHaveBeenCalledTimes(1);
+
+    const [recipients] = mocks.submitBatchPayout.mock.calls[0] as [
+      Array<{ address: string; amount: string }>
+    ];
+
+    expect(recipients.length).toBeGreaterThan(0);
+    expect(recipients.map((recipient) => recipient.address)).toEqual([
+      "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBQ2",
+    ]);
+  });
+
+  it("logs an error and skips winners with no Stellar address", async () => {
+    mocks.getLeaderboard.mockResolvedValue([
+      buildLeaderboardSession({
+        id: "session-1",
+        user_id: "user-no-address",
+        total_score: 300,
+        stellar_address: null,
+      }),
+      buildLeaderboardSession({
+        id: "session-2",
+        user_id: "user-with-address",
+        total_score: 250,
+        stellar_address: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC3",
+      }),
+    ]);
+
+    await processPayout("challenge-1");
+
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      "Winner missing Stellar address on file; skipping payout",
+      expect.objectContaining({
+        challengeId: "challenge-1",
+        userId: "user-no-address",
+      })
+    );
+
+    const [recipients] = mocks.submitBatchPayout.mock.calls[0] as [
+      Array<{ address: string; amount: string }>
+    ];
+
+    expect(recipients).toHaveLength(1);
+    expect(recipients[0]?.address).toBe(
+      "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC3"
+    );
+  });
+});
