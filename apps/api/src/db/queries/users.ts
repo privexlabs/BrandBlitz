@@ -8,6 +8,7 @@ export interface User {
   google_id: string | null;
   display_name: string;
   username: string | null;
+  role: string;
   phone_hash: string | null;
   phone_verified: boolean;
   age_verified: boolean;
@@ -68,15 +69,17 @@ export async function upsertUser(data: {
   name?: string;
   avatarUrl?: string;
 }): Promise<User> {
+  const displayName = data.name?.trim() || data.email.split("@")[0];
   const result = await query<User>(
-    `INSERT INTO users (email, google_id, avatar_url)
-     VALUES ($1, $2, $3)
+    `INSERT INTO users (email, google_id, display_name, avatar_url)
+     VALUES ($1, $2, $3, $4)
      ON CONFLICT (google_id) DO UPDATE
        SET email = EXCLUDED.email,
+           display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), users.display_name),
            avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
            updated_at = NOW()
      RETURNING *`,
-    [data.email, data.googleId, data.avatarUrl ?? null]
+    [data.email, data.googleId, displayName, data.avatarUrl ?? null]
   );
   return result.rows[0];
 }

@@ -46,7 +46,9 @@ router.post(
     const session = await createSession({
       userId: req.user!.sub,
       challengeId: challenge.id,
-      deviceId: req.headers["x-visitor-id"] as string | undefined,
+      deviceId:
+        (req.headers["x-device-id"] as string | undefined) ??
+        (req.headers["x-visitor-id"] as string | undefined),
       isPractice: req.body.isPractice === true,
     });
 

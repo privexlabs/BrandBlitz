@@ -12,6 +12,11 @@ export interface Challenge {
   brand_id: string;
   challenge_id: string;
   pool_amount_usdc: string;
+  participant_count?: number;
+  brand_name?: string;
+  logo_url?: string | null;
+  primary_color?: string | null;
+  secondary_color?: string | null;
   status: ChallengeStatus;
   stellar_deposit_tx: string | null;
   payout_tx_hashes: string[] | null;
@@ -75,6 +80,23 @@ export async function getActiveChallenges(limit = 20, offset = 0): Promise<Chall
      ORDER BY c.pool_amount_usdc DESC
      LIMIT $1 OFFSET $2`,
     [limit, offset]
+  );
+  return result.rows;
+}
+
+export async function getChallengesByBrandId(
+  brandId: string,
+  limit = 20,
+  offset = 0
+): Promise<Challenge[]> {
+  const result = await query<Challenge>(
+    `SELECT c.*, b.name as brand_name, b.logo_url, b.primary_color, b.secondary_color
+     FROM challenges c
+     JOIN brands b ON c.brand_id = b.id
+     WHERE c.brand_id = $1
+     ORDER BY c.created_at DESC
+     LIMIT $2 OFFSET $3`,
+    [brandId, limit, offset]
   );
   return result.rows;
 }

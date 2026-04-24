@@ -3,7 +3,7 @@ import { getLeaderboard } from "../db/queries/sessions";
 import { getChallengeById, updateChallengeStatus } from "../db/queries/challenges";
 import { createPayout, updatePayoutStatus } from "../db/queries/payouts";
 import { calculatePayoutShare, rankWinners } from "./scoring";
-import { payoutQueue } from "../queues/payout.queue";
+import { payoutJobOptions, payoutQueue } from "../queues/payout.queue";
 import { logger } from "../lib/logger";
 import { config } from "../lib/config";
 import type { NetworkName } from "@brandblitz/stellar";
@@ -16,12 +16,7 @@ export async function enqueuePayout(challengeId: string): Promise<void> {
   await payoutQueue.add(
     "process-payout",
     { challengeId },
-    {
-      attempts: 3,
-      backoff: { type: "exponential", delay: 5000 },
-      removeOnComplete: { count: 100 },
-      removeOnFail: { count: 50 },
-    }
+    payoutJobOptions
   );
   logger.info("Payout job enqueued", { challengeId });
 }
