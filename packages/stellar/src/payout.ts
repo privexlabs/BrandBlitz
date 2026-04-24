@@ -53,7 +53,7 @@ export async function submitBatchPayout(
         fee: BASE_FEE,
         networkPassphrase: passphrase,
       })
-        .addMemo(Memo.text(`bb-${challengeId}-${i}`))
+        .addMemo(Memo.text(buildPayoutMemo(challengeId, i)))
         .setTimeout(180);
 
       for (const recipient of batch) {
@@ -93,6 +93,14 @@ export async function submitBatchPayout(
   }
 
   return results;
+}
+
+/**
+ * Build a deterministic payout memo that respects Stellar's 28-byte text memo limit.
+ */
+function buildPayoutMemo(challengeId: string, batchIndex: number): string {
+  const challengeTag = challengeId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 20);
+  return `bb-${challengeTag}-${batchIndex}`;
 }
 
 function chunkArray<T>(array: T[], size: number): T[][] {

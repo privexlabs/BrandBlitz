@@ -28,6 +28,11 @@ export interface RoundScore {
   updated_at: string;
 }
 
+export interface LeaderboardSession extends GameSession {
+  username: string;
+  avatar_url: string;
+  stellar_address: string | null;
+}
 export async function createSession(data: {
   userId: string;
   challengeId: string;
@@ -147,9 +152,15 @@ export async function getLeaderboard(
   challengeId: string,
   limit = 20,
   offset = 0
-): Promise<Array<GameSession & { username: string; avatar_url: string }>> {
-  const result = await query<GameSession & { username: string; avatar_url: string }>(
-    `SELECT gs.*, u.email as username, u.avatar_url
+): Promise<LeaderboardSession[]> {
+  const result = await query<LeaderboardSession>(
+    `SELECT gs.*,
+            u.email AS username,
+            u.avatar_url,
+            COALESCE(
+              NULLIF(to_jsonb(u) ->> 'embedded_wallet_address', ''),
+              NULLIF(to_jsonb(u) ->> 'stellar_address', '')
+            ) AS stellar_address
      FROM game_sessions gs
      JOIN users u ON gs.user_id = u.id
      WHERE gs.challenge_id = $1
