@@ -1,41 +1,51 @@
 import { Router } from "express";
+import { z } from "zod";
 import {
+  getChallengeByDepositTxHash,
   getChallengeByMemo,
   updateChallengeStatus,
 } from "../db/queries/challenges";
+import { findPayoutByTxHash } from "../db/queries/payouts";
+import { apiLimiter } from "../middleware/rate-limit";
 import { logger } from "../lib/logger";
 
 const router = Router();
+
+const DepositWebhookSchema = z
+  .object({
+    memo: z.string().uuid("memo must be a valid UUID"),
+    txHash: z.string().regex(/^[0-9a-fA-F]{64}$/, "txHash must be a 64-character hex string"),
+    amount: z.string().regex(/^\d+(\.\d{1,7})?$/, "amount must be a numeric string").optional(),
+  })
+  .strict();
 
 /**
  * POST /webhooks/stellar/deposit
  * Internal webhook: called by the deposit monitor when a matching USDC
  * payment is detected on-chain. Activates the challenge.
- *
- * This endpoint is internal only — not exposed to the public internet.
- * Protected by a shared secret in the X-Webhook-Secret header.
  */
-router.post("/stellar/deposit", async (req, res) => {
+router.post("/stellar/deposit", apiLimiter, async (req, res) => {
   const secret = req.headers["x-webhook-secret"];
   if (secret !== process.env.WEBHOOK_SECRET) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
-  const { memo, txHash, amount } = req.body as {
-    memo: string;
-    txHash: string;
-    amount: string;
-  };
+  const body = DepositWebhookSchema.parse(req.body);
 
-  if (!memo || !txHash) {
-    res.status(400).json({ error: "Missing memo or txHash" });
+  const duplicateChallenge = await getChallengeByDepositTxHash(body.txHash);
+  const duplicatePayout = await findPayoutByTxHash(body.txHash);
+  if (duplicateChallenge || duplicatePayout) {
+    res.status(200).json({ status: "duplicate_tx_ignored" });
     return;
   }
 
-  const challenge = await getChallengeByMemo(memo);
+  const challenge = await getChallengeByMemo(body.memo);
   if (!challenge) {
-    logger.warn("Deposit received for unknown challenge memo", { memo, txHash });
+    logger.warn("Deposit received for unknown challenge memo", {
+      memo: body.memo,
+      txHash: body.txHash,
+    });
     res.json({ status: "unknown_memo" });
     return;
   }
@@ -45,12 +55,12 @@ router.post("/stellar/deposit", async (req, res) => {
     return;
   }
 
-  await updateChallengeStatus(challenge.id, "active", { depositTx: txHash });
+  await updateChallengeStatus(challenge.id, "active", { depositTx: body.txHash });
 
   logger.info("Challenge activated via deposit", {
     challengeId: challenge.id,
-    txHash,
-    amount,
+    txHash: body.txHash,
+    amount: body.amount,
   });
 
   res.json({ status: "activated", challengeId: challenge.id });

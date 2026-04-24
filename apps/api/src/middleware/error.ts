@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import { ZodError } from "zod";
 import { logger } from "../lib/logger";
 
 export interface ApiError extends Error {
@@ -18,6 +19,17 @@ export function errorHandler(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _next: NextFunction
 ): void {
+  if (err instanceof ZodError) {
+    res.status(400).json({
+      error: err.issues[0]?.message ?? "Invalid request",
+      issues: err.issues.map((issue) => ({
+        path: issue.path.join("."),
+        message: issue.message,
+      })),
+    });
+    return;
+  }
+
   const statusCode = err.statusCode ?? 500;
   const message = statusCode < 500 ? err.message : "Internal server error";
 

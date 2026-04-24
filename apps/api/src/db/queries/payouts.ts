@@ -50,3 +50,11 @@ export async function getPendingPayouts(challengeId: string): Promise<Payout[]> 
   );
   return result.rows;
 }
+
+export async function findPayoutByTxHash(txHash: string): Promise<Payout | null> {
+  const result = await query<Payout>(
+    "SELECT * FROM payouts WHERE tx_hash = $1 LIMIT 1",
+    [txHash]
+  );
+  return result.rows[0] ?? null;
+}

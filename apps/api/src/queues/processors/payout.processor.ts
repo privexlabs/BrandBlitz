@@ -4,6 +4,8 @@ import { processPayout } from "../../services/payout";
 import { logger } from "../../lib/logger";
 
 export function createPayoutWorker(): Worker {
+  const concurrency = parseInt(process.env.PAYOUT_WORKER_CONCURRENCY ?? "4", 10);
+
   const worker = new Worker(
     "payout",
     async (job: Job<{ challengeId: string }>) => {
@@ -12,7 +14,7 @@ export function createPayoutWorker(): Worker {
     },
     {
       connection: redis,
-      concurrency: 2, // process 2 payouts at a time
+      concurrency,
     }
   );
 

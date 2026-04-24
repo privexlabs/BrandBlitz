@@ -99,9 +99,11 @@ export async function getLeaderboard(
   challengeId: string,
   limit = 20,
   offset = 0
-): Promise<Array<GameSession & { username: string; avatar_url: string }>> {
-  const result = await query<GameSession & { username: string; avatar_url: string }>(
-    `SELECT gs.*, u.email as username, u.avatar_url
+): Promise<Array<GameSession & { username: string; avatar_url: string | null; stellar_address: string | null }>> {
+  const result = await query<
+    GameSession & { username: string; avatar_url: string | null; stellar_address: string | null }
+  >(
+    `SELECT gs.*, u.email as username, u.avatar_url, u.stellar_address
      FROM game_sessions gs
      JOIN users u ON gs.user_id = u.id
      WHERE gs.challenge_id = $1

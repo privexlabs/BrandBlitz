@@ -15,8 +15,9 @@ CREATE TABLE users (
   avatar_url        TEXT,
   stellar_address   TEXT,
   muxed_id          BIGINT UNIQUE,
-  phone_number      TEXT,
+  phone_hash        TEXT UNIQUE,
   phone_verified    BOOLEAN NOT NULL DEFAULT FALSE,
+  phone_verified_at TIMESTAMPTZ,
   league            TEXT CHECK (league IN ('bronze', 'silver', 'gold')),
   total_score       BIGINT NOT NULL DEFAULT 0,
   total_earned_usdc NUMERIC(20, 7) NOT NULL DEFAULT 0,
@@ -28,6 +29,7 @@ CREATE TABLE users (
 
 CREATE INDEX idx_users_email        ON users (email);
 CREATE INDEX idx_users_google_id    ON users (google_id);
+CREATE INDEX idx_users_phone_hash   ON users (phone_hash);
 CREATE INDEX idx_users_total_score  ON users (total_score DESC);
 CREATE INDEX idx_users_league       ON users (league);
 
@@ -60,14 +62,15 @@ CREATE TABLE challenges (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   brand_id            UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
   status              TEXT NOT NULL DEFAULT 'pending_deposit'
-                        CHECK (status IN ('pending_deposit', 'active', 'completed', 'cancelled')),
+                        CHECK (status IN ('pending_deposit', 'active', 'ended', 'settled', 'payout_failed', 'cancelled')),
   pool_amount_usdc    NUMERIC(20, 7) NOT NULL,
   deposit_address     TEXT NOT NULL,
   deposit_memo        TEXT NOT NULL UNIQUE,
+  deposit_tx_hash     TEXT UNIQUE,
   participant_count   INTEGER NOT NULL DEFAULT 0,
   starts_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   ends_at             TIMESTAMPTZ NOT NULL,
-  payout_tx_hash      TEXT,
+  payout_tx_hashes    TEXT[] NOT NULL DEFAULT '{}',
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
