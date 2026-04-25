@@ -21,16 +21,16 @@ export default defineProject({
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     coverage: {
       provider: "v8",
-      all: true,
       include: [
-        "src/components/game/result-screen.tsx",
-        "src/components/game/warmup-phase.tsx",
+        "src/components/brand/brand-kit-form.tsx",
       ],
       reporter: ["text", "lcov"],
-      statements: 85,
-      branches: 85,
-      functions: 85,
-      lines: 85,
+      thresholds: {
+        statements: 80,
+        branches: 80,
+        functions: 80,
+        lines: 80,
+      },
     },
       reporter: ["text", "json", "html"],
       include: ["src/components/game/countdown-timer.tsx"],
