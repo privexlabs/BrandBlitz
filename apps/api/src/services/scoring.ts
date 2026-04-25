@@ -55,7 +55,7 @@ export function calculatePayoutShare(
 
 /**
  * Get top-N winners from sessions eligible for payout.
- * Sorted by total_score DESC, then challenge_ended_at ASC (tiebreaker: fastest finish).
+ * Sorted by total_score DESC, then completed_at ASC (tiebreaker: fastest finish).
  */
 export interface SessionSummary {
   userId: string;

@@ -13,7 +13,6 @@ CREATE TABLE users (
   display_name      TEXT NOT NULL,
   username          TEXT UNIQUE,
   avatar_url        TEXT,
-  phone_hash        TEXT,
   age_verified      BOOLEAN NOT NULL DEFAULT FALSE,
   kyc_complete      BOOLEAN NOT NULL DEFAULT FALSE,
   stellar_address   TEXT,
@@ -71,31 +70,26 @@ CREATE TABLE challenges (
   brand_id            UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
   challenge_id        TEXT NOT NULL UNIQUE,
   status              TEXT NOT NULL DEFAULT 'pending_deposit'
-                        CHECK (status IN ('pending_deposit', 'active', 'ended', 'settled', 'payout_failed')),
+                        CHECK (status IN ('pending_deposit', 'active', 'ended', 'settled', 'payout_failed', 'cancelled')),
   pool_amount_usdc    NUMERIC(20, 7) NOT NULL,
   stellar_deposit_tx  TEXT,
-  payout_tx_hashes    TEXT[],
+  deposit_address     TEXT,
+  deposit_memo        TEXT UNIQUE,
+  deposit_tx_hash     TEXT UNIQUE,
   max_players         INTEGER,
   participant_count   INTEGER NOT NULL DEFAULT 0,
   starts_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   ends_at             TIMESTAMPTZ,
-                        CHECK (status IN ('pending_deposit', 'active', 'ended', 'settled', 'payout_failed', 'cancelled')),
-  pool_amount_usdc    NUMERIC(20, 7) NOT NULL,
-  deposit_address     TEXT NOT NULL,
-  deposit_memo        TEXT NOT NULL UNIQUE,
-  deposit_tx_hash     TEXT UNIQUE,
-  participant_count   INTEGER NOT NULL DEFAULT 0,
-  starts_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  ends_at             TIMESTAMPTZ NOT NULL,
-  payout_tx_hashes    TEXT[] NOT NULL DEFAULT '{}',
+  payout_tx_hashes    TEXT[],
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_challenges_brand_id  ON challenges (brand_id);
-CREATE INDEX idx_challenges_status    ON challenges (status);
-CREATE INDEX idx_challenges_ends_at   ON challenges (ends_at);
-CREATE INDEX idx_challenges_challenge_id ON challenges (challenge_id);
+CREATE INDEX idx_challenges_brand_id      ON challenges (brand_id);
+CREATE INDEX idx_challenges_status        ON challenges (status);
+CREATE INDEX idx_challenges_ends_at       ON challenges (ends_at);
+CREATE INDEX idx_challenges_challenge_id  ON challenges (challenge_id);
+CREATE INDEX idx_challenges_deposit_memo  ON challenges (deposit_memo);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- CHALLENGE QUESTIONS (3 per challenge, server-side only)
@@ -134,7 +128,6 @@ CREATE TABLE game_sessions (
   warmup_started_at     TIMESTAMPTZ,
   warmup_completed_at   TIMESTAMPTZ,
   challenge_started_at  TIMESTAMPTZ,
-  challenge_ended_at    TIMESTAMPTZ,
   completed_at          TIMESTAMPTZ,
   round_1_answer        CHAR(1) CHECK (round_1_answer IN ('A', 'B', 'C', 'D')),
   round_1_score         INTEGER NOT NULL DEFAULT 0,

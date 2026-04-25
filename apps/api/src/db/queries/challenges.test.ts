@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const originalDatabaseUrl = process.env.DATABASE_URL;
@@ -88,6 +89,7 @@ describeIntegration("challenges db queries", () => {
         pool_amount_usdc NUMERIC(20,7) NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending_deposit',
         stellar_deposit_tx TEXT,
+        deposit_memo TEXT UNIQUE,
         payout_tx_hashes TEXT[],
         max_players INTEGER,
         starts_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -95,6 +97,9 @@ describeIntegration("challenges db queries", () => {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await query(
+      `CREATE INDEX idx_challenges_deposit_memo ON challenges (deposit_memo)`
+    );
 
     // Challenge questions table
     await query(`
@@ -316,14 +321,15 @@ describeIntegration("challenges db queries", () => {
 
     const created = await challenges.createChallenge({
       brandId,
-      challengeId: memo,
+      challengeId: `cid-${randomUUID()}`,
       poolAmountUsdc: "75.0000000",
     });
+    // Set deposit_memo separately — mirrors how the deposit flow works
+    await query("UPDATE challenges SET deposit_memo = $1 WHERE id = $2", [memo, created.id]);
 
     const found = await challenges.getChallengeByMemo(memo);
     expect(found).not.toBeNull();
     expect(found!.id).toBe(created.id);
-    expect(found!.challenge_id).toBe(memo);
   });
 
   it("getChallengeByMemo returns null for unknown memo", async () => {
@@ -493,6 +499,39 @@ describeIntegration("challenges db queries", () => {
     expect(result).toHaveLength(1);
     // The current getChallengeQuestions returns SELECT * so correct_option is included
     expect(result[0].correct_option).toBe("B");
+  });
+
+  // ── deposit_memo index performance ─────────────────────────────────────────
+  it("getChallengeByMemo lookup completes in < 5ms with 10k rows", async () => {
+    const userId = await createUser("memo-perf");
+    const brandId = await createBrand(userId, "Perf Brand");
+
+    // Insert 10 000 challenges in batches to keep the test fast
+    const batchSize = 200;
+    const batches = 50;
+    for (let b = 0; b < batches; b++) {
+      const values = Array.from({ length: batchSize }, (_, i) => {
+        const idx = b * batchSize + i;
+        return `('${brandId}', 'perf-cid-${randomUUID()}', 100, 'perf-memo-${idx}-${randomUUID()}')`;
+      }).join(",");
+      await query(
+        `INSERT INTO challenges (brand_id, challenge_id, pool_amount_usdc, deposit_memo) VALUES ${values}`
+      );
+    }
+
+    const targetMemo = `target-memo-${randomUUID()}`;
+    await query(
+      `INSERT INTO challenges (brand_id, challenge_id, pool_amount_usdc, deposit_memo)
+       VALUES ($1, $2, 50, $3)`,
+      [brandId, `target-cid-${randomUUID()}`, targetMemo]
+    );
+
+    const start = performance.now();
+    const found = await challenges.getChallengeByMemo(targetMemo);
+    const elapsed = performance.now() - start;
+
+    expect(found).not.toBeNull();
+    expect(elapsed).toBeLessThan(5);
   });
 
   it("getChallengeQuestions returns empty array for challenge with no questions", async () => {

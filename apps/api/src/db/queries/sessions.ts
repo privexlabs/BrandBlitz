@@ -8,7 +8,7 @@ export interface GameSession {
   warmup_started_at: string | null;
   warmup_completed_at: string | null;
   challenge_started_at: string | null;
-  challenge_ended_at: string | null;
+  completed_at: string | null;
   round_1_score: number;
   round_2_score: number;
   round_3_score: number;
@@ -121,7 +121,7 @@ export async function recordRoundScore(
 export async function finishSession(sessionId: string): Promise<GameSession> {
   const result = await query<GameSession>(
     `UPDATE game_sessions
-     SET challenge_ended_at = NOW(),
+     SET completed_at = NOW(),
          status = 'completed',
          total_score = COALESCE((
            SELECT SUM(score)::int
@@ -167,7 +167,7 @@ export async function getLeaderboard(
      WHERE gs.challenge_id = $1
        AND gs.flagged = FALSE
        AND gs.is_practice = FALSE
-     ORDER BY gs.total_score DESC, gs.challenge_ended_at ASC
+     ORDER BY gs.total_score DESC, gs.completed_at ASC
      LIMIT $2 OFFSET $3`,
     [challengeId, limit, offset]
   );
@@ -183,7 +183,7 @@ export async function getTopSessionsPerChallenge(
   const result = await query<LeaderboardSession>(
     `SELECT sub.id, sub.user_id, sub.challenge_id, sub.device_id,
             sub.warmup_started_at, sub.warmup_completed_at,
-            sub.challenge_started_at, sub.challenge_ended_at,
+            sub.challenge_started_at, sub.completed_at,
             sub.round_1_score, sub.round_2_score, sub.round_3_score,
             sub.total_score, sub.flagged, sub.flag_reasons,
             sub.is_practice, sub.created_at,
@@ -198,7 +198,7 @@ export async function getTopSessionsPerChallenge(
               ) AS stellar_address,
               ROW_NUMBER() OVER (
                 PARTITION BY gs.challenge_id
-                ORDER BY gs.total_score DESC, gs.challenge_ended_at ASC
+                ORDER BY gs.total_score DESC, gs.completed_at ASC
               ) AS rn
        FROM game_sessions gs
        JOIN users u ON gs.user_id = u.id
@@ -207,7 +207,7 @@ export async function getTopSessionsPerChallenge(
          AND gs.is_practice = FALSE
      ) sub
      WHERE sub.rn <= $2
-     ORDER BY sub.challenge_id, sub.total_score DESC, sub.challenge_ended_at ASC`,
+     ORDER BY sub.challenge_id, sub.total_score DESC, sub.completed_at ASC`,
     [challengeIds, limitPerChallenge]
   );
   return result.rows;

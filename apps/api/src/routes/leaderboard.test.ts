@@ -47,15 +47,15 @@ const CHALLENGES = [{ id: "challenge-aaa" }, { id: "challenge-bbb" }];
 const TOP_SESSIONS = [
   {
     id: "s1", user_id: "u1", challenge_id: "challenge-aaa",
-    username: "alice", avatar_url: null, total_score: 300, challenge_ended_at: "2026-01-01T01:00:00Z",
+    username: "alice", avatar_url: null, total_score: 300, completed_at: "2026-01-01T01:00:00Z",
   },
   {
     id: "s2", user_id: "u2", challenge_id: "challenge-aaa",
-    username: "bob", avatar_url: null, total_score: 200, challenge_ended_at: "2026-01-01T02:00:00Z",
+    username: "bob", avatar_url: null, total_score: 200, completed_at: "2026-01-01T02:00:00Z",
   },
   {
     id: "s3", user_id: "u3", challenge_id: "challenge-bbb",
-    username: "carol", avatar_url: "https://cdn.example.com/carol.png", total_score: 400, challenge_ended_at: "2026-01-01T03:00:00Z",
+    username: "carol", avatar_url: "https://cdn.example.com/carol.png", total_score: 400, completed_at: "2026-01-01T03:00:00Z",
   },
 ];
 
