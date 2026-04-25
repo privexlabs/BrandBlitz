@@ -73,7 +73,7 @@ describeIntegration("sessions db queries", () => {
         warmup_started_at TIMESTAMPTZ,
         warmup_completed_at TIMESTAMPTZ,
         challenge_started_at TIMESTAMPTZ,
-        challenge_ended_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
         round_1_score INTEGER NOT NULL DEFAULT 0,
         round_2_score INTEGER NOT NULL DEFAULT 0,
         round_3_score INTEGER NOT NULL DEFAULT 0,
@@ -201,7 +201,7 @@ describeIntegration("sessions db queries", () => {
 
     const finished = await sessions.finishSession(session.id);
 
-    expect(finished.challenge_ended_at).toBeTruthy();
+    expect(finished.completed_at).toBeTruthy();
     expect(finished.total_score).toBe(366);
   });
 
@@ -251,11 +251,11 @@ describeIntegration("sessions db queries", () => {
     }
 
     await sessions.flagSession(flagged.id, ["bot"]);
-    await query("UPDATE game_sessions SET challenge_ended_at = $2 WHERE id = $1", [
+    await query("UPDATE game_sessions SET completed_at = $2 WHERE id = $1", [
       fastTie.id,
       "2026-01-01T00:00:00.000Z",
     ]);
-    await query("UPDATE game_sessions SET challenge_ended_at = $2 WHERE id = $1", [
+    await query("UPDATE game_sessions SET completed_at = $2 WHERE id = $1", [
       slowTie.id,
       "2026-01-01T00:00:05.000Z",
     ]);

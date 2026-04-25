@@ -208,8 +208,8 @@ describe("challenges routes", () => {
       mocks.getChallengeById.mockResolvedValue({ id: "chal-leader" });
       
       const mockSessions = [
-        { username: "Alice", avatar_url: "alice.png", total_score: 500, challenge_ended_at: "time1" },
-        { username: "Bob", avatar_url: "bob.png", total_score: 400, challenge_ended_at: "time2" }
+        { username: "Alice", avatar_url: "alice.png", total_score: 500, completed_at: "time1" },
+        { username: "Bob", avatar_url: "bob.png", total_score: 400, completed_at: "time2" }
       ];
       mocks.getLeaderboard.mockResolvedValue(mockSessions);
 

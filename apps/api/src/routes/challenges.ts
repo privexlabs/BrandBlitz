@@ -79,7 +79,7 @@ router.get("/:id/leaderboard", async (req, res) => {
       username: s.username,
       avatarUrl: s.avatar_url,
       totalScore: s.total_score,
-      endedAt: s.challenge_ended_at,
+      endedAt: s.completed_at,
     })),
   });
 });

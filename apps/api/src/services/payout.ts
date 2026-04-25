@@ -44,7 +44,7 @@ export async function processPayout(challengeId: string): Promise<void> {
       userId: s.user_id,
       stellarAddress: (s.stellar_address ?? "").trim(),
       totalScore: s.total_score,
-      endedAt: s.challenge_ended_at ?? s.created_at,
+      endedAt: s.completed_at ?? s.created_at,
     }))
   );
 
