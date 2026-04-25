@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createApiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,11 @@ export default function BrandAnalyticsPage() {
   const { data: session, status } = useSession();
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const brandId = params.id as string;
+  const depositAddress = searchParams.get("depositAddress");
+  const depositMemo = searchParams.get("memo");
+  const depositAmount = searchParams.get("amount");
 
   const [brand, setBrand] = useState<any>(null);
   const [challenge, setChallenge] = useState<any>(null);
@@ -112,6 +116,22 @@ export default function BrandAnalyticsPage() {
 
       {challenge && (
         <>
+          {depositAddress && depositMemo ? (
+            <Card className="mb-8 border-amber-300 bg-amber-50">
+              <CardHeader>
+                <CardTitle>Deposit Instructions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <p>Fund this challenge to activate it on-chain.</p>
+                <div className="space-y-1 font-mono text-xs text-slate-700">
+                  <p>Address: {depositAddress}</p>
+                  <p>Memo: {depositMemo}</p>
+                  {depositAmount ? <p>Amount: {depositAmount} USDC</p> : null}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
           <div className="grid grid-cols-3 gap-4 mb-8">
             {[
               { label: "Pool Size", value: `${formatUsdc(challenge.poolAmountUsdc)} USDC` },

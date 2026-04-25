@@ -5,6 +5,8 @@ import { WARMUP_MIN_SECONDS } from "./constants";
 import { WarmupPhase } from "./warmup-phase";
 import type { Challenge } from "@/lib/api";
 
+const apiPostMock = vi.fn();
+
 vi.mock("next/image", () => ({
   default: ({
     alt,
@@ -14,6 +16,17 @@ vi.mock("next/image", () => ({
     <img alt={alt} src={src} {...props} />
   ),
 }));
+
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+
+  return {
+    ...actual,
+    createApiClient: () => ({
+      post: apiPostMock,
+    }),
+  };
+});
 
 const challenge: Challenge = {
   id: "session-123",
@@ -31,22 +44,18 @@ const challenge: Challenge = {
 };
 
 describe("WarmupPhase", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
     vi.useFakeTimers();
-    fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    apiPostMock.mockReset();
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
   it("renders the brand logo, name, tagline, and warmup copy", () => {
-    render(<WarmupPhase challenge={challenge} onComplete={vi.fn()} />);
+    render(<WarmupPhase challenge={challenge} apiToken="test-token" onComplete={vi.fn()} />);
 
     expect(screen.getByRole("img", { name: "Acme" })).toHaveAttribute(
       "src",
@@ -67,6 +76,7 @@ describe("WarmupPhase", () => {
           logo_url: undefined,
           tagline: undefined,
         }}
+        apiToken="test-token"
         onComplete={vi.fn()}
       />
     );
@@ -76,7 +86,7 @@ describe("WarmupPhase", () => {
   });
 
   it("counts down from WARMUP_MIN_SECONDS and keeps the start button disabled until zero", async () => {
-    render(<WarmupPhase challenge={challenge} onComplete={vi.fn()} />);
+    render(<WarmupPhase challenge={challenge} apiToken="test-token" onComplete={vi.fn()} />);
 
     const startButton = screen.getByRole("button", { name: "Preparing..." });
 
@@ -100,12 +110,11 @@ describe("WarmupPhase", () => {
 
   it("posts warmup completion and invokes onComplete with the challenge token", async () => {
     const onComplete = vi.fn();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({ challengeToken: "token-abc" }),
+    apiPostMock.mockResolvedValue({
+      data: { challengeToken: "token-abc" },
     });
 
-    render(<WarmupPhase challenge={challenge} onComplete={onComplete} />);
+    render(<WarmupPhase challenge={challenge} apiToken="test-token" onComplete={onComplete} />);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(WARMUP_MIN_SECONDS * 1000);
@@ -116,22 +125,20 @@ describe("WarmupPhase", () => {
       await Promise.resolve();
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/proxy/sessions/session-123/warmup-complete",
-      { method: "POST" }
-    );
+    expect(apiPostMock).toHaveBeenCalledWith("/sessions/session-123/warmup-complete");
     expect(onComplete).toHaveBeenCalledWith("token-abc");
   });
 
   it("shows a not-yet-ready message for a 400 response with remainingMs and does not invoke onComplete", async () => {
     const onComplete = vi.fn();
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 400,
-      json: vi.fn().mockResolvedValue({ remainingMs: 1500 }),
+    apiPostMock.mockRejectedValue({
+      response: {
+        status: 400,
+        data: { remainingMs: 1500 },
+      },
     });
 
-    render(<WarmupPhase challenge={challenge} onComplete={onComplete} />);
+    render(<WarmupPhase challenge={challenge} apiToken="test-token" onComplete={onComplete} />);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(WARMUP_MIN_SECONDS * 1000);
@@ -149,14 +156,13 @@ describe("WarmupPhase", () => {
   it("shows a retry button after a network error and retries the request successfully", async () => {
     const onComplete = vi.fn();
 
-    fetchMock
+    apiPostMock
       .mockRejectedValueOnce(new Error("Network error"))
       .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ challengeToken: "token-retry" }),
+        data: { challengeToken: "token-retry" },
       });
 
-    render(<WarmupPhase challenge={challenge} onComplete={onComplete} />);
+    render(<WarmupPhase challenge={challenge} apiToken="test-token" onComplete={onComplete} />);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(WARMUP_MIN_SECONDS * 1000);
@@ -174,18 +180,19 @@ describe("WarmupPhase", () => {
       await Promise.resolve();
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(apiPostMock).toHaveBeenCalledTimes(2);
     expect(onComplete).toHaveBeenCalledWith("token-retry");
   });
 
   it("treats non-400 server failures as retryable errors", async () => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: vi.fn().mockResolvedValue({}),
+    apiPostMock.mockRejectedValue({
+      response: {
+        status: 500,
+        data: {},
+      },
     });
 
-    render(<WarmupPhase challenge={challenge} onComplete={vi.fn()} />);
+    render(<WarmupPhase challenge={challenge} apiToken="test-token" onComplete={vi.fn()} />);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(WARMUP_MIN_SECONDS * 1000);

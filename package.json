@@ -7,12 +7,14 @@
     "dev": "turbo run dev --parallel",
     "build": "turbo run build",
     "test": "turbo run test",
+    "e2e": "playwright test -c e2e/playwright.config.ts",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
     "clean": "turbo run clean && rm -rf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\" --ignore-path .gitignore"
   },
   "devDependencies": {
+    "@playwright/test": "1.51.1",
     "eslint": "10.1.0",
     "prettier": "3.8.1",
     "prettier-plugin-tailwindcss": "0.6.12",

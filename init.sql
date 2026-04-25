@@ -13,14 +13,21 @@ CREATE TABLE users (
   display_name      TEXT NOT NULL,
   username          TEXT UNIQUE,
   avatar_url        TEXT,
+  phone_hash        TEXT,
+  age_verified      BOOLEAN NOT NULL DEFAULT FALSE,
+  kyc_complete      BOOLEAN NOT NULL DEFAULT FALSE,
   stellar_address   TEXT,
-  muxed_id          BIGINT UNIQUE,
-  phone_number      TEXT,
+  embedded_wallet_address TEXT,
   phone_verified    BOOLEAN NOT NULL DEFAULT FALSE,
   league            TEXT CHECK (league IN ('bronze', 'silver', 'gold')),
   total_score       BIGINT NOT NULL DEFAULT 0,
   total_earned_usdc NUMERIC(20, 7) NOT NULL DEFAULT 0,
   challenges_played INTEGER NOT NULL DEFAULT 0,
+  state_code        TEXT,
+  streak            INTEGER NOT NULL DEFAULT 0,
+  last_play_day     DATE,
+  streak_repairs_this_month INTEGER NOT NULL DEFAULT 0,
+  streak_repair_available BOOLEAN NOT NULL DEFAULT FALSE,
   role              TEXT NOT NULL DEFAULT 'player' CHECK (role IN ('player', 'brand', 'admin')),
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -36,22 +43,21 @@ CREATE INDEX idx_users_league       ON users (league);
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE brands (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  owner_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name                TEXT NOT NULL,
   tagline             TEXT,
-  description         TEXT,
+  brand_story         TEXT,
+  usp                 TEXT,
   logo_url            TEXT,
-  logo_key            TEXT,
-  product_image_urls  TEXT[]  NOT NULL DEFAULT '{}',
-  product_image_keys  TEXT[]  NOT NULL DEFAULT '{}',
+  product_image_1_url TEXT,
+  product_image_2_url TEXT,
   primary_color       TEXT DEFAULT '#6366f1',
   secondary_color     TEXT DEFAULT '#a5b4fc',
-  website_url         TEXT,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_brands_owner_id ON brands (owner_id);
+CREATE INDEX idx_brands_owner_user_id ON brands (owner_user_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- CHALLENGES
@@ -59,15 +65,16 @@ CREATE INDEX idx_brands_owner_id ON brands (owner_id);
 CREATE TABLE challenges (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   brand_id            UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+  challenge_id        TEXT NOT NULL UNIQUE,
   status              TEXT NOT NULL DEFAULT 'pending_deposit'
-                        CHECK (status IN ('pending_deposit', 'active', 'completed', 'cancelled')),
+                        CHECK (status IN ('pending_deposit', 'active', 'ended', 'settled', 'payout_failed')),
   pool_amount_usdc    NUMERIC(20, 7) NOT NULL,
-  deposit_address     TEXT NOT NULL,
-  deposit_memo        TEXT NOT NULL UNIQUE,
+  stellar_deposit_tx  TEXT,
+  payout_tx_hashes    TEXT[],
+  max_players         INTEGER,
   participant_count   INTEGER NOT NULL DEFAULT 0,
   starts_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  ends_at             TIMESTAMPTZ NOT NULL,
-  payout_tx_hash      TEXT,
+  ends_at             TIMESTAMPTZ,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -75,7 +82,7 @@ CREATE TABLE challenges (
 CREATE INDEX idx_challenges_brand_id  ON challenges (brand_id);
 CREATE INDEX idx_challenges_status    ON challenges (status);
 CREATE INDEX idx_challenges_ends_at   ON challenges (ends_at);
-CREATE INDEX idx_challenges_memo      ON challenges (deposit_memo);
+CREATE INDEX idx_challenges_challenge_id ON challenges (challenge_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- CHALLENGE QUESTIONS (3 per challenge, server-side only)
@@ -84,7 +91,10 @@ CREATE TABLE challenge_questions (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   challenge_id     UUID NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
   round            INTEGER NOT NULL CHECK (round IN (1, 2, 3)),
+  question_type    TEXT NOT NULL,
+  prompt_type      TEXT NOT NULL,
   question_text    TEXT NOT NULL,
+  correct_answer   TEXT NOT NULL,
   option_a         TEXT NOT NULL,
   option_b         TEXT NOT NULL,
   option_c         TEXT NOT NULL,

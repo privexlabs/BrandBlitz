@@ -1,8 +1,34 @@
 import type { NextAuthOptions } from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
+
+const mockGoogleAuthEnabled = process.env.E2E_MOCK_GOOGLE_OAUTH === "true";
 
 export const authOptions: NextAuthOptions = {
   providers: [
+    ...(mockGoogleAuthEnabled
+      ? [
+          CredentialsProvider({
+            id: "google-mock",
+            name: "Google",
+            credentials: {
+              email: { label: "Email", type: "email" },
+              name: { label: "Name", type: "text" },
+            },
+            async authorize(credentials) {
+              const email = credentials?.email?.trim() || "e2e-player@example.com";
+              const name = credentials?.name?.trim() || "E2E Player";
+
+              return {
+                id: email,
+                email,
+                name,
+                mockIdToken: `e2e:${email}:${name}`,
+              } as any;
+            },
+          }),
+        ]
+      : []),
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
@@ -13,7 +39,10 @@ export const authOptions: NextAuthOptions = {
     async signIn({ user, account }) {
       // After Google OAuth, register user in our API and get a JWT
       try {
-        const idToken = (account as { id_token?: string } | null)?.id_token;
+        const idToken =
+          account?.provider === "google-mock"
+            ? (user as any).mockIdToken
+            : (account as { id_token?: string } | null)?.id_token;
         if (!idToken) return false;
 
         const response = await fetch(

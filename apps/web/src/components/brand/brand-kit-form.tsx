@@ -34,11 +34,6 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!logoKey) {
-      setError("Please upload a brand logo.");
-      return;
-    }
-
     setSubmitting(true);
     setError(null);
 
@@ -49,26 +44,36 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
       const brandRes = await api.post("/brands", {
         name: fields.name,
         tagline: fields.tagline,
-        description: fields.description,
+        brandStory: fields.description,
         primaryColor: fields.primaryColor,
         secondaryColor: fields.secondaryColor,
-        websiteUrl: fields.websiteUrl || undefined,
         logoKey,
-        productImageKeys,
+        usp: fields.tagline || undefined,
+        productImage1Key: productImageKeys[0],
+        productImage2Key: productImageKeys[1],
       });
 
       const brandId = brandRes.data.brand.id;
 
       // 2. Create challenge
-      const challengeRes = await api.post(`/brands/${brandId}/challenges`, {
+      const challengeRes = await api.post("/brands/challenges", {
+        brandId,
         poolAmountUsdc: fields.poolAmountUsdc,
-        durationHours: parseInt(fields.durationHours, 10),
+        endsAt: new Date(
+          Date.now() + parseInt(fields.durationHours, 10) * 60 * 60 * 1000
+        ).toISOString(),
       });
 
-      const { depositAddress, memo } = challengeRes.data;
+      const { depositInstructions } = challengeRes.data;
 
       // Redirect to brand page to show deposit instructions
-      router.push(`/brand/${brandId}?depositAddress=${depositAddress}&memo=${memo}`);
+      router.push(
+        `/brand/${brandId}?depositAddress=${encodeURIComponent(
+          depositInstructions.hotWalletAddress
+        )}&memo=${encodeURIComponent(depositInstructions.memo)}&amount=${encodeURIComponent(
+          depositInstructions.amount
+        )}`
+      );
     } catch (err: any) {
       setError(err?.response?.data?.message ?? "Failed to create brand. Please try again.");
       setSubmitting(false);
@@ -177,7 +182,7 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
           <h2 className="font-semibold text-lg">Brand Assets</h2>
 
           <div className="space-y-2">
-            <Label>Logo *</Label>
+            <Label>Logo</Label>
             <UploadField
               label="Upload Brand Logo"
               accept="image/png,image/svg+xml,image/jpeg,image/webp"

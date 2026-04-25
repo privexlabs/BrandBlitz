@@ -17,19 +17,18 @@ interface PageProps {
 
 export default function ChallengePage({ params }: PageProps) {
   const { id: challengeId } = use(params);
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
 
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [questions, setQuestions] = useState<ChallengeQuestion[]>([]);
   const [phase, setPhase] = useState<GamePhase>("loading");
   const [currentRound, setCurrentRound] = useState<1 | 2 | 3>(1);
-  const [challengeToken, setChallengeToken] = useState("");
-  const [sessionId, setSessionId] = useState("");
   const [scores, setScores] = useState<number[]>([]);
 
   useEffect(() => {
     if (!challengeId) return;
+    if (status === "loading") return;
     if (!session) {
       router.push(`/login?callbackUrl=/challenge/${challengeId}`);
       return;
@@ -47,15 +46,18 @@ export default function ChallengePage({ params }: PageProps) {
         .post(`/sessions/${challengeId}/warmup-start`, {
           deviceId: undefined, // FingerprintJS visitorId added via middleware
         })
-        .then((r) => {
-          setSessionId(r.data.sessionId);
+        .then(() => {
           setPhase("warmup");
         });
     });
-  }, [challengeId, session, router]);
+  }, [challengeId, session, status, router]);
 
-  const handleWarmupComplete = (token: string) => {
-    setChallengeToken(token);
+  const handleWarmupComplete = async (token: string) => {
+    const apiToken = (session as any)?.apiToken as string;
+    const api = createApiClient(apiToken);
+
+    await api.post(`/sessions/${challengeId}/start`, { challengeToken: token });
+
     setPhase("challenge");
     setCurrentRound(1);
   };
@@ -87,7 +89,15 @@ export default function ChallengePage({ params }: PageProps) {
   }
 
   if (phase === "warmup" && challenge) {
-    return <WarmupPhase challenge={challenge} onComplete={handleWarmupComplete} />;
+    return (
+      <WarmupPhase
+        challenge={challenge}
+        apiToken={(session as any).apiToken}
+        onComplete={(token) => {
+          void handleWarmupComplete(token);
+        }}
+      />
+    );
   }
 
   if (phase === "challenge" && challenge) {

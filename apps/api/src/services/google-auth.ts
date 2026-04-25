@@ -18,6 +18,15 @@ export interface VerifiedGoogleUser {
 }
 
 export async function verifyGoogleIdToken(idToken: string): Promise<VerifiedGoogleUser> {
+  if (process.env.E2E_MOCK_GOOGLE_OAUTH === "true" && idToken.startsWith("e2e:")) {
+    const [, rawEmail = "e2e-player@example.com", rawName = "E2E Player"] = idToken.split(":");
+    return {
+      googleId: `e2e-${rawEmail}`,
+      email: rawEmail,
+      name: rawName,
+    };
+  }
+
   const response = await fetch(
     `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`
   );

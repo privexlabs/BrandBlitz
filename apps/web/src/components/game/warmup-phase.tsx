@@ -5,14 +5,16 @@ import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { CountdownTimer } from "./countdown-timer";
 import { WARMUP_MIN_SECONDS } from "./constants";
+import { createApiClient } from "@/lib/api";
 import type { Challenge } from "@/lib/api";
 
 interface WarmupPhaseProps {
   challenge: Challenge;
+  apiToken: string;
   onComplete: (challengeToken: string) => void;
 }
 
-export function WarmupPhase({ challenge, onComplete }: WarmupPhaseProps) {
+export function WarmupPhase({ challenge, apiToken, onComplete }: WarmupPhaseProps) {
   const [unlocked, setUnlocked] = useState(false);
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -31,26 +33,24 @@ export function WarmupPhase({ challenge, onComplete }: WarmupPhaseProps) {
 
     try {
       // Notify API that warmup completed — receive challenge token
-      const res = await fetch(`/api/proxy/sessions/${challenge.id}/warmup-complete`, {
-        method: "POST",
-      });
+      const api = createApiClient(apiToken);
+      const res = await api.post(`/sessions/${challenge.id}/warmup-complete`);
+      const data = res.data;
 
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        if (res.status === 400 && typeof data?.remainingMs === "number") {
-          setStatusMessage(
-            `Not yet ready. Please wait ${Math.ceil(data.remainingMs / 1000)} more seconds and try again.`
-          );
-          setLoading(false);
-          return;
-        }
-
-        throw new Error("Request failed");
+      if (!data?.challengeToken) {
+        throw new Error("Missing challenge token");
       }
 
       onComplete(data.challengeToken);
-    } catch {
+    } catch (error: any) {
+      if (error?.response?.status === 400 && typeof error?.response?.data?.remainingMs === "number") {
+        setStatusMessage(
+          `Not yet ready. Please wait ${Math.ceil(error.response.data.remainingMs / 1000)} more seconds and try again.`
+        );
+        setLoading(false);
+        return;
+      }
+
       setStatusMessage("Couldn't start the challenge. Check your connection and try again.");
       setShowRetry(true);
       setLoading(false);
