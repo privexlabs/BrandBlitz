@@ -8,15 +8,29 @@ import { cn } from "@/lib/utils";
 interface UploadFieldProps {
   label: string;
   accept?: string;
+  maxSizeBytes?: number;
   uploadType: "brand-logo" | "product-image" | "user-avatar";
   apiToken: string;
   onUploaded: (key: string, publicUrl: string) => void;
   className?: string;
 }
 
+/** Returns true if mimeType is covered by the `accept` attribute value. */
+function isAcceptedMime(mimeType: string, accept: string): boolean {
+  return accept
+    .split(",")
+    .map((a) => a.trim())
+    .some((a) => {
+      if (a === "*" || a === "*/*") return true;
+      if (a.endsWith("/*")) return mimeType.startsWith(a.slice(0, -1));
+      return mimeType === a;
+    });
+}
+
 export function UploadField({
   label,
   accept = "image/*",
+  maxSizeBytes,
   uploadType,
   apiToken,
   onUploaded,
@@ -26,10 +40,28 @@ export function UploadField({
   const [uploading, setUploading] = useState(false);
   const [uploadedUrl, setUploadedUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const handleFile = async (file: File) => {
-    setUploading(true);
     setError(null);
+
+    // MIME validation — no network calls on failure
+    if (!isAcceptedMime(file.type, accept)) {
+      setError(`File type "${file.type}" is not allowed.`);
+      setPendingFile(null);
+      return;
+    }
+
+    // Size validation — no network calls on failure
+    if (maxSizeBytes !== undefined && file.size > maxSizeBytes) {
+      const maxMB = (maxSizeBytes / 1024 / 1024).toFixed(1);
+      setError(`File is too large. Maximum size is ${maxMB} MB.`);
+      setPendingFile(null);
+      return;
+    }
+
+    setUploading(true);
+    setPendingFile(file);
 
     try {
       const api = createApiClient(apiToken);
@@ -44,15 +76,20 @@ export function UploadField({
       const { presignedUrl, key, publicUrl } = presignRes.data;
 
       // 2. Upload directly to S3/MinIO
-      await fetch(presignedUrl, {
+      const putRes = await fetch(presignedUrl, {
         method: "PUT",
         body: file,
         headers: { "Content-Type": file.type },
       });
 
+      if (!putRes.ok) {
+        throw new Error(`PUT failed with status ${putRes.status}`);
+      }
+
       // 3. Verify upload
       await api.post("/upload/verify", { key });
 
+      setPendingFile(null);
       setUploadedUrl(publicUrl);
       onUploaded(key, publicUrl);
     } catch {
@@ -115,7 +152,20 @@ export function UploadField({
         </button>
       )}
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && (
+        <div className="space-y-1">
+          <p className="text-sm text-red-500">{error}</p>
+          {pendingFile && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleFile(pendingFile)}
+            >
+              Retry
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

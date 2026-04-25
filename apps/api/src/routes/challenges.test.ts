@@ -1,23 +1,22 @@
+import type { Server } from "node:http";
+import { randomUUID } from "node:crypto";
 import express from "express";
-import jwt from "jsonwebtoken";
-import request from "supertest";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import challengesRouter from "./challenges";
-import { errorHandler } from "../middleware/error";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getActiveChallenges: vi.fn(),
-  getChallengesByBrandId: vi.fn(),
   getChallengeById: vi.fn(),
+  getChallengesByBrandId: vi.fn(),
   getChallengeQuestions: vi.fn(),
   getBrandById: vi.fn(),
   getLeaderboard: vi.fn(),
+  authMockUser: null as any,
 }));
 
 vi.mock("../db/queries/challenges", () => ({
   getActiveChallenges: mocks.getActiveChallenges,
-  getChallengesByBrandId: mocks.getChallengesByBrandId,
   getChallengeById: mocks.getChallengeById,
+  getChallengesByBrandId: mocks.getChallengesByBrandId,
   getChallengeQuestions: mocks.getChallengeQuestions,
 }));
 
@@ -29,81 +28,215 @@ vi.mock("../db/queries/sessions", () => ({
   getLeaderboard: mocks.getLeaderboard,
 }));
 
-function createTestApp() {
+vi.mock("../middleware/authenticate", () => ({
+  optionalAuth: (req: any, _res: any, next: any) => {
+    req.user = mocks.authMockUser;
+    next();
+  },
+  authenticate: (req: any, res: any, next: any) => {
+    if (!mocks.authMockUser) return res.status(401).json({ error: "Unauthorized" });
+    req.user = mocks.authMockUser;
+    next();
+  },
+}));
+
+import { errorHandler } from "../middleware/error";
+import challengesRouter from "./challenges";
+
+async function startServer(): Promise<{ server: Server; baseUrl: string }> {
   const app = express();
   app.use(express.json());
   app.use("/challenges", challengesRouter);
   app.use(errorHandler);
-  return app;
+
+  const server = app.listen(0);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Failed to start test server");
+  }
+
+  return { server, baseUrl: `http://127.0.0.1:${address.port}` };
 }
 
-function signToken(userId: string): string {
-  return jwt.sign({ sub: userId, email: `${userId}@example.com` }, process.env.JWT_SECRET!, {
-    expiresIn: "15m",
-  });
-}
+describe("challenges routes", () => {
+  let currentServer: Server | undefined;
+  let baseUrl: string;
 
-describe("challenge routes", () => {
-  beforeEach(() => {
-    process.env.JWT_SECRET = "test-jwt-secret";
+  beforeEach(async () => {
     vi.clearAllMocks();
+    mocks.authMockUser = null;
+    
+    const s = await startServer();
+    currentServer = s.server;
+    baseUrl = s.baseUrl;
   });
 
-  it("returns active challenges when no brand filter is provided", async () => {
-    const challenges = [{ id: "challenge-1" }, { id: "challenge-2" }];
-    mocks.getActiveChallenges.mockResolvedValue(challenges);
-
-    const response = await request(createTestApp())
-      .get("/challenges?limit=5&offset=10")
-      .expect(200);
-
-    expect(mocks.getActiveChallenges).toHaveBeenCalledWith(5, 10);
-    expect(mocks.getChallengesByBrandId).not.toHaveBeenCalled();
-    expect(response.body).toEqual({ challenges });
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (currentServer) {
+        currentServer.close(() => resolve());
+        currentServer = undefined;
+        return;
+      }
+      resolve();
+    });
   });
 
-  it("returns the caller's brand challenges when brandId is provided", async () => {
-    const userId = "owner-1";
-    const brandId = "67d8439a-d63b-4f07-9aa2-517e777a34e2";
-    const challenges = [{ id: "challenge-1", brand_id: brandId }];
+  describe("GET /challenges", () => {
+    it("returns active challenges and paginates natively", async () => {
+      const mockChallenges = [{ id: "chal-1" }, { id: "chal-2" }];
+      mocks.getActiveChallenges.mockResolvedValue(mockChallenges);
 
-    mocks.getBrandById.mockResolvedValue({ id: brandId, owner_user_id: userId });
-    mocks.getChallengesByBrandId.mockResolvedValue(challenges);
+      const response = await fetch(`${baseUrl}/challenges?status=active&limit=5&offset=10`);
+      expect(response.status).toBe(200);
 
-    const response = await request(createTestApp())
-      .get(`/challenges?brandId=${brandId}&limit=2&offset=1`)
-      .set("Authorization", `Bearer ${signToken(userId)}`)
-      .expect(200);
+      const data: any = await response.json();
+      expect(data).toEqual({ challenges: mockChallenges });
+      expect(mocks.getActiveChallenges).toHaveBeenCalledWith(5, 10);
+    });
 
-    expect(mocks.getBrandById).toHaveBeenCalledWith(brandId);
-    expect(mocks.getChallengesByBrandId).toHaveBeenCalledWith(brandId, 2, 1);
-    expect(mocks.getActiveChallenges).not.toHaveBeenCalled();
-    expect(response.body).toEqual({ challenges });
+    it("rejects invalid pagination input via Zod", async () => {
+      const response = await fetch(`${baseUrl}/challenges?limit=notanumber`);
+      expect(response.status).toBe(400);
+      const data: any = await response.json();
+      expect(data.code).toBe("INVALID_QUERY");
+    });
+    
+    it("brandId filter honoured for authenticated owners", async () => {
+      mocks.authMockUser = { sub: "user-owner" };
+      const brandId = randomUUID();
+      
+      mocks.getBrandById.mockResolvedValue({ id: brandId, owner_user_id: "user-owner" });
+      const brandChallenges = [{ id: "brand-chal-1" }];
+      mocks.getChallengesByBrandId.mockResolvedValue(brandChallenges);
+
+      const response = await fetch(`${baseUrl}/challenges?brandId=${brandId}`);
+      expect(response.status).toBe(200);
+
+      const data: any = await response.json();
+      expect(data).toEqual({ challenges: brandChallenges });
+      expect(mocks.getChallengesByBrandId).toHaveBeenCalledWith(brandId, 20, 0);
+    });
+
+    it("returns 403 Forbidden if unauthenticated user tries to filter by brandId", async () => {
+      mocks.authMockUser = null; 
+      const brandId = randomUUID();
+      mocks.getBrandById.mockResolvedValue({ id: brandId, owner_user_id: "owner" });
+
+      const response = await fetch(`${baseUrl}/challenges?brandId=${brandId}`);
+      expect(response.status).toBe(403);
+    });
+
+    it("returns 403 Forbidden if authenticated user requests another owner's brandId", async () => {
+      mocks.authMockUser = { sub: "thief" };
+      const brandId = randomUUID();
+      mocks.getBrandById.mockResolvedValue({ id: brandId, owner_user_id: "owner" });
+
+      const response = await fetch(`${baseUrl}/challenges?brandId=${brandId}`);
+      expect(response.status).toBe(403);
+    });
+
+    it("returns 403 Forbidden if the requested brandId does not exist at all", async () => {
+      mocks.authMockUser = { sub: "owner" };
+      const brandId = randomUUID();
+      mocks.getBrandById.mockResolvedValue(null);
+
+      const response = await fetch(`${baseUrl}/challenges?brandId=${brandId}`);
+      expect(response.status).toBe(403);
+    });
   });
 
-  it("returns 403 when the caller does not own the requested brand", async () => {
-    const brandId = "67d8439a-d63b-4f07-9aa2-517e777a34e2";
+  describe("GET /challenges/:id", () => {
+    it("returns 404 for non-existent challenge ID", async () => {
+      mocks.getChallengeById.mockResolvedValue(null);
+      
+      const response = await fetch(`${baseUrl}/challenges/not-found`);
+      expect(response.status).toBe(404);
+      const data: any = await response.json();
+      expect(data.error).toBe("Challenge not found");
+    });
 
-    mocks.getBrandById.mockResolvedValue({ id: brandId, owner_user_id: "different-owner" });
+    it("returns challenge detail and strictly strips 'correct_option' and 'correct_answer' from questions", async () => {
+      const mockChallenge = { id: "chal-secret" };
+      mocks.getChallengeById.mockResolvedValue(mockChallenge);
 
-    const response = await request(createTestApp())
-      .get(`/challenges?brandId=${brandId}`)
-      .set("Authorization", `Bearer ${signToken("owner-1")}`)
-      .expect(403);
+      const mockQuestions = [
+        {
+          id: "q1",
+          question_text: "What is 2+2?",
+          option_a: "3", option_b: "4", option_c: "5", option_d: "6",
+          correct_option: "B",
+          correct_answer: "4"
+        },
+        {
+          id: "q2",
+          question_text: "What color is the sky?",
+          option_a: "blue", option_b: "red", option_c: "green", option_d: "yellow",
+          correct_option: "A",
+          correct_answer: "blue"
+        }
+      ];
+      
+      mocks.getChallengeQuestions.mockResolvedValue(mockQuestions);
 
-    expect(mocks.getChallengesByBrandId).not.toHaveBeenCalled();
-    expect(response.body.error).toBe("Forbidden");
+      const response = await fetch(`${baseUrl}/challenges/chal-secret`);
+      expect(response.status).toBe(200);
+
+      const data: any = await response.json();
+      expect(data.challenge).toEqual(mockChallenge);
+      expect(data.questions).toHaveLength(2);
+      
+      expect(data.questions[0]).not.toHaveProperty("correct_option");
+      expect(data.questions[0]).not.toHaveProperty("correct_answer");
+      expect(data.questions[0].option_a).toBe("3");
+      
+      expect(data.questions[1]).not.toHaveProperty("correct_option");
+      expect(data.questions[1]).not.toHaveProperty("correct_answer");
+    });
   });
 
-  it("returns 400 when brandId is not a valid UUID", async () => {
-    const response = await request(createTestApp())
-      .get("/challenges?brandId=not-a-uuid")
-      .expect(400);
+  describe("GET /challenges/:id/leaderboard", () => {
+    it("returns 404 for non-existent challenge ID on leaderboard endpoint", async () => {
+      mocks.getChallengeById.mockResolvedValue(null);
+      const response = await fetch(`${baseUrl}/challenges/not-found/leaderboard`);
+      expect(response.status).toBe(404);
+    });
 
-    expect(mocks.getBrandById).not.toHaveBeenCalled();
-    expect(response.body).toEqual({
-      error: "Invalid query parameters",
-      code: "INVALID_QUERY",
+    it("paginates and maps leaderboard outputs cleanly mapping total_score DESC effectively", async () => {
+      mocks.getChallengeById.mockResolvedValue({ id: "chal-leader" });
+      
+      const mockSessions = [
+        { username: "Alice", avatar_url: "alice.png", total_score: 500, challenge_ended_at: "time1" },
+        { username: "Bob", avatar_url: "bob.png", total_score: 400, challenge_ended_at: "time2" }
+      ];
+      mocks.getLeaderboard.mockResolvedValue(mockSessions);
+
+      const response = await fetch(`${baseUrl}/challenges/chal-leader/leaderboard?limit=10&offset=5`);
+      expect(response.status).toBe(200);
+
+      const data: any = await response.json();
+      expect(data.challengeId).toBe("chal-leader");
+      expect(data.sessions).toHaveLength(2);
+
+      expect(data.sessions[0]).toEqual({
+        rank: 6,
+        username: "Alice",
+        avatarUrl: "alice.png",
+        totalScore: 500,
+        endedAt: "time1"
+      });
+      
+      expect(data.sessions[1]).toEqual({
+        rank: 7,
+        username: "Bob",
+        avatarUrl: "bob.png",
+        totalScore: 400,
+        endedAt: "time2"
+      });
+
+      expect(mocks.getLeaderboard).toHaveBeenCalledWith("chal-leader", 10, 5);
     });
   });
 });

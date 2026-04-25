@@ -173,3 +173,42 @@ export async function getLeaderboard(
   );
   return result.rows;
 }
+
+export async function getTopSessionsPerChallenge(
+  challengeIds: string[],
+  limitPerChallenge = 10
+): Promise<LeaderboardSession[]> {
+  if (challengeIds.length === 0) return [];
+
+  const result = await query<LeaderboardSession>(
+    `SELECT sub.id, sub.user_id, sub.challenge_id, sub.device_id,
+            sub.warmup_started_at, sub.warmup_completed_at,
+            sub.challenge_started_at, sub.challenge_ended_at,
+            sub.round_1_score, sub.round_2_score, sub.round_3_score,
+            sub.total_score, sub.flagged, sub.flag_reasons,
+            sub.is_practice, sub.created_at,
+            sub.username, sub.avatar_url, sub.stellar_address
+     FROM (
+       SELECT gs.*,
+              u.email        AS username,
+              u.avatar_url,
+              COALESCE(
+                NULLIF(to_jsonb(u) ->> 'embedded_wallet_address', ''),
+                NULLIF(to_jsonb(u) ->> 'stellar_address', '')
+              ) AS stellar_address,
+              ROW_NUMBER() OVER (
+                PARTITION BY gs.challenge_id
+                ORDER BY gs.total_score DESC, gs.challenge_ended_at ASC
+              ) AS rn
+       FROM game_sessions gs
+       JOIN users u ON gs.user_id = u.id
+       WHERE gs.challenge_id = ANY($1::uuid[])
+         AND gs.flagged = FALSE
+         AND gs.is_practice = FALSE
+     ) sub
+     WHERE sub.rn <= $2
+     ORDER BY sub.challenge_id, sub.total_score DESC, sub.challenge_ended_at ASC`,
+    [challengeIds, limitPerChallenge]
+  );
+  return result.rows;
+}
