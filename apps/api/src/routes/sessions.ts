@@ -25,7 +25,7 @@ import { WARMUP_MIN_SECONDS } from "@brandblitz/stellar";
 const router = Router();
 
 const AnswerSchema = z.object({
-  selectedOption: z.enum(["A", "B", "C", "D"]),
+  selectedOption: z.enum(["A", "B", "C", "D"]).nullable(),
   reactionTimeMs: z.number().int().min(0),
 });
 

@@ -139,6 +139,33 @@ describe("Sessions API", () => {
       expect(sessionQueries.recordRoundScore).toHaveBeenCalledWith("s1", 1, 100);
     });
 
+    it("should accept timeout answer and score 0", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.getSession as any).mockResolvedValue({
+        id: "s1",
+        user_id: "user123",
+        challenge_started_at: new Date(),
+      });
+      (challengeQueries.getChallengeQuestions as any).mockResolvedValue([
+        { round: 1, correct_option: "A" },
+      ]);
+      (scoringService.calculateRoundScore as any).mockReturnValue(0);
+      (scoringService.validateAnswer as any).mockReturnValue(false);
+
+      const res = await request(app)
+        .post("/sessions/c1/answer/1")
+        .send({ selectedOption: null, reactionTimeMs: 15000 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.score).toBe(0);
+      expect(sessionQueries.recordRoundScore).toHaveBeenCalledWith("s1", 1, 0);
+      expect(scoringService.calculateRoundScore).toHaveBeenCalledWith({
+        selectedOption: null,
+        correctOption: "A",
+        reactionTimeMs: 15000,
+      });
+    });
+
     it("should finalize session on round 3", async () => {
       (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
       (sessionQueries.getSession as any).mockResolvedValue({

@@ -10,7 +10,7 @@ import type { ChallengeQuestion } from "@/lib/api";
 interface ChallengeRoundProps {
   question: ChallengeQuestion;
   round: 1 | 2 | 3;
-  onAnswer: (option: "A" | "B" | "C" | "D", reactionTimeMs: number) => void;
+  onAnswer: (option: "A" | "B" | "C" | "D" | null, reactionTimeMs: number) => void;
   brandLogoUrl?: string;
   brandProductImageUrl?: string;
 }
@@ -44,9 +44,9 @@ export function ChallengeRound({
 
   const handleTimeExpire = () => {
     if (!answered) {
-      // Submit null answer — server records 0 score
       const reactionTimeMs = ROUND_SECONDS * 1000;
-      onAnswer("A", reactionTimeMs); // forced answer on expire
+      setAnswered(true);
+      onAnswer(null, reactionTimeMs);
     }
   };
 

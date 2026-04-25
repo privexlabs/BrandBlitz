@@ -60,7 +60,7 @@ export default function ChallengePage({ params }: PageProps) {
     setCurrentRound(1);
   };
 
-  const handleAnswer = async (option: "A" | "B" | "C" | "D", reactionTimeMs: number) => {
+  const handleAnswer = async (option: "A" | "B" | "C" | "D" | null, reactionTimeMs: number) => {
     const apiToken = (session as any)?.apiToken as string;
     const api = createApiClient(apiToken);
 

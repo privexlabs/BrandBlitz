@@ -13,7 +13,7 @@ const ROUND_DURATION_MS = 15_000;
  * Max per round: 150. Max total: 450.
  */
 export function calculateRoundScore(params: {
-  selectedOption: "A" | "B" | "C" | "D";
+  selectedOption: "A" | "B" | "C" | "D" | null;
   correctOption: "A" | "B" | "C" | "D";
   reactionTimeMs: number;
 }): number {
@@ -33,7 +33,7 @@ export function calculateRoundScore(params: {
  */
 export function validateAnswer(
   question: ChallengeQuestion,
-  selectedOption: "A" | "B" | "C" | "D"
+  selectedOption: "A" | "B" | "C" | "D" | null
 ): boolean {
   return question.correct_option === selectedOption;
 }
