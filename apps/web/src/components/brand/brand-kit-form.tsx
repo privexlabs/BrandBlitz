@@ -231,7 +231,7 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
           <h2 className="font-semibold text-lg">Brand Assets</h2>
 
           <div className="space-y-2">
-            <Label>Logo *</Label>
+            <Label>Logo</Label>
             <UploadField
               label="Upload Brand Logo"
               accept="image/png,image/svg+xml,image/jpeg,image/webp"
