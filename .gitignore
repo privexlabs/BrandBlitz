@@ -45,3 +45,5 @@ data/
 
 # Type-checked output
 *.tsbuildinfo
+
+fix.md
