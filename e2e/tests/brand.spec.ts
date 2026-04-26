@@ -25,3 +25,32 @@ test("brand can create a brand kit and see deposit instructions", async ({ page 
   await expect(page.getByText(/Address:/)).toBeVisible();
   await expect(page.getByText(/Memo:/)).toBeVisible();
 });
+
+test("submit button only fires one POST request on double-click", async ({ page, request }) => {
+  const posts: string[] = [];
+  request.on("request", (msg) => {
+    if (msg.method() === "POST") {
+      posts.push(msg.url());
+    }
+  });
+
+  await signInWithMockGoogle(
+    page,
+    { email: "doubleclick@example.com", name: "Double Click" },
+    "/brand/new"
+  );
+
+  await page.waitForURL("**/brand/new");
+
+  await page.getByLabel("Brand Name *").fill("Test Brand");
+  await page.getByLabel("Prize Pool (USDC) *").fill("50");
+
+  const submitBtn = page.getByRole("button", { name: "Create Brand Kit & Challenge" });
+  await submitBtn.dblclick();
+
+  await page.waitForURL("**/brand/*");
+  await expect(page.getByRole("heading", { name: "Deposit Instructions" })).toBeVisible();
+
+  const brandPosts = posts.filter((p) => p.includes("/brands"));
+  expect(brandPosts).toHaveLength(1);
+});

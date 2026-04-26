@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { UploadField } from "./upload-field";
+import { useSubmitting } from "@/hooks/use-submitting";
 
 interface BrandKitFormProps {
   apiToken: string;
@@ -17,7 +18,7 @@ const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/;
 
 export function BrandKitForm({ apiToken }: BrandKitFormProps) {
   const router = useRouter();
-  const [submitting, setSubmitting] = useState(false);
+  const { submitting, wrap, setSubmitting } = useSubmitting();
   const [error, setError] = useState<string | null>(null);
 
   const [fields, setFields] = useState({
@@ -57,69 +58,64 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
       return;
     }
 
-    setSubmitting(true);
     setError(null);
 
     try {
-      const api = createApiClient(apiToken);
-      const [productImage1Key, productImage2Key] = productImageKeys;
+      await wrap(async () => {
+        const api = createApiClient(apiToken);
+        const [productImage1Key, productImage2Key] = productImageKeys;
 
-      // 1. Create brand kit
-      const brandRes = await api.post("/brands", {
-        name: fields.name,
-        tagline: fields.tagline,
-        brandStory: fields.description,
-        primaryColor: fields.primaryColor,
-        secondaryColor: fields.secondaryColor,
-        logoKey,
-        usp: fields.tagline || undefined,
-        productImage1Key: productImageKeys[0],
-        productImage2Key: productImageKeys[1],
-        brandStory: fields.brandStory,
-        primaryColor: fields.primaryColor,
-        secondaryColor: fields.secondaryColor,
-        logoKey,
-        productImage1Key,
-        productImage2Key,
+        const brandRes = await api.post("/brands", {
+          name: fields.name,
+          tagline: fields.tagline,
+          brandStory: fields.description,
+          primaryColor: fields.primaryColor,
+          secondaryColor: fields.secondaryColor,
+          logoKey,
+          usp: fields.tagline || undefined,
+          productImage1Key: productImageKeys[0],
+          productImage2Key: productImageKeys[1],
+          brandStory: fields.brandStory,
+          primaryColor: fields.primaryColor,
+          secondaryColor: fields.secondaryColor,
+          logoKey,
+          productImage1Key,
+          productImage2Key,
+        });
+
+        const brandId = brandRes.data.brand.id;
+        const parsedDurationHours = Number.parseInt(fields.durationHours, 10);
+        const durationHours = Number.isFinite(parsedDurationHours) && parsedDurationHours > 0
+          ? parsedDurationHours
+          : 72;
+        const endsAt = new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
+
+        const challengeRes = await api.post("/brands/challenges", {
+          brandId,
+          poolAmountUsdc: fields.poolAmountUsdc,
+          endsAt: new Date(
+            Date.now() + parseInt(fields.durationHours, 10) * 60 * 60 * 1000
+          ).toISOString(),
+        });
+
+        const { depositInstructions } = challengeRes.data;
+
+        router.push(
+          `/brand/${brandId}?depositAddress=${encodeURIComponent(
+            depositInstructions.hotWalletAddress
+          )}&memo=${encodeURIComponent(depositInstructions.memo)}&amount=${encodeURIComponent(
+            depositInstructions.amount
+          )}`
+        );
+
+        const { hotWalletAddress, memo } = challengeRes.data.depositInstructions;
+
+        router.push(
+          `/brand/${brandId}?depositAddress=${encodeURIComponent(hotWalletAddress ?? "")}&memo=${encodeURIComponent(memo ?? "")}`
+        );
       });
-
-      const brandId = brandRes.data.brand.id;
-      const parsedDurationHours = Number.parseInt(fields.durationHours, 10);
-      const durationHours = Number.isFinite(parsedDurationHours) && parsedDurationHours > 0
-        ? parsedDurationHours
-        : 72;
-      const endsAt = new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
-
-      // 2. Create challenge
-      const challengeRes = await api.post("/brands/challenges", {
-        brandId,
-        poolAmountUsdc: fields.poolAmountUsdc,
-        endsAt: new Date(
-          Date.now() + parseInt(fields.durationHours, 10) * 60 * 60 * 1000
-        ).toISOString(),
-      });
-
-      const { depositInstructions } = challengeRes.data;
-
-      // Redirect to brand page to show deposit instructions
-      router.push(
-        `/brand/${brandId}?depositAddress=${encodeURIComponent(
-          depositInstructions.hotWalletAddress
-        )}&memo=${encodeURIComponent(depositInstructions.memo)}&amount=${encodeURIComponent(
-          depositInstructions.amount
-        )}`
-        endsAt,
-      });
-
-      const { hotWalletAddress, memo } = challengeRes.data.depositInstructions;
-
-      // Redirect to brand page to show deposit instructions
-      router.push(
-        `/brand/${brandId}?depositAddress=${encodeURIComponent(hotWalletAddress ?? "")}&memo=${encodeURIComponent(memo ?? "")}`
-      );
     } catch (err: any) {
       setError(err?.response?.data?.message ?? "Failed to create brand. Please try again.");
-      setSubmitting(false);
     }
   };
 

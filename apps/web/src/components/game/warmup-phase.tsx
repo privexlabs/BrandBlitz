@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { CountdownTimer } from "./countdown-timer";
 import { WARMUP_MIN_SECONDS } from "./constants";
 import { createApiClient } from "@/lib/api";
+import { useSubmitting } from "@/hooks/use-submitting";
 import type { Challenge } from "@/lib/api";
 
 interface WarmupPhaseProps {
@@ -16,7 +17,7 @@ interface WarmupPhaseProps {
 
 export function WarmupPhase({ challenge, apiToken, onComplete }: WarmupPhaseProps) {
   const [unlocked, setUnlocked] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const { submitting, wrap } = useSubmitting();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [showRetry, setShowRetry] = useState(false);
 
@@ -27,33 +28,31 @@ export function WarmupPhase({ challenge, apiToken, onComplete }: WarmupPhaseProp
   }, []);
 
   const handleStartChallenge = async () => {
-    setLoading(true);
     setStatusMessage(null);
     setShowRetry(false);
 
     try {
-      // Notify API that warmup completed — receive challenge token
-      const api = createApiClient(apiToken);
-      const res = await api.post(`/sessions/${challenge.id}/warmup-complete`);
-      const data = res.data;
+      await wrap(async () => {
+        const api = createApiClient(apiToken);
+        const res = await api.post(`/sessions/${challenge.id}/warmup-complete`);
+        const data = res.data;
 
-      if (!data?.challengeToken) {
-        throw new Error("Missing challenge token");
-      }
+        if (!data?.challengeToken) {
+          throw new Error("Missing challenge token");
+        }
 
-      onComplete(data.challengeToken);
+        onComplete(data.challengeToken);
+      });
     } catch (error: any) {
       if (error?.response?.status === 400 && typeof error?.response?.data?.remainingMs === "number") {
         setStatusMessage(
           `Not yet ready. Please wait ${Math.ceil(error.response.data.remainingMs / 1000)} more seconds and try again.`
         );
-        setLoading(false);
         return;
       }
 
       setStatusMessage("Couldn't start the challenge. Check your connection and try again.");
       setShowRetry(true);
-      setLoading(false);
     }
   };
 
@@ -109,12 +108,12 @@ export function WarmupPhase({ challenge, apiToken, onComplete }: WarmupPhaseProp
         {/* Start button — unlocked after minimum warmup */}
         <Button
           onClick={handleStartChallenge}
-          disabled={!unlocked || loading}
+          disabled={!unlocked || submitting}
           size="lg"
           className="w-full text-lg"
           style={{ backgroundColor: challenge.primary_color ?? undefined }}
         >
-          {loading ? "Starting..." : unlocked ? "Start Challenge →" : "Preparing..."}
+          {submitting ? "Starting..." : unlocked ? "Start Challenge →" : "Preparing..."}
         </Button>
 
         {statusMessage ? (
@@ -126,7 +125,7 @@ export function WarmupPhase({ challenge, apiToken, onComplete }: WarmupPhaseProp
         {showRetry ? (
           <Button
             onClick={handleStartChallenge}
-            disabled={loading}
+            disabled={submitting}
             variant="outline"
             className="w-full"
           >
