@@ -43,10 +43,13 @@ export async function updatePayoutStatus(
   }
 }
 
-export async function getPendingPayouts(challengeId: string): Promise<Payout[]> {
+export async function getPendingPayouts(
+  challengeId: string,
+  limit = 100
+): Promise<Payout[]> {
   const result = await query<Payout>(
-    "SELECT * FROM payouts WHERE challenge_id = $1 AND status = 'pending'",
-    [challengeId]
+    "SELECT * FROM payouts WHERE challenge_id = $1 AND status = 'pending' ORDER BY created_at ASC LIMIT $2",
+    [challengeId, limit]
   );
   return result.rows;
 }
