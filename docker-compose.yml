@@ -58,6 +58,7 @@ services:
     restart: on-failure
 
   api:
+    image: ${IMAGE_REGISTRY:-ghcr.io/privexlabs}/brandblitz-api:${APP_VERSION:-dev}
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -98,6 +99,7 @@ services:
         condition: service_healthy
 
   worker:
+    image: ${IMAGE_REGISTRY:-ghcr.io/privexlabs}/brandblitz-worker:${APP_VERSION:-dev}
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -127,6 +129,7 @@ services:
         condition: service_healthy
 
   web:
+    image: ${IMAGE_REGISTRY:-ghcr.io/privexlabs}/brandblitz-web:${APP_VERSION:-dev}
     build:
       context: .
       dockerfile: apps/web/Dockerfile

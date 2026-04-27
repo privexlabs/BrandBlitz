@@ -5,8 +5,10 @@ import {
   createBrand,
   getBrandsByOwner,
   getBrandById,
+  getBrandMetaById,
   getActiveDistractorBrands,
   updateBrand,
+  deleteBrand,
 } from "../db/queries/brands";
 import {
   createChallenge,
@@ -57,6 +59,21 @@ router.get("/:id", authenticate, async (req, res) => {
   if (!brand) throw createError("Brand not found", 404);
   if (brand.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
   res.json({ brand });
+});
+
+/**
+ * DELETE /brands/:id
+ * Soft-delete a brand kit (prevents new activity; existing challenges continue).
+ */
+router.delete("/:id", authenticate, async (req, res) => {
+  const meta = await getBrandMetaById(req.params.id);
+  if (!meta || meta.deleted_at) throw createError("Brand not found", 404);
+  if (meta.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
+
+  const deleted = await deleteBrand(req.params.id, req.user!.sub);
+  if (!deleted) throw createError("Brand not found", 404);
+
+  res.status(204).send();
 });
 
 /**

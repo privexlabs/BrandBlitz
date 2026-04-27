@@ -9,6 +9,7 @@ import { apiLimiter } from "./middleware/rate-limit";
 import { connectDb, closeDb } from "./db";
 import { connectRedis, redis } from "./lib/redis";
 import { payoutQueue } from "./queues/payout.queue";
+import { leagueQueue } from "./queues/league.queue";
 import { logger } from "./lib/logger";
 import { config } from "./lib/config";
 
@@ -65,6 +66,7 @@ async function start(): Promise<void> {
     server.close(async () => {
       try {
         await payoutQueue.close();
+        await leagueQueue.close();
         await closeDb();
         await redis.disconnect();
         logger.info("Shutdown complete");

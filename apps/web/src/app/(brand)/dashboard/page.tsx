@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [brands, setBrands] = useState<BrandWithChallenges[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingBrandId, setDeletingBrandId] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -46,6 +47,23 @@ export default function DashboardPage() {
       .catch(() => setBrands([]))
       .finally(() => setLoading(false));
   }, [session, status, router]);
+
+  async function handleDeleteBrand(brand: BrandWithChallenges) {
+    if (deletingBrandId) return;
+    const ok = window.confirm(`Delete "${brand.name}"? This can’t be undone.`);
+    if (!ok) return;
+
+    setDeletingBrandId(brand.id);
+    try {
+      const api = createApiClient((session as any).apiToken);
+      await api.delete(`/brands/${brand.id}`);
+      setBrands((prev) => prev.filter((b) => b.id !== brand.id));
+    } catch {
+      // Best-effort UI: keep state if request fails.
+    } finally {
+      setDeletingBrandId(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -113,6 +131,14 @@ export default function DashboardPage() {
                     <Link href={`/brand/${brand.id}/challenge/new`}>
                       <Button size="sm">Launch Challenge</Button>
                     </Link>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={deletingBrandId === brand.id}
+                      onClick={() => handleDeleteBrand(brand)}
+                    >
+                      {deletingBrandId === brand.id ? "Deleting..." : "Delete"}
+                    </Button>
                   </div>
                 </div>
               </CardHeader>

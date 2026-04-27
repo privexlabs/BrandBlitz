@@ -12,6 +12,7 @@ export interface Brand {
   usp: string | null;
   product_image_1_url: string | null;
   product_image_2_url: string | null;
+  deleted_at?: string | null;
   created_at: string;
 }
 
@@ -40,14 +41,24 @@ export async function createBrand(data: Omit<Brand, "id" | "created_at">): Promi
 
 export async function getBrandsByOwner(ownerUserId: string): Promise<Brand[]> {
   const result = await query<Brand>(
-    "SELECT * FROM brands WHERE owner_user_id = $1 ORDER BY created_at DESC",
+    "SELECT * FROM brands WHERE owner_user_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
     [ownerUserId]
   );
   return result.rows;
 }
 
 export async function getBrandById(id: string): Promise<Brand | null> {
-  const result = await query<Brand>("SELECT * FROM brands WHERE id = $1", [id]);
+  const result = await query<Brand>("SELECT * FROM brands WHERE id = $1 AND deleted_at IS NULL", [id]);
+  return result.rows[0] ?? null;
+}
+
+export async function getBrandMetaById(
+  id: string
+): Promise<Pick<Brand, "id" | "owner_user_id" | "deleted_at"> | null> {
+  const result = await query<Pick<Brand, "id" | "owner_user_id" | "deleted_at">>(
+    "SELECT id, owner_user_id, deleted_at FROM brands WHERE id = $1",
+    [id]
+  );
   return result.rows[0] ?? null;
 }
 
@@ -59,7 +70,7 @@ export async function getActiveDistractorBrands(excludeBrandId: string): Promise
   const result = await query<Brand>(
     `SELECT *
      FROM brands
-     WHERE id <> $1
+     WHERE id <> $1 AND deleted_at IS NULL
      ORDER BY created_at DESC
      LIMIT 20`,
     [excludeBrandId]
@@ -89,7 +100,7 @@ export async function updateBrand(
 
 export async function deleteBrand(id: string, ownerUserId: string): Promise<boolean> {
   const result = await query(
-    "DELETE FROM brands WHERE id = $1 AND owner_user_id = $2 RETURNING id",
+    "UPDATE brands SET deleted_at = NOW() WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL RETURNING id",
     [id, ownerUserId]
   );
   return (result.rowCount ?? 0) > 0;

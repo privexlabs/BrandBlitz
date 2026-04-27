@@ -56,11 +56,13 @@ CREATE TABLE brands (
   product_image_2_url TEXT,
   primary_color       TEXT DEFAULT '#6366f1',
   secondary_color     TEXT DEFAULT '#a5b4fc',
+  deleted_at          TIMESTAMPTZ,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_brands_owner_user_id ON brands (owner_user_id);
+CREATE INDEX idx_brands_deleted_at    ON brands (deleted_at);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- CHALLENGES
@@ -209,12 +211,16 @@ CREATE TABLE league_assignments (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   league       TEXT NOT NULL CHECK (league IN ('bronze', 'silver', 'gold')),
+  group_id     INTEGER NOT NULL,
   week_start   DATE NOT NULL,
-  score        BIGINT NOT NULL DEFAULT 0,
+  weekly_points BIGINT NOT NULL DEFAULT 0,
+  rank_in_group INTEGER,
+  promoted    BOOLEAN NOT NULL DEFAULT FALSE,
+  demoted     BOOLEAN NOT NULL DEFAULT FALSE,
   UNIQUE (user_id, week_start)
 );
 
-CREATE INDEX idx_league_assignments_week ON league_assignments (week_start, league, score DESC);
+CREATE INDEX idx_league_assignments_week ON league_assignments (week_start, league, group_id, weekly_points DESC);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- USER BADGES

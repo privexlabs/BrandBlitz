@@ -2,6 +2,8 @@ import "dotenv/config";
 import { connectDb, closeDb } from "./db";
 import { connectRedis, redis } from "./lib/redis";
 import { createPayoutWorker } from "./queues/processors/payout.processor";
+import { createLeagueWorker } from "./queues/processors/league.processor";
+import { ensureLeagueRepeatableJobs } from "./queues/league.queue";
 import { logger } from "./lib/logger";
 
 async function startWorker(): Promise<void> {
@@ -9,11 +11,14 @@ async function startWorker(): Promise<void> {
   await connectRedis();
 
   const payoutWorker = createPayoutWorker();
-  logger.info("BullMQ worker started — processing payout jobs");
+  const leagueWorker = createLeagueWorker();
+  await ensureLeagueRepeatableJobs();
+  logger.info("BullMQ worker started — processing payout + league jobs");
 
   const shutdown = async (signal: string) => {
     logger.info(`${signal} received — closing worker`);
     await payoutWorker.close();
+    await leagueWorker.close();
     await closeDb();
     await redis.disconnect();
     logger.info("Worker shutdown complete");
