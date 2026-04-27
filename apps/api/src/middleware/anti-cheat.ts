@@ -3,8 +3,10 @@ import { redis } from "../lib/redis";
 import { createFraudFlag } from "../db/queries/fraud-flags";
 import { getSession } from "../db/queries/sessions";
 import { logger } from "../lib/logger";
+import { metrics } from "../lib/metrics";
 import { createError } from "./error";
 
+export const BOT_REACTION_THRESHOLD_MS = 80;
 export const MIN_HUMAN_REACTION_MS = 150;
 export const MAX_HUMAN_REACTION_MS = 30_000;
 
@@ -37,6 +39,9 @@ async function recordFraudFlag(
   if (!sessionId) return;
 
   await createFraudFlag({ sessionId, userId, flagType, details });
+
+  const severity = (details?.severity as string) || "warning";
+  metrics.inc("antiCheat.flags_total", { severity, type: flagType });
 }
 
 /**
@@ -56,18 +61,25 @@ export async function validateReactionTime(
     return;
   }
 
+  if (reactionTimeMs < BOT_REACTION_THRESHOLD_MS) {
+    await recordFraudFlag(req, "reaction_time_bot_threshold", {
+      reactionTimeMs,
+      severity: "critical",
+    }).catch(() => {});
+    throw createError("Reaction time impossible for humans", 403, "REACTION_IMPOSSIBLE");
+  }
+
   if (reactionTimeMs < MIN_HUMAN_REACTION_MS) {
     await recordFraudFlag(req, "reaction_time_below_minimum", {
       reactionTimeMs,
-      minimumAllowedMs: MIN_HUMAN_REACTION_MS,
+      severity: "warning",
     }).catch(() => {});
-    throw createError("Reaction time below minimum threshold", 403, "REACTION_TOO_FAST");
   }
 
   if (reactionTimeMs > MAX_HUMAN_REACTION_MS) {
     await recordFraudFlag(req, "reaction_time_above_maximum", {
       reactionTimeMs,
-      maximumAllowedMs: MAX_HUMAN_REACTION_MS,
+      severity: "info",
     }).catch(() => {});
   }
 
@@ -144,6 +156,7 @@ export async function validateDeviceFingerprint(
         deviceId,
         accountCount: count,
         windowSeconds: 86400,
+        severity: "warning",
       }).catch(() => {});
     }
   } catch (error) {
