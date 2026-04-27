@@ -3,6 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatScore, formatUsdc } from "@/lib/utils";
 import type { LeaderboardEntry } from "@/lib/api";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import Image from "next/image";
 
 async function getGlobalLeaderboard(): Promise<LeaderboardEntry[]> {
   try {
@@ -29,7 +33,17 @@ export default async function LeaderboardPage() {
         </CardHeader>
         <CardContent className="p-0">
           {entries.length === 0 ? (
-            <p className="p-6 text-[var(--muted-foreground)]">No entries yet.</p>
+            <div className="p-6">
+              <EmptyState
+                title="No games played yet"
+                description="Be the first to climb the leaderboard."
+                action={
+                  <Link href="/challenge">
+                    <Button>Browse Challenges</Button>
+                  </Link>
+                }
+              />
+            </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -60,10 +74,12 @@ export default async function LeaderboardPage() {
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         {entry.avatarUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
+                          <Image
                             src={entry.avatarUrl}
                             alt={entry.displayName}
+                            width={32}
+                            height={32}
+                            sizes="32px"
                             className="h-8 w-8 rounded-full object-cover"
                           />
                         ) : (

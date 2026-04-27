@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Image from "next/image";
 import { createApiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -76,8 +77,7 @@ export function UploadField({
       const { uploadUrl, key, publicUrl } = presignRes.data;
 
       // 2. Upload directly to S3/MinIO
-      await fetch(uploadUrl, {
-      const putRes = await fetch(presignedUrl, {
+      const putRes = await fetch(uploadUrl, {
         method: "PUT",
         body: file,
         headers: { "Content-Type": file.type },
@@ -115,8 +115,14 @@ export function UploadField({
 
       {uploadedUrl ? (
         <div className="flex items-center gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={uploadedUrl} alt={label} className="h-16 w-16 object-contain rounded-lg border border-[var(--border)]" />
+          <Image
+            src={uploadedUrl}
+            alt={label}
+            width={64}
+            height={64}
+            sizes="64px"
+            className="h-16 w-16 rounded-lg border border-[var(--border)] object-contain"
+          />
           <div>
             <p className="text-sm font-medium text-green-600">Uploaded</p>
             <Button

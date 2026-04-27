@@ -3,6 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatScore, formatUsdc } from "@/lib/utils";
 import { notFound } from "next/navigation";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import Image from "next/image";
 
 interface ProfilePageProps {
   params: Promise<{ username: string }>;
@@ -28,10 +32,12 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
       {/* Profile header */}
       <div className="flex items-center gap-6 mb-10">
         {user.avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={user.avatarUrl}
             alt={user.displayName}
+            width={80}
+            height={80}
+            sizes="80px"
             className="h-20 w-20 rounded-full object-cover"
           />
         ) : (
@@ -67,7 +73,7 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
       </div>
 
       {/* Recent activity */}
-      {user.recentSessions?.length > 0 && (
+      {user.recentSessions?.length > 0 ? (
         <Card>
           <CardHeader>
             <CardTitle>Recent Challenges</CardTitle>
@@ -99,6 +105,16 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
             </table>
           </CardContent>
         </Card>
+      ) : (
+        <EmptyState
+          title="No history yet"
+          description="Play a challenge to start building your stats."
+          action={
+            <Link href="/challenge">
+              <Button>Browse Challenges</Button>
+            </Link>
+          }
+        />
       )}
     </main>
   );

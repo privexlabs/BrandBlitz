@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { CountdownTimer } from "./countdown-timer";
 import { cn } from "@/lib/utils";
@@ -72,21 +73,25 @@ export function ChallengeRound({
       {/* Prompt image */}
       {(question.prompt_type === "logo" && brandLogoUrl) && (
         <div className="flex justify-center py-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <Image
             src={brandLogoUrl}
             alt="Brand prompt"
-            className="h-24 object-contain"
+            width={320}
+            height={96}
+            sizes="320px"
+            className="h-24 w-auto object-contain"
           />
         </div>
       )}
       {(question.prompt_type === "productImage1" && brandProductImageUrl) && (
         <div className="flex justify-center py-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <Image
             src={brandProductImageUrl}
             alt="Product prompt"
-            className="h-40 object-contain rounded-lg"
+            width={480}
+            height={320}
+            sizes="480px"
+            className="h-40 w-auto rounded-lg object-contain"
           />
         </div>
       )}

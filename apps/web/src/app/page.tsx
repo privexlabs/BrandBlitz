@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -67,8 +68,14 @@ export default async function HomePage() {
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     {c.logo_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={c.logo_url} alt={c.brand_name} className="h-12 object-contain" />
+                      <Image
+                        src={c.logo_url}
+                        alt={c.brand_name}
+                        width={160}
+                        height={48}
+                        sizes="160px"
+                        className="h-12 w-auto object-contain"
+                      />
                     ) : (
                       <div
                         className="h-12 w-12 rounded-lg"

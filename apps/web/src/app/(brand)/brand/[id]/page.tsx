@@ -4,11 +4,13 @@ import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { createApiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatScore, formatUsdc } from "@/lib/utils";
 import type { LeaderboardEntry } from "@/lib/api";
+import { EmptyState } from "@/components/ui/empty-state";
 
 function normalizeBrand(brand: any) {
   if (!brand) return null;
@@ -96,8 +98,14 @@ export default function BrandAnalyticsPage() {
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
           {brand.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={brand.logoUrl} alt={brand.name} className="h-16 object-contain" />
+            <Image
+              src={brand.logoUrl}
+              alt={brand.name}
+              width={200}
+              height={64}
+              sizes="200px"
+              className="h-16 w-auto object-contain"
+            />
           ) : (
             <div
               className="h-16 w-16 rounded-xl"
@@ -187,14 +195,15 @@ export default function BrandAnalyticsPage() {
       )}
 
       {!challenge && (
-        <Card className="text-center py-12">
-          <CardContent>
-            <p className="text-[var(--muted-foreground)] mb-4">No active challenge for this brand.</p>
+        <EmptyState
+          title="This brand has no challenges yet"
+          description="Launch your first challenge to start attracting players and tracking performance."
+          action={
             <Link href={`/brand/${brandId}/challenge/new`}>
               <Button>Launch a Challenge</Button>
             </Link>
-          </CardContent>
-        </Card>
+          }
+        />
       )}
     </main>
   );

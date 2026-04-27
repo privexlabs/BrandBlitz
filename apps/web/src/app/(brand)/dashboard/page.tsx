@@ -4,11 +4,13 @@ import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { createApiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatUsdc } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface BrandWithChallenges {
   id: string;
@@ -66,16 +68,15 @@ export default function DashboardPage() {
       </div>
 
       {brands.length === 0 ? (
-        <Card className="text-center py-16">
-          <CardContent>
-            <p className="text-[var(--muted-foreground)] mb-4">
-              No brands yet. Create your first brand kit to launch a challenge.
-            </p>
+        <EmptyState
+          title="Create your first brand"
+          description="Set up a brand kit and launch your first challenge in minutes."
+          action={
             <Link href="/brand/new">
               <Button>Create Brand Kit</Button>
             </Link>
-          </CardContent>
-        </Card>
+          }
+        />
       ) : (
         <div className="space-y-6">
           {brands.map((brand) => (
@@ -84,11 +85,13 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     {brand.logoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
+                      <Image
                         src={brand.logoUrl}
                         alt={brand.name}
-                        className="h-12 object-contain"
+                        width={160}
+                        height={48}
+                        sizes="160px"
+                        className="h-12 w-auto object-contain"
                       />
                     ) : (
                       <div
