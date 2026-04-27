@@ -31,6 +31,9 @@ export interface RoundScore {
 export interface LeaderboardSession extends GameSession {
   username: string;
   avatar_url: string;
+  display_name: string;
+  league: "bronze" | "silver" | "gold" | null;
+  total_earned_usdc: string;
   stellar_address: string | null;
 }
 
@@ -158,6 +161,9 @@ export async function getLeaderboard(
     `SELECT gs.*,
             u.email AS username,
             u.avatar_url,
+            u.display_name,
+            u.league,
+            u.total_earned_usdc,
             COALESCE(
               NULLIF(to_jsonb(u) ->> 'embedded_wallet_address', ''),
               NULLIF(to_jsonb(u) ->> 'stellar_address', '')
@@ -187,11 +193,14 @@ export async function getTopSessionsPerChallenge(
             sub.round_1_score, sub.round_2_score, sub.round_3_score,
             sub.total_score, sub.flagged, sub.flag_reasons,
             sub.is_practice, sub.created_at,
-            sub.username, sub.avatar_url, sub.stellar_address
+            sub.username, sub.avatar_url, sub.display_name, sub.league, sub.total_earned_usdc, sub.stellar_address
      FROM (
        SELECT gs.*,
               u.email        AS username,
               u.avatar_url,
+              u.display_name,
+              u.league,
+              u.total_earned_usdc,
               COALESCE(
                 NULLIF(to_jsonb(u) ->> 'embedded_wallet_address', ''),
                 NULLIF(to_jsonb(u) ->> 'stellar_address', '')

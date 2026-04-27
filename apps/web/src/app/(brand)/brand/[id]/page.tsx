@@ -8,9 +8,10 @@ import Image from "next/image";
 import { createApiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatScore, formatUsdc } from "@/lib/utils";
+import { formatUsdc } from "@/lib/utils";
 import type { LeaderboardEntry } from "@/lib/api";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LiveChallengeLeaderboard } from "@/components/leaderboard/live-challenge-leaderboard";
 
 function normalizeBrand(brand: any) {
   if (!brand) return null;
@@ -161,33 +162,11 @@ export default function BrandAnalyticsPage() {
                 <CardTitle>Current Leaderboard</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-[var(--border)]">
-                      <th className="text-left px-6 py-3 text-[var(--muted-foreground)]">Rank</th>
-                      <th className="text-left px-6 py-3 text-[var(--muted-foreground)]">Player</th>
-                      <th className="text-right px-6 py-3 text-[var(--muted-foreground)]">Score</th>
-                      <th className="text-right px-6 py-3 text-[var(--muted-foreground)]">Est. Payout</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {leaderboard.slice(0, 10).map((entry) => (
-                      <tr
-                        key={`${entry.rank}-${entry.username}`}
-                        className="border-b border-[var(--border)] last:border-0"
-                      >
-                        <td className="px-6 py-3 font-bold">#{entry.rank}</td>
-                        <td className="px-6 py-3">{entry.username}</td>
-                        <td className="px-6 py-3 text-right font-mono">
-                          {formatScore(entry.totalScore)}
-                        </td>
-                        <td className="px-6 py-3 text-right text-green-600">
-                          {"—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <LiveChallengeLeaderboard
+                  key={challenge.id}
+                  challengeId={challenge.id}
+                  initial={leaderboard}
+                />
               </CardContent>
             </Card>
           )}

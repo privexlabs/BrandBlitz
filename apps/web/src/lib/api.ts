@@ -47,9 +47,13 @@ export interface ChallengeQuestion {
 
 export interface LeaderboardEntry {
   rank: number;
+  userId?: string;
   username: string;
+  displayName?: string;
+  league?: "bronze" | "silver" | "gold" | null;
   avatarUrl: string | null;
   totalScore: number;
+  totalEarned?: string;
   endedAt: string | null;
 }
 

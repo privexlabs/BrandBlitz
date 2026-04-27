@@ -76,9 +76,13 @@ router.get("/:id/leaderboard", async (req, res) => {
     challengeId: challenge.id,
     sessions: sessions.map((s, i) => ({
       rank: offset + i + 1,
+      userId: s.user_id,
       username: s.username,
+      displayName: s.display_name,
+      league: s.league,
       avatarUrl: s.avatar_url,
       totalScore: s.total_score,
+      totalEarned: s.total_earned_usdc,
       endedAt: s.completed_at,
     })),
   });

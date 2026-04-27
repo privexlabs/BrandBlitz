@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useSession, signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "./theme-toggle";
 
 export function Header() {
   const { data: session, status } = useSession();
@@ -39,6 +40,7 @@ export function Header() {
         </nav>
 
         <div className="flex items-center gap-3">
+          <ThemeToggle />
           {status === "loading" ? null : session ? (
             <div className="flex items-center gap-3">
               {session.user?.image ? (
