@@ -110,6 +110,7 @@ CREATE TABLE challenge_questions (
   option_d         TEXT NOT NULL,
   correct_option   CHAR(1) NOT NULL CHECK (correct_option IN ('A', 'B', 'C', 'D')),
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (challenge_id, round)
 );
 
@@ -146,6 +147,7 @@ CREATE TABLE game_sessions (
   flag_reasons          TEXT[]  NOT NULL DEFAULT '{}',
   fraud_flags           TEXT[]  NOT NULL DEFAULT '{}',
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, challenge_id)
 );
 
@@ -198,7 +200,9 @@ CREATE TABLE fraud_flags (
   user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   flag_type    TEXT NOT NULL,
   details      JSONB,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (session_id, flag_type)
 );
 
 CREATE INDEX idx_fraud_flags_user_id    ON fraud_flags (user_id);
@@ -217,6 +221,8 @@ CREATE TABLE league_assignments (
   rank_in_group INTEGER,
   promoted    BOOLEAN NOT NULL DEFAULT FALSE,
   demoted     BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, week_start)
 );
 
@@ -229,6 +235,8 @@ CREATE TABLE user_badges (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   badge_slug  TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   awarded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, badge_slug)
 );
@@ -243,7 +251,8 @@ CREATE TABLE referrals (
   referrer_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   referred_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE UNIQUE,
   rewarded     BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_referrals_referrer_id ON referrals (referrer_id);
@@ -259,7 +268,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER users_updated_at     BEFORE UPDATE ON users      FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER brands_updated_at    BEFORE UPDATE ON brands     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER challenges_updated_at BEFORE UPDATE ON challenges FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER payouts_updated_at   BEFORE UPDATE ON payouts    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER users_updated_at           BEFORE UPDATE ON users             FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER brands_updated_at          BEFORE UPDATE ON brands            FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER challenges_updated_at      BEFORE UPDATE ON challenges        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER payouts_updated_at         BEFORE UPDATE ON payouts           FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER challenge_questions_updated_at BEFORE UPDATE ON challenge_questions FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER game_sessions_updated_at   BEFORE UPDATE ON game_sessions    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER session_round_scores_updated_at BEFORE UPDATE ON session_round_scores FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER fraud_flags_updated_at     BEFORE UPDATE ON fraud_flags      FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER league_assignments_updated_at BEFORE UPDATE ON league_assignments FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER user_badges_updated_at     BEFORE UPDATE ON user_badges      FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER referrals_updated_at       BEFORE UPDATE ON referrals       FOR EACH ROW EXECUTE FUNCTION set_updated_at();
