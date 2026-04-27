@@ -77,8 +77,13 @@ router.post("/:challengeId/warmup-complete", authenticate, async (req, res) => {
 
   // Enforce server-side warmup minimum
   const unlockAt = await redis.get(`warmup:unlock:${session.id}`);
-  if (unlockAt && Date.now() < parseInt(unlockAt)) {
-    throw createError("Warm-up minimum not yet elapsed", 400, "WARMUP_TOO_FAST");
+  if (unlockAt) {
+    const remainingMs = parseInt(unlockAt) - Date.now();
+    if (remainingMs > 0) {
+      const error = createError("Warm-up minimum not yet elapsed", 400, "WARMUP_TOO_FAST");
+      (error as any).remainingMs = remainingMs;
+      throw error;
+    }
   }
 
   await markWarmupCompleted(session.id);

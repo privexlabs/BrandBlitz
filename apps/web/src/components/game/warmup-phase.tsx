@@ -23,9 +23,16 @@ export function WarmupPhase({ challenge, apiToken, onComplete }: WarmupPhaseProp
 
   // Server enforces WARMUP_MIN_SECONDS; client enables button after same duration
   useEffect(() => {
+    // Signal to server that warmup has started to initialize timing & session
+    const api = createApiClient(apiToken);
+    api.post(`/sessions/${challenge.id}/warmup-start`).catch((error) => {
+      console.error("Failed to initialize warmup session:", error);
+      setStatusMessage("Failed to initialize warmup. Please refresh.");
+    });
+
     const timer = setTimeout(() => setUnlocked(true), WARMUP_MIN_SECONDS * 1000);
     return () => clearTimeout(timer);
-  }, []);
+  }, [apiToken, challenge.id]);
 
   const handleStartChallenge = async () => {
     setStatusMessage(null);
