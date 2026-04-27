@@ -17,7 +17,11 @@ export async function createFraudFlag(data: {
 }): Promise<void> {
   await query(
     `INSERT INTO fraud_flags (session_id, user_id, flag_type, details)
-     VALUES ($1, $2, $3, $4)`,
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (session_id, flag_type)
+     DO UPDATE SET
+       details = EXCLUDED.details,
+       created_at = EXCLUDED.created_at`,
     [data.sessionId, data.userId, data.flagType, data.details ?? null]
   );
 }

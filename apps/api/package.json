@@ -11,6 +11,7 @@
     "start:worker": "node dist/worker.js",
     "lint": "eslint src",
     "type-check": "tsc --noEmit",
+    "docs:db": "cd ../../ && pnpm docs:db",
     "test": "corepack pnpm exec vitest run"
   },
   "dependencies": {

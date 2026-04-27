@@ -5,10 +5,14 @@ on:
     paths:
       - 'init.sql'
       - 'migrations/**'
+      - 'docs/DATABASE.md'
+      - 'docs/db/er.svg'
   pull_request:
     paths:
       - 'init.sql'
       - 'migrations/**'
+      - 'docs/DATABASE.md'
+      - 'docs/db/er.svg'
 
 jobs:
   dual-path:
@@ -81,3 +85,13 @@ jobs:
           grep -v '^--' /tmp/schema_fresh.sql | sort > /tmp/fresh_sorted.sql
           grep -v '^--' /tmp/schema_migration.sql | sort > /tmp/migration_sorted.sql
           diff /tmp/fresh_sorted.sql /tmp/migration_sorted.sql && echo "Schemas match" || (echo "Schema divergence detected" && exit 1)
+
+      - name: Install tbls
+        run: |
+          GOBIN=$HOME/go/bin go install github.com/k1LoW/tbls@latest
+
+      - name: Assert ER diagram is up-to-date
+        run: |
+          mkdir -p /tmp/tbls-docs
+          PATH="$HOME/go/bin:$PATH" tbls doc "postgresql://bb:bb@localhost:5433/brandblitz_fresh?sslmode=disable" /tmp/tbls-docs --er-format svg --force
+          cmp -s /tmp/tbls-docs/schema.svg docs/db/er.svg
