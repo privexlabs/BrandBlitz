@@ -56,7 +56,7 @@ export default function BrandAnalyticsPage() {
     }
     if (status !== "authenticated") return;
 
-    const api = createApiClient((session as any).apiToken);
+    const api = createApiClient(session.apiToken);
 
     Promise.all([
       api.get(`/brands/${brandId}`),

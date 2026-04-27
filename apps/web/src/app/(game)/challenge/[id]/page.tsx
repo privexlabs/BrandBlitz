@@ -34,7 +34,7 @@ export default function ChallengePage({ params }: PageProps) {
       return;
     }
 
-    const apiToken = (session as any).apiToken as string;
+    const apiToken = session.apiToken;
     const api = createApiClient(apiToken);
 
     api.get(`/challenges/${challengeId}`).then((res) => {
@@ -53,7 +53,7 @@ export default function ChallengePage({ params }: PageProps) {
   }, [challengeId, session, status, router]);
 
   const handleWarmupComplete = async (token: string) => {
-    const apiToken = (session as any)?.apiToken as string;
+    const apiToken = session?.apiToken;
     const api = createApiClient(apiToken);
 
     await api.post(`/sessions/${challengeId}/start`, { challengeToken: token });
@@ -63,7 +63,7 @@ export default function ChallengePage({ params }: PageProps) {
   };
 
   const handleAnswer = async (option: "A" | "B" | "C" | "D" | null, reactionTimeMs: number) => {
-    const apiToken = (session as any)?.apiToken as string;
+    const apiToken = session?.apiToken;
     const api = createApiClient(apiToken);
 
     const res = await api.post(`/sessions/${challengeId}/answer/${currentRound}`, {
@@ -92,7 +92,7 @@ export default function ChallengePage({ params }: PageProps) {
     return (
       <WarmupPhase
         challenge={challenge}
-        apiToken={(session as any).apiToken}
+        apiToken={session.apiToken}
         onComplete={(token) => {
           void handleWarmupComplete(token);
         }}
