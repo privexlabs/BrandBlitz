@@ -1,6 +1,12 @@
-import type { NextAuthOptions } from "next-auth";
+import type { NextAuthOptions, User } from "next-auth";
+import type { JWT } from "next-auth/jwt";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
+
+interface GoogleAccount {
+  provider: string;
+  id_token?: string;
+}
 
 const mockGoogleAuthEnabled = process.env.E2E_MOCK_GOOGLE_OAUTH === "true";
 
@@ -24,7 +30,7 @@ export const authOptions: NextAuthOptions = {
                 email,
                 name,
                 mockIdToken: `e2e:${email}:${name}`,
-              } as any;
+              } as User;
             },
           }),
         ]
@@ -41,8 +47,8 @@ export const authOptions: NextAuthOptions = {
       try {
         const idToken =
           account?.provider === "google-mock"
-            ? (user as any).mockIdToken
-            : (account as { id_token?: string } | null)?.id_token;
+            ? user.mockIdToken
+            : (account as GoogleAccount | null)?.id_token;
         if (!idToken) return false;
 
         const response = await fetch(
@@ -59,7 +65,7 @@ export const authOptions: NextAuthOptions = {
         if (!response.ok) return false;
 
         const data = (await response.json()) as { token: string };
-        (user as any).apiToken = data.token;
+        user.apiToken = data.token;
         return true;
       } catch {
         return false;
@@ -67,14 +73,14 @@ export const authOptions: NextAuthOptions = {
     },
 
     async jwt({ token, user }) {
-      if ((user as any)?.apiToken) {
-        token.apiToken = (user as any).apiToken;
+      if (user?.apiToken) {
+        token.apiToken = user.apiToken;
       }
       return token;
     },
 
     async session({ session, token }) {
-      (session as any).apiToken = token.apiToken;
+      session.apiToken = token.apiToken;
       return session;
     },
   },

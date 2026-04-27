@@ -37,7 +37,7 @@ export default function DashboardPage() {
     }
     if (status !== "authenticated") return;
 
-    const api = createApiClient((session as any).apiToken);
+    const api = createApiClient(session.apiToken);
     api
       .get("/brands")
       .then((res) => setBrands(res.data.brands))
