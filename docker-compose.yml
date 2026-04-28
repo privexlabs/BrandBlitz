@@ -63,7 +63,7 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      NODE_ENV: ${NODE_ENV:-development}
+      NODE_ENV: ${NODE_ENV}
       PORT: 3001
       DATABASE_URL: postgresql://brandblitz:${POSTGRES_PASSWORD:-brandblitz_dev}@postgres:5432/brandblitz
       REDIS_URL: redis://redis:6379
@@ -105,7 +105,7 @@ services:
       dockerfile: apps/api/Dockerfile
     command: ["node", "dist/worker.js"]
     environment:
-      NODE_ENV: ${NODE_ENV:-development}
+      NODE_ENV: ${NODE_ENV}
       DATABASE_URL: postgresql://brandblitz:${POSTGRES_PASSWORD:-brandblitz_dev}@postgres:5432/brandblitz
       REDIS_URL: redis://redis:6379
       STELLAR_NETWORK: ${STELLAR_NETWORK:-testnet}
