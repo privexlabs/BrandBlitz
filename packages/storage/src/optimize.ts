@@ -42,6 +42,19 @@ export async function optimizeImage(key: string, type: ImageType): Promise<strin
 
   const buffer = Buffer.from(await original.Body.transformToByteArray());
 
+  // Check if format is supported and if image is valid
+  try {
+    const metadata = await sharp(buffer).metadata();
+    const supportedFormats = ["jpeg", "jpg", "png", "webp", "avif", "tiff"];
+    if (!metadata.format || !supportedFormats.includes(metadata.format)) {
+      console.warn(`[storage] Unsupported image format: ${metadata.format}. Skipping optimization for ${key}.`);
+      return key;
+    }
+  } catch (error) {
+    console.warn(`[storage] Failed to process image metadata for ${key}. Skipping optimization. Reason: ${(error as Error).message}`);
+    return key;
+  }
+
   const optimized = await sharp(buffer)
     .resize(spec.width, spec.height, {
       fit: spec.fit,

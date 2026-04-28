@@ -24,6 +24,6 @@ export type BucketKey = (typeof BUCKETS)[keyof typeof BUCKETS];
  * In prod: https://assets.brandblitz.app/logos/uuid.webp
  */
 export function getPublicUrl(bucket: string, key: string): string {
-  const base = process.env.S3_PUBLIC_URL ?? process.env.S3_ENDPOINT ?? "";
+  const base = process.env.S3_PUBLIC_URL || process.env.S3_ENDPOINT || "";
   return `${base}/${bucket}/${key}`;
 }
