@@ -54,3 +54,29 @@ test("submit button only fires one POST request on double-click", async ({ page,
   const brandPosts = posts.filter((p) => p.includes("/brands"));
   expect(brandPosts).toHaveLength(1);
 });
+
+test("brand dashboard shows a toast when the brands API is down", async ({ page }) => {
+  await page.route("**/api/brands", async (route, request) => {
+    if (request.method() === "GET") {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Temporary outage" }),
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await signInWithMockGoogle(
+    page,
+    { email: "dashboard-failure@example.com", name: "Dashboard Failure" },
+    "/brand/dashboard"
+  );
+
+  await page.waitForURL("**/brand/dashboard");
+
+  await expect(page.getByRole("heading", { name: "Couldn't load brands" })).toBeVisible();
+  await expect(page.getByText("Couldn't load brands. Please try again.")).toBeVisible();
+});

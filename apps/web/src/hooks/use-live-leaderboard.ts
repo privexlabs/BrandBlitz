@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { LeaderboardEntry } from "@/lib/api";
+import { toast } from "@/lib/toast";
 
 type LiveState =
   | { status: "idle" | "connecting" | "polling"; entries: LeaderboardEntry[] }
@@ -28,6 +29,7 @@ export function useLiveLeaderboard(opts?: {
 
   const pollTimerRef = useRef<number | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
+  const hasShownConnectionErrorRef = useRef(false);
 
   const pollUrl = useMemo(() => {
     if (challengeId) return `/leaderboard/${challengeId}?limit=100&offset=0`;
@@ -36,6 +38,20 @@ export function useLiveLeaderboard(opts?: {
 
   useEffect(() => {
     setState((prev) => ({ ...prev, status: "connecting" }));
+
+    const reportConnectionError = () => {
+      if (hasShownConnectionErrorRef.current) return;
+      hasShownConnectionErrorRef.current = true;
+      toast.error(
+        challengeId
+          ? "Couldn't refresh the challenge leaderboard. Retrying..."
+          : "Couldn't refresh the leaderboard. Retrying..."
+      );
+    };
+
+    const clearConnectionError = () => {
+      hasShownConnectionErrorRef.current = false;
+    };
 
     const stopPolling = () => {
       if (pollTimerRef.current) {
@@ -54,15 +70,16 @@ export function useLiveLeaderboard(opts?: {
           const nextEntries: LeaderboardEntry[] = challengeId
             ? res.data.sessions
             : res.data.leaderboard;
+          clearConnectionError();
           setState({ status: "polling", entries: nextEntries });
         } catch {
-          // ignore
+          reportConnectionError();
         }
       };
 
-      fetchOnce().catch(() => {});
+      void fetchOnce();
       pollTimerRef.current = window.setInterval(() => {
-        fetchOnce().catch(() => {});
+        void fetchOnce();
       }, 5000);
     };
 
@@ -80,9 +97,8 @@ export function useLiveLeaderboard(opts?: {
         try {
           const data = JSON.parse(event.data);
           if (closed) return;
-          const nextEntries: LeaderboardEntry[] = challengeId
-            ? data.sessions
-            : data.leaderboard;
+          const nextEntries: LeaderboardEntry[] = challengeId ? data.sessions : data.leaderboard;
+          clearConnectionError();
           setState({ status: "live", entries: nextEntries, updatedAt: data.updatedAt });
         } catch {
           // ignore parse errors
@@ -92,9 +108,11 @@ export function useLiveLeaderboard(opts?: {
       source.onerror = () => {
         if (closed) return;
         source.close();
+        reportConnectionError();
         startPolling();
       };
     } catch {
+      reportConnectionError();
       startPolling();
     }
 
@@ -108,4 +126,3 @@ export function useLiveLeaderboard(opts?: {
 
   return state;
 }
-
