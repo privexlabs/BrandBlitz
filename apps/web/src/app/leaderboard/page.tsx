@@ -2,30 +2,53 @@ import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { LeaderboardEntry } from "@/lib/api";
 import { LiveGlobalLeaderboard } from "@/components/leaderboard/live-global-leaderboard";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
 
-async function getGlobalLeaderboard(): Promise<LeaderboardEntry[]> {
+async function getGlobalLeaderboard(): Promise<{ entries: LeaderboardEntry[]; failed: boolean }> {
   try {
     const res = await api.get("/leaderboard/global");
-    return res.data.leaderboard;
+    return {
+      entries: res.data.leaderboard,
+      failed: false,
+    };
   } catch {
-    return [];
+    return {
+      entries: [],
+      failed: true,
+    };
   }
 }
 
 export default async function LeaderboardPage() {
-  const entries = await getGlobalLeaderboard();
+  const { entries, failed } = await getGlobalLeaderboard();
 
   return (
-    <main className="max-w-3xl mx-auto px-6 py-12">
-      <h1 className="text-3xl font-bold mb-2">Global Leaderboard</h1>
-      <p className="text-[var(--muted-foreground)] mb-8">Top performers across all challenges</p>
+    <main className="mx-auto max-w-3xl px-6 py-12">
+      <h1 className="mb-2 text-3xl font-bold">Global Leaderboard</h1>
+      <p className="mb-8 text-[var(--muted-foreground)]">Top performers across all challenges</p>
 
       <Card>
         <CardHeader>
           <CardTitle>All-Time Rankings</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <LiveGlobalLeaderboard initial={entries} />
+          {failed ? (
+            <div className="p-6">
+              <EmptyState
+                title="Couldn't load leaderboard"
+                description="We couldn't load the rankings right now. Please try again."
+                action={
+                  <Link href="/leaderboard">
+                    <Button variant="outline">Try Again</Button>
+                  </Link>
+                }
+              />
+            </div>
+          ) : (
+            <LiveGlobalLeaderboard initial={entries} />
+          )}
         </CardContent>
       </Card>
     </main>

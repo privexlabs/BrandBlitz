@@ -12,6 +12,7 @@ import { formatUsdc } from "@/lib/utils";
 import type { LeaderboardEntry } from "@/lib/api";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LiveChallengeLeaderboard } from "@/components/leaderboard/live-challenge-leaderboard";
+import { toast } from "@/lib/toast";
 
 function normalizeBrand(brand: any) {
   if (!brand) return null;
@@ -39,6 +40,7 @@ export default function BrandAnalyticsPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const apiToken = (session as { apiToken?: string } | null)?.apiToken;
   const brandId = params.id as string;
   const depositAddress = searchParams.get("depositAddress");
   const depositMemo = searchParams.get("memo");
@@ -48,39 +50,77 @@ export default function BrandAnalyticsPage() {
   const [challenge, setChallenge] = useState<any>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [brandLoadError, setBrandLoadError] = useState(false);
+  const [challengeLoadError, setChallengeLoadError] = useState(false);
+  const [leaderboardLoadError, setLeaderboardLoadError] = useState(false);
+
+  async function loadAnalytics(apiToken: string) {
+    setLoading(true);
+    setBrandLoadError(false);
+    setChallengeLoadError(false);
+    setLeaderboardLoadError(false);
+
+    const api = createApiClient(apiToken);
+    const [brandResult, challengeResult] = await Promise.allSettled([
+      api.get(`/brands/${brandId}`),
+      api.get(`/challenges?brandId=${brandId}&limit=1`),
+    ]);
+
+    if (brandResult.status === "rejected") {
+      setBrand(null);
+      setChallenge(null);
+      setLeaderboard([]);
+      setBrandLoadError(true);
+      setLoading(false);
+      toast.error("Couldn't load brand details. Please try again.");
+      return;
+    }
+
+    setBrand(normalizeBrand(brandResult.value.data.brand));
+
+    if (challengeResult.status === "rejected") {
+      setChallenge(null);
+      setLeaderboard([]);
+      setChallengeLoadError(true);
+      setLoading(false);
+      toast.error("Couldn't load challenges for this brand. Please try again.");
+      return;
+    }
+
+    const latestChallenge = normalizeChallenge(challengeResult.value.data.challenges[0]);
+    setChallenge(latestChallenge ?? null);
+
+    if (!latestChallenge) {
+      setLeaderboard([]);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const leaderboardResponse = await api.get(`/challenges/${latestChallenge.id}/leaderboard`);
+      setLeaderboard(leaderboardResponse.data.sessions);
+    } catch {
+      setLeaderboard([]);
+      setLeaderboardLoadError(true);
+      toast.error("Couldn't load the challenge leaderboard. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login");
       return;
     }
-    if (status !== "authenticated") return;
+    if (status !== "authenticated" || !apiToken) return;
 
-    const api = createApiClient(session.apiToken);
-
-    Promise.all([
-      api.get(`/brands/${brandId}`),
-      api.get(`/challenges?brandId=${brandId}&limit=1`).catch(() => ({ data: { challenges: [] } })),
-    ])
-      .then(([brandRes, challengeRes]) => {
-        setBrand(normalizeBrand(brandRes.data.brand));
-        const latestChallenge = normalizeChallenge(challengeRes.data.challenges[0]);
-        setChallenge(latestChallenge ?? null);
-
-        if (latestChallenge) {
-          return api
-            .get(`/challenges/${latestChallenge.id}/leaderboard`)
-            .then((r) => setLeaderboard(r.data.sessions))
-            .catch(() => {});
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [session, status, router, brandId]);
+    void loadAnalytics(apiToken);
+  }, [apiToken, status, router, brandId]);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center">
         <div className="animate-pulse text-[var(--muted-foreground)]">Loading...</div>
       </div>
     );
@@ -88,15 +128,27 @@ export default function BrandAnalyticsPage() {
 
   if (!brand) {
     return (
-      <main className="max-w-2xl mx-auto px-6 py-12">
-        <p className="text-[var(--muted-foreground)]">Brand not found.</p>
+      <main className="mx-auto max-w-2xl px-6 py-12">
+        {brandLoadError ? (
+          <EmptyState
+            title="Couldn't load brand"
+            description="We couldn't load this brand — tap to retry."
+            action={
+              <Button disabled={!apiToken} onClick={() => apiToken && void loadAnalytics(apiToken)}>
+                Try Again
+              </Button>
+            }
+          />
+        ) : (
+          <p className="text-[var(--muted-foreground)]">Brand not found.</p>
+        )}
       </main>
     );
   }
 
   return (
-    <main className="max-w-4xl mx-auto px-6 py-12">
-      <div className="flex items-center justify-between mb-8">
+    <main className="mx-auto max-w-4xl px-6 py-12">
+      <div className="mb-8 flex items-center justify-between">
         <div className="flex items-center gap-4">
           {brand.logoUrl ? (
             <Image
@@ -141,22 +193,42 @@ export default function BrandAnalyticsPage() {
             </Card>
           ) : null}
 
-          <div className="grid grid-cols-3 gap-4 mb-8">
+          <div className="mb-8 grid grid-cols-3 gap-4">
             {[
               { label: "Pool Size", value: `${formatUsdc(challenge.poolAmountUsdc)} USDC` },
               { label: "Participants", value: challenge.participantCount ?? 0 },
               { label: "Status", value: challenge.status },
             ].map(({ label, value }) => (
               <Card key={label} className="text-center">
-                <CardContent className="pt-6 pb-4">
+                <CardContent className="pb-4 pt-6">
                   <p className="text-xl font-bold text-[var(--primary)]">{value}</p>
-                  <p className="text-xs text-[var(--muted-foreground)] mt-1">{label}</p>
+                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">{label}</p>
                 </CardContent>
               </Card>
             ))}
           </div>
 
-          {leaderboard.length > 0 && (
+          {leaderboardLoadError ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Leaderboard unavailable</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <EmptyState
+                  title="Couldn't load leaderboard"
+                  description="We couldn't load the latest rankings — tap to retry."
+                  action={
+                    <Button
+                      disabled={!apiToken}
+                      onClick={() => apiToken && void loadAnalytics(apiToken)}
+                    >
+                      Try Again
+                    </Button>
+                  }
+                />
+              </CardContent>
+            </Card>
+          ) : leaderboard.length > 0 ? (
             <Card>
               <CardHeader>
                 <CardTitle>Current Leaderboard</CardTitle>
@@ -169,21 +241,32 @@ export default function BrandAnalyticsPage() {
                 />
               </CardContent>
             </Card>
-          )}
+          ) : null}
         </>
       )}
 
-      {!challenge && (
-        <EmptyState
-          title="This brand has no challenges yet"
-          description="Launch your first challenge to start attracting players and tracking performance."
-          action={
-            <Link href={`/brand/${brandId}/challenge/new`}>
-              <Button>Launch a Challenge</Button>
-            </Link>
-          }
-        />
-      )}
+      {!challenge &&
+        (challengeLoadError ? (
+          <EmptyState
+            title="Couldn't load challenges"
+            description="We couldn't load this brand's challenges — tap to retry."
+            action={
+              <Button disabled={!apiToken} onClick={() => apiToken && void loadAnalytics(apiToken)}>
+                Try Again
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            title="This brand has no challenges yet"
+            description="Launch your first challenge to start attracting players and tracking performance."
+            action={
+              <Link href={`/brand/${brandId}/challenge/new`}>
+                <Button>Launch a Challenge</Button>
+              </Link>
+            }
+          />
+        ))}
     </main>
   );
 }
