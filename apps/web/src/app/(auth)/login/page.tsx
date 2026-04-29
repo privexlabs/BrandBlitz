@@ -1,12 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
-import { signIn } from "next-auth/react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo } from "react";
+import { signIn, useSession } from "next-auth/react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import LoginLoading from "./loading";
 
 export default function LoginPage() {
+  const { status } = useSession();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") ?? "/";
   const providerId = process.env.NEXT_PUBLIC_E2E_MOCK_GOOGLE_OAUTH === "true" ? "google-mock" : "google";
@@ -18,6 +21,16 @@ export default function LoginPage() {
     }),
     [callbackUrl, searchParams]
   );
+
+  useEffect(() => {
+    if (status === "authenticated") {
+      router.replace(callbackUrl);
+    }
+  }, [status, router, callbackUrl]);
+
+  if (status === "loading") {
+    return <LoginLoading />;
+  }
 
   return (
     <Card className="w-full max-w-sm">
