@@ -4,16 +4,12 @@ import { createFraudFlag } from "../db/queries/fraud-flags";
 import { getSession } from "../db/queries/sessions";
 import { logger } from "../lib/logger";
 import { metrics } from "../lib/metrics";
+import { computeFingerprint } from "../lib/fingerprint";
 import { createError } from "./error";
 
 export const BOT_REACTION_THRESHOLD_MS = 80;
 export const MIN_HUMAN_REACTION_MS = 150;
 export const MAX_HUMAN_REACTION_MS = 30_000;
-
-function getDeviceId(req: Request): string | undefined {
-  const rawHeader = req.headers["x-device-id"] ?? req.headers["x-visitor-id"];
-  return Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-}
 
 async function resolveSessionId(req: Request): Promise<string | undefined> {
   const existingSessionId = (req as any).sessionId as string | undefined;
@@ -124,45 +120,66 @@ export async function enforceOneSessionPerChallenge(
 }
 
 /**
- * Anti-cheat Layer 2 — device fingerprint check.
- * Validates a stable device fingerprint header and flags shared-device abuse.
+ * Anti-cheat Layer 2 — stable device fingerprint check.
+ * Derives a server-side fingerprint from (visitorId | deviceId) + IP /24 + UA hash.
+ * Rejects sessions when the fingerprint is shared by >2 accounts in 24 h.
  */
 export async function validateDeviceFingerprint(
   req: Request,
   _res: Response,
   next: NextFunction
 ): Promise<void> {
-  const deviceId = getDeviceId(req);
-  const userId = req.user?.sub;
+  const rawVisitorId = req.headers["x-visitor-id"];
+  const rawDeviceId = req.headers["x-device-id"];
 
-  if (!deviceId) {
+  const visitorId = Array.isArray(rawVisitorId) ? rawVisitorId[0] : rawVisitorId;
+  const deviceId = Array.isArray(rawDeviceId) ? rawDeviceId[0] : rawDeviceId;
+
+  if (!visitorId && !deviceId) {
     throw createError("Missing X-Device-Id header", 400, "MISSING_DEVICE_ID");
   }
 
+  const userId = req.user?.sub;
   if (!userId) {
     next();
     return;
   }
 
   try {
-    // Check if this device is associated with too many accounts (>2 in 24h)
-    const deviceKey = `device:${deviceId}:accounts`;
-    await redis.sadd(deviceKey, userId);
-    await redis.expire(deviceKey, 86400); // 24h
-    const count = await redis.scard(deviceKey);
+    const fingerprint = computeFingerprint({
+      visitorId,
+      deviceId,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"],
+    });
+
+    const fpKey = `fp:${fingerprint}:accounts`;
+    await redis.sadd(fpKey, userId);
+    await redis.expire(fpKey, 86400); // 24 h window
+    const count = await redis.scard(fpKey);
 
     if (count >= 3) {
-      await recordFraudFlag(req, "multi_account_device", {
-        deviceId,
+      metrics.inc("antiCheat.fingerprint_collision_total", {
+        fingerprint: fingerprint.slice(0, 8),
+      });
+      await recordFraudFlag(req, "multi_account_fingerprint", {
+        fingerprint: fingerprint.slice(0, 8),
         accountCount: count,
         windowSeconds: 86400,
-        severity: "warning",
+        severity: "critical",
       }).catch(() => {});
+      throw createError(
+        "Session rejected due to fingerprint collision",
+        403,
+        "FINGERPRINT_COLLISION"
+      );
     }
   } catch (error) {
+    if ((error as { statusCode?: number }).statusCode) {
+      throw error;
+    }
     logger.warn("Redis unavailable during device fingerprint validation; failing open", {
       userId,
-      deviceId,
       error: (error as Error).message,
     });
   }

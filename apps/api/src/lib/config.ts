@@ -36,6 +36,9 @@ const configSchema = z.object({
 
   // Logging
   LOG_LEVEL: z.enum(["error", "warn", "info", "http", "verbose", "debug", "silly"]).default("info"),
+
+  // Session integrity — rotated independently of JWT_SECRET; optional for backwards compat
+  SESSION_INTEGRITY_KEY: z.string().min(32).optional(),
 });
 
 export type Config = z.infer<typeof configSchema>;

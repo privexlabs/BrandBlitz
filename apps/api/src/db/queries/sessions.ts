@@ -9,13 +9,18 @@ export interface GameSession {
   warmup_completed_at: string | null;
   challenge_started_at: string | null;
   completed_at: string | null;
+  round_1_answer: string | null;
   round_1_score: number;
+  round_2_answer: string | null;
   round_2_score: number;
+  round_3_answer: string | null;
   round_3_score: number;
   total_score: number;
+  rank: number | null;
   flagged: boolean;
   flag_reasons: string[] | null;
   is_practice: boolean;
+  integrity_hmac: string | null;
   created_at: string;
 }
 
@@ -97,13 +102,15 @@ export async function markChallengeStarted(sessionId: string): Promise<void> {
 export async function recordRoundScore(
   sessionId: string,
   round: 1 | 2 | 3,
-  score: number
+  score: number,
+  answer: string | null = null
 ): Promise<void> {
   if (![1, 2, 3].includes(round)) {
     throw new Error("Invalid round");
   }
 
   const roundColumn = `round_${round}_score`;
+  const answerColumn = `round_${round}_answer`;
 
   await query(
     `WITH upserted AS (
@@ -115,9 +122,10 @@ export async function recordRoundScore(
        RETURNING session_id, score
      )
      UPDATE game_sessions
-     SET ${roundColumn} = (SELECT score FROM upserted)
+     SET ${roundColumn} = (SELECT score FROM upserted),
+         ${answerColumn} = $4
      WHERE id = $1`,
-    [sessionId, round, score]
+    [sessionId, round, score, answer]
   );
 }
 
@@ -136,6 +144,13 @@ export async function finishSession(sessionId: string): Promise<GameSession> {
     [sessionId]
   );
   return result.rows[0];
+}
+
+export async function storeSessionHmac(sessionId: string, hmac: string): Promise<void> {
+  await query(
+    "UPDATE game_sessions SET integrity_hmac = $1 WHERE id = $2",
+    [hmac, sessionId]
+  );
 }
 
 export async function flagSession(

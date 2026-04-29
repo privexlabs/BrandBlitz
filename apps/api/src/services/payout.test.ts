@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   submitBatchPayout: vi.fn(),
   queueAdd: vi.fn(),
   emitCounterMetric: vi.fn(),
+  verifySessionHmac: vi.fn().mockReturnValue(true),
+  metricsInc: vi.fn(),
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -59,6 +61,14 @@ vi.mock("../lib/logger", () => ({
   logger: mocks.logger,
 }));
 
+vi.mock("../lib/integrity", () => ({
+  verifySessionHmac: mocks.verifySessionHmac,
+}));
+
+vi.mock("../lib/metrics", () => ({
+  metrics: { inc: mocks.metricsInc },
+}));
+
 import { processPayout } from "./payout";
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────
@@ -89,16 +99,24 @@ function buildLeaderboardSession(
     warmup_completed_at: null,
     challenge_started_at: null,
     completed_at: "2026-04-24T10:30:00.000Z",
+    round_1_answer: null,
     round_1_score: 100,
+    round_2_answer: null,
     round_2_score: 100,
+    round_3_answer: null,
     round_3_score: 100,
     total_score: 300,
+    rank: null,
     flagged: false,
     flag_reasons: null,
     is_practice: false,
+    integrity_hmac: "valid-hmac",
     created_at: "2026-04-24T10:00:00.000Z",
     username: "player@example.com",
     avatar_url: "https://example.com/avatar.png",
+    display_name: "Player One",
+    league: null,
+    total_earned_usdc: "0.0000000",
     stellar_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
     ...overrides,
   };
@@ -113,6 +131,7 @@ describe("processPayout", () => {
     process.env.HOT_WALLET_SECRET = "SBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
     process.env.STELLAR_NETWORK = "testnet";
 
+    mocks.verifySessionHmac.mockReturnValue(true);
     mocks.getChallengeById.mockResolvedValue(challengeFixture);
     mocks.createPayout.mockImplementation(async ({ userId }: { userId: string }) => ({
       id: `payout-${userId}`,
@@ -271,5 +290,46 @@ describe("processPayout", () => {
       "testnet",
       expect.any(Object)
     );
+  });
+
+  it("aborts payout and logs critical error when a session integrity HMAC does not match", async () => {
+    mocks.getChallengeById.mockResolvedValue({ ...challengeFixture, id: "challenge-6" });
+    mocks.getLeaderboard.mockResolvedValue([
+      buildLeaderboardSession({
+        id: "session-tampered",
+        user_id: "user-1",
+        total_score: 999,
+        integrity_hmac: "invalid-hmac",
+        stellar_address: "GUSER1",
+      }),
+    ]);
+    mocks.verifySessionHmac.mockReturnValue(false);
+
+    await expect(processPayout("challenge-6")).rejects.toThrow("session-tampered");
+
+    expect(mocks.submitBatchPayout).not.toHaveBeenCalled();
+    expect(mocks.metricsInc).toHaveBeenCalledWith("antiCheat.integrity_hmac_tampered_total");
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      "Session integrity check failed — payout aborted",
+      expect.objectContaining({ sessionId: "session-tampered" })
+    );
+  });
+
+  it("proceeds normally when all sessions pass integrity verification", async () => {
+    mocks.getLeaderboard.mockResolvedValue([
+      buildLeaderboardSession({
+        id: "session-ok",
+        user_id: "user-1",
+        total_score: 300,
+        integrity_hmac: "valid-hmac",
+        stellar_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      }),
+    ]);
+    mocks.verifySessionHmac.mockReturnValue(true);
+
+    await processPayout("challenge-1");
+
+    expect(mocks.submitBatchPayout).toHaveBeenCalledTimes(1);
+    expect(mocks.metricsInc).not.toHaveBeenCalledWith("antiCheat.integrity_hmac_tampered_total");
   });
 });

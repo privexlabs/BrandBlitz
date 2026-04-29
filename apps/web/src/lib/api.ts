@@ -6,6 +6,7 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost/api";
 export function createApiClient(token?: string): AxiosInstance {
   return axios.create({
     baseURL: BASE_URL,
+    withCredentials: true,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     timeout: 10_000,
   });

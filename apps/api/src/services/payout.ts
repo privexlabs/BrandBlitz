@@ -6,7 +6,10 @@ import { createPayout, updatePayoutStatus } from "../db/queries/payouts";
 import { calculatePayoutShare, rankWinners } from "./scoring";
 import { payoutJobOptions, payoutQueue } from "../queues/payout.queue";
 import { logger } from "../lib/logger";
+import { metrics } from "../lib/metrics";
 import { config } from "../lib/config";
+import { stellarSequenceStore } from "../lib/redis";
+import { verifySessionHmac } from "../lib/integrity";
 
 /**
  * Enqueue a payout job for a completed challenge.
@@ -34,6 +37,25 @@ export async function processPayout(challengeId: string): Promise<void> {
   }
 
   const sessions = await getLeaderboard(challengeId, 1000); // all ranked sessions
+
+  // Verify session integrity before any payout; abort if any record was tampered with
+  for (const session of sessions) {
+    if (!verifySessionHmac(
+      session.id,
+      session.total_score,
+      session.completed_at ?? "",
+      session.integrity_hmac
+    )) {
+      metrics.inc("antiCheat.integrity_hmac_tampered_total");
+      logger.error("Session integrity check failed — payout aborted", {
+        challengeId,
+        sessionId: session.id,
+        userId: session.user_id,
+      });
+      throw new Error(`Session ${session.id} failed integrity check`);
+    }
+  }
+
   if (sessions.length === 0) {
     await updateChallengeStatus(challengeId, "settled");
     return;
@@ -99,7 +121,8 @@ export async function processPayout(challengeId: string): Promise<void> {
     recipients,
     config.HOT_WALLET_SECRET,
     challengeId,
-    network
+    network,
+    { sequenceStore: stellarSequenceStore }
   );
 
   const txHashes: string[] = [];
