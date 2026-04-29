@@ -84,7 +84,8 @@ CREATE TABLE challenges (
   ends_at             TIMESTAMPTZ,
   payout_tx_hashes    TEXT[],
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT challenges_ends_after_starts CHECK (ends_at IS NULL OR ends_at > starts_at)
 );
 
 CREATE INDEX idx_challenges_brand_id      ON challenges (brand_id);
@@ -279,3 +280,35 @@ CREATE TRIGGER fraud_flags_updated_at     BEFORE UPDATE ON fraud_flags      FOR 
 CREATE TRIGGER league_assignments_updated_at BEFORE UPDATE ON league_assignments FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER user_badges_updated_at     BEFORE UPDATE ON user_badges      FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER referrals_updated_at       BEFORE UPDATE ON referrals       FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- APP CONFIG (runtime-tunable key/value store)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE app_config (
+  key        TEXT PRIMARY KEY,
+  value      JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TRIGGER app_config_updated_at BEFORE UPDATE ON app_config FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+INSERT INTO app_config (key, value) VALUES
+  ('anti_cheat.thresholds', '{"min_human_reaction_ms": 150, "max_human_reaction_ms": 30000}');
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- AUDIT LOG (append-only; records admin config changes)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE audit_log (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_id   UUID REFERENCES users(id) ON DELETE SET NULL,
+  action     TEXT NOT NULL,
+  entity     TEXT NOT NULL,
+  entity_key TEXT,
+  before     JSONB,
+  after      JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_audit_log_actor_id   ON audit_log (actor_id);
+CREATE INDEX idx_audit_log_entity     ON audit_log (entity, entity_key);
+CREATE INDEX idx_audit_log_created_at ON audit_log (created_at DESC);

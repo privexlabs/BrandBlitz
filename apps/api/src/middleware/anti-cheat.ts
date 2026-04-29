@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { redis } from "../lib/redis";
 import { createFraudFlag } from "../db/queries/fraud-flags";
+import { getConfig } from "../db/queries/config";
 import { getSession } from "../db/queries/sessions";
 import { logger } from "../lib/logger";
 import { metrics } from "../lib/metrics";
@@ -8,8 +9,41 @@ import { computeFingerprint } from "../lib/fingerprint";
 import { createError } from "./error";
 
 export const BOT_REACTION_THRESHOLD_MS = 80;
+// Fallback defaults — override at runtime via PATCH /admin/config/anti_cheat.thresholds
 export const MIN_HUMAN_REACTION_MS = 150;
 export const MAX_HUMAN_REACTION_MS = 30_000;
+
+const THRESHOLDS_CACHE_KEY = "config:cache:anti_cheat.thresholds";
+const THRESHOLDS_CONFIG_KEY = "anti_cheat.thresholds";
+const CACHE_TTL_SECONDS = 5;
+
+interface AntiCheatThresholds {
+  min_human_reaction_ms: number;
+  max_human_reaction_ms: number;
+}
+
+async function getThresholds(): Promise<AntiCheatThresholds> {
+  try {
+    const cached = await redis.get(THRESHOLDS_CACHE_KEY);
+    if (cached) return JSON.parse(cached) as AntiCheatThresholds;
+
+    const config = await getConfig(THRESHOLDS_CONFIG_KEY);
+    const thresholds: AntiCheatThresholds = {
+      min_human_reaction_ms:
+        (config?.min_human_reaction_ms as number) ?? MIN_HUMAN_REACTION_MS,
+      max_human_reaction_ms:
+        (config?.max_human_reaction_ms as number) ?? MAX_HUMAN_REACTION_MS,
+    };
+
+    await redis.set(THRESHOLDS_CACHE_KEY, JSON.stringify(thresholds), "EX", CACHE_TTL_SECONDS);
+    return thresholds;
+  } catch {
+    return {
+      min_human_reaction_ms: MIN_HUMAN_REACTION_MS,
+      max_human_reaction_ms: MAX_HUMAN_REACTION_MS,
+    };
+  }
+}
 
 async function resolveSessionId(req: Request): Promise<string | undefined> {
   const existingSessionId = (req as any).sessionId as string | undefined;
@@ -43,7 +77,7 @@ async function recordFraudFlag(
 /**
  * Anti-cheat Layer 3 — server-side timing validation.
  * Validates that answer submission timing falls within human range.
- * Called on session answer routes.
+ * Thresholds are read from app_config (5s Redis cache) with fallback to defaults.
  */
 export async function validateReactionTime(
   req: Request,
@@ -65,14 +99,16 @@ export async function validateReactionTime(
     throw createError("Reaction time impossible for humans", 403, "REACTION_IMPOSSIBLE");
   }
 
-  if (reactionTimeMs < MIN_HUMAN_REACTION_MS) {
+  const thresholds = await getThresholds();
+
+  if (reactionTimeMs < thresholds.min_human_reaction_ms) {
     await recordFraudFlag(req, "reaction_time_below_minimum", {
       reactionTimeMs,
       severity: "warning",
     }).catch(() => {});
   }
 
-  if (reactionTimeMs > MAX_HUMAN_REACTION_MS) {
+  if (reactionTimeMs > thresholds.max_human_reaction_ms) {
     await recordFraudFlag(req, "reaction_time_above_maximum", {
       reactionTimeMs,
       severity: "info",

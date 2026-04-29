@@ -32,3 +32,25 @@ warmup → active → completed
 `deposit_memo` carries the Stellar payment memo that identifies which challenge a deposit belongs to. It has a `UNIQUE` constraint (backed by a btree index) and an additional explicit index `idx_challenges_deposit_memo` (see `docs/database/indexes.md`).
 
 `getChallengeByMemo()` in `apps/api/src/db/queries/challenges.ts` is the hot path for webhook-time deposit matching.
+
+### `challenges_ends_after_starts` constraint
+
+```sql
+CONSTRAINT challenges_ends_after_starts CHECK (ends_at IS NULL OR ends_at > starts_at)
+```
+
+A challenge with a defined end date must end strictly after it starts. `NULL` `ends_at` is allowed (open-ended challenge). Inserting or updating a row with `ends_at <= starts_at` raises PostgreSQL error `23514` (check_violation).
+
+**Migration:** `migrations/009_challenges_end_after_start.sql` adds this constraint to existing databases and backfills any violating rows by setting `ends_at = starts_at + INTERVAL '72 hours'`.
+
+## app_config
+
+Runtime-tunable key/value store added in `migrations/010_app_config.sql`.
+
+| key | default value | description |
+|-----|---------------|-------------|
+| `anti_cheat.thresholds` | `{"min_human_reaction_ms": 150, "max_human_reaction_ms": 30000}` | Anti-cheat reaction-time window. Tunable via `PATCH /admin/config/:key`. |
+
+## audit_log
+
+Append-only table. Every change made through `PATCH /admin/config/:key` inserts a row recording the actor, the old value, and the new value. Rows are never deleted.
