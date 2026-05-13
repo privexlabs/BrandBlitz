@@ -8,7 +8,7 @@ A short-lived JWT is issued at login and sent as an `Authorization: Bearer <toke
 
 ## Cookie / Session (httpOnly)
 
-The API enables `cors({ credentials: true })` and is scoped to the specific dashboard origin (`WEB_URL` env var — never a wildcard). The frontend axios client sets `withCredentials: true` so the browser attaches cookies automatically.
+The API enables `cors({ credentials: true })` and is scoped to the specific dashboard origin (`NEXT_PUBLIC_APP_URL`, falling back to `WEB_URL` — never a wildcard). The frontend axios client sets `withCredentials: true` so the browser attaches cookies automatically.
 
 This means:
 - An `httpOnly` session cookie set by a future `/auth/session` endpoint will travel with every cross-origin request.
@@ -24,7 +24,8 @@ This means:
 ### Required API server config
 
 ```
-WEB_URL=https://app.brandblitz.io   # must NOT be *
+NEXT_PUBLIC_APP_URL=https://app.brandblitz.io   # must NOT be *
+WEB_URL=https://app.brandblitz.io               # fallback for existing deployments
 ```
 
-The browser will refuse to send credentials to a wildcard origin, so `WEB_URL` must always be a specific origin.
+The browser will refuse to send credentials to a wildcard origin, so the configured app URL must always be a specific origin.
