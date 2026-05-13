@@ -13,6 +13,7 @@ There are no safe defaults — a missing value causes the compose service to fai
 | `NEXTAUTH_SECRET` | web | NextAuth.js session signing key. |
 | `NEXTAUTH_URL` | api, web | Public URL of the web app, e.g. `https://brandblitz.io`. |
 | `WEB_URL` | api | Same as `NEXTAUTH_URL`. |
+| `NEXT_PUBLIC_APP_URL` | api, web | Public dashboard origin allowed by API CORS. |
 
 ## Database
 

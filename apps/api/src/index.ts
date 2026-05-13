@@ -1,7 +1,5 @@
 import "dotenv/config";
 import express from "express";
-import helmet from "helmet";
-import cors from "cors";
 import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
 import { errorHandler } from "./middleware/error";
@@ -12,19 +10,14 @@ import { payoutQueue } from "./queues/payout.queue";
 import { leagueQueue } from "./queues/league.queue";
 import { logger } from "./lib/logger";
 import { config } from "./lib/config";
+import { applySecurityMiddleware } from "./middleware/security";
 
 const app = express();
 const PORT = config.PORT;
 let isShuttingDown = false;
 
 // ── Security & Parsing ─────────────────────────────────────────────────────
-app.use(helmet());
-app.use(
-  cors({
-    origin: config.WEB_URL,
-    credentials: true,
-  })
-);
+applySecurityMiddleware(app, config);
 app.use(cookieParser());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));

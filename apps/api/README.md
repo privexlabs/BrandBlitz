@@ -136,6 +136,7 @@ The API listens on `PORT` (default `3001`). In the full Docker stack, Nginx prox
 | `TWILIO_AUTH_TOKEN` | No | Twilio auth token |
 | `TWILIO_VERIFY_SERVICE_SID` | No | Twilio Verify service SID |
 | `WEBHOOK_SECRET` | Yes | `X-Webhook-Secret` header value |
+| `NEXT_PUBLIC_APP_URL` | Yes | Frontend origin allowed by API CORS |
 | `NEXTAUTH_URL` | Yes | Frontend base URL (for CORS) |
 
 ---

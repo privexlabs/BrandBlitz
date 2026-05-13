@@ -12,6 +12,7 @@ const configSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   WEB_URL: z.string().url().default("http://localhost:3000"),
+  NEXT_PUBLIC_APP_URL: z.string().url().optional(),
 
   // Stellar
   STELLAR_NETWORK: z.enum(["testnet", "public"]).default("testnet"),
