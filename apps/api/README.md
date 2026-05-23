@@ -135,7 +135,7 @@ The API listens on `PORT` (default `3001`). In the full Docker stack, Nginx prox
 | `TWILIO_ACCOUNT_SID` | No | Twilio account SID |
 | `TWILIO_AUTH_TOKEN` | No | Twilio auth token |
 | `TWILIO_VERIFY_SERVICE_SID` | No | Twilio Verify service SID |
-| `WEBHOOK_SECRET` | Yes | `X-Webhook-Secret` header value |
+| `WEBHOOK_SECRET` | Yes | Shared secret used by `X-Webhook-Secret` and Stellar webhook HMAC signatures |
 | `NEXTAUTH_URL` | Yes | Frontend base URL (for CORS) |
 
 ---
@@ -463,7 +463,7 @@ Public profile — display name, stats, recent sessions. No auth required.
 
 #### `POST /webhooks/stellar`
 
-Called by a Stellar event listener when a USDC deposit is detected. Protected by `X-Webhook-Secret` header.
+Called by a Stellar event listener when a USDC deposit is detected. Protected by `X-Webhook-Secret`, a timestamped `X-Webhook-Signature`, and replay protection through `X-Webhook-Id`.
 
 **Body:**
 ```json
