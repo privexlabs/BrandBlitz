@@ -26,7 +26,14 @@ app.use(
   })
 );
 app.use(cookieParser());
-app.use(express.json({ limit: "1mb" }));
+app.use(
+  express.json({
+    limit: "1mb",
+    verify: (req, _res, buf) => {
+      (req as express.Request & { rawBody?: string }).rawBody = buf.toString("utf8");
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 
 // ── Global rate limit ──────────────────────────────────────────────────────

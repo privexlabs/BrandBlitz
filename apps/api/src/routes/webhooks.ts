@@ -7,8 +7,8 @@ import {
 } from "../db/queries/challenges";
 import { findPayoutByTxHash } from "../db/queries/payouts";
 import { webhookLimiter } from "../middleware/rate-limit";
+import { verifyStellarWebhook } from "../middleware/verify-webhook";
 import { logger } from "../lib/logger";
-import { config } from "../lib/config";
 
 const router = Router();
 
@@ -16,7 +16,10 @@ const DepositWebhookSchema = z
   .object({
     memo: z.string().uuid("memo must be a valid UUID"),
     txHash: z.string().regex(/^[0-9a-fA-F]{64}$/, "txHash must be a 64-character hex string"),
-    amount: z.string().regex(/^\d+(\.\d{1,7})?$/, "amount must be a numeric string").optional(),
+    amount: z
+      .string()
+      .regex(/^\d+(\.\d{1,7})?$/, "amount must be a numeric string")
+      .optional(),
   })
   .strict();
 
@@ -25,13 +28,7 @@ const DepositWebhookSchema = z
  * Internal webhook: called by the deposit monitor when a matching USDC
  * payment is detected on-chain. Activates the challenge.
  */
-router.post("/stellar/deposit", webhookLimiter, async (req, res) => {
-  const secret = req.headers["x-webhook-secret"];
-  if (secret !== config.WEBHOOK_SECRET) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-
+router.post("/stellar/deposit", webhookLimiter, verifyStellarWebhook, async (req, res) => {
   const body = DepositWebhookSchema.parse(req.body);
 
   const duplicateChallenge = await getChallengeByDepositTxHash(body.txHash);
