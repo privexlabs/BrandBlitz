@@ -107,8 +107,8 @@ describeIntegration("challenges db queries", () => {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         challenge_id UUID NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
         round INTEGER NOT NULL CHECK (round IN (1, 2, 3)),
-        question_type TEXT NOT NULL,
-        prompt_type TEXT NOT NULL,
+        question_type TEXT NOT NULL CHECK (question_type IN ('which_brand', 'which_tagline', 'which_product')),
+        prompt_type TEXT NOT NULL CHECK (prompt_type IN ('logo', 'productImage1', 'tagline')),
         question_text TEXT NOT NULL,
         correct_answer TEXT NOT NULL,
         option_a TEXT NOT NULL,
@@ -372,8 +372,8 @@ describeIntegration("challenges db queries", () => {
     const questions = [1, 2, 3].map((round) => ({
       challenge_id: created.id,
       round: round as 1 | 2 | 3,
-      question_type: "brand_trivia",
-      prompt_type: "text",
+      question_type: "which_brand",
+      prompt_type: "tagline",
       question_text: `Question ${round}?`,
       correct_answer: `Answer ${round}`,
       option_a: "A answer",
@@ -404,8 +404,8 @@ describeIntegration("challenges db queries", () => {
 
     const baseQuestion = {
       challenge_id: created.id,
-      question_type: "brand_trivia",
-      prompt_type: "text",
+      question_type: "which_brand",
+      prompt_type: "tagline",
       question_text: "Duplicate?",
       correct_answer: "Yes",
       option_a: "A",
@@ -443,8 +443,8 @@ describeIntegration("challenges db queries", () => {
     const questions = [3, 1, 2].map((round) => ({
       challenge_id: created.id,
       round: round as 1 | 2 | 3,
-      question_type: "brand_trivia",
-      prompt_type: "text",
+      question_type: "which_brand",
+      prompt_type: "tagline",
       question_text: `Question round ${round}`,
       correct_answer: `Answer ${round}`,
       option_a: "A",
@@ -483,8 +483,8 @@ describeIntegration("challenges db queries", () => {
       {
         challenge_id: created.id,
         round: 1,
-        question_type: "brand_trivia",
-        prompt_type: "text",
+        question_type: "which_tagline",
+        prompt_type: "logo",
         question_text: "Private test?",
         correct_answer: "Yes",
         option_a: "A",
@@ -499,6 +499,42 @@ describeIntegration("challenges db queries", () => {
     expect(result).toHaveLength(1);
     // The current getChallengeQuestions returns SELECT * so correct_option is included
     expect(result[0].correct_option).toBe("B");
+  });
+
+  it("round-trips question and prompt types", async () => {
+    const userId = await createUser("get-q-types");
+    const brandId = await createBrand(userId);
+
+    const created = await challenges.createChallenge({
+      brandId,
+      challengeId: `q-types-${randomUUID()}`,
+      poolAmountUsdc: "100.0000000",
+    });
+
+    await challenges.insertChallengeQuestions([
+      {
+        challenge_id: created.id,
+        round: 1,
+        question_type: "which_product",
+        prompt_type: "productImage1",
+        question_text: "Which brand makes this product?",
+        correct_answer: "Acme",
+        option_a: "Acme",
+        option_b: "Beta",
+        option_c: "Cyan",
+        option_d: "Delta",
+        correct_option: "A",
+      },
+    ]);
+
+    const result = await challenges.getChallengeQuestions(created.id);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      question_type: "which_product",
+      prompt_type: "productImage1",
+      question_text: "Which brand makes this product?",
+    });
   });
 
   // ── deposit_memo index performance ─────────────────────────────────────────

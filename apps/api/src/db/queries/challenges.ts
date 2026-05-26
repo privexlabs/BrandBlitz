@@ -30,8 +30,8 @@ export interface ChallengeQuestion {
   id: string;
   challenge_id: string;
   round: 1 | 2 | 3;
-  question_type: string;
-  prompt_type: string;
+  question_type: "which_brand" | "which_tagline" | "which_product";
+  prompt_type: "logo" | "productImage1" | "tagline";
   question_text: string;
   correct_answer: string;
   option_a: string;
