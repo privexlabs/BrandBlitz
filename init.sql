@@ -17,7 +17,7 @@ CREATE TABLE users (
   kyc_complete      BOOLEAN NOT NULL DEFAULT FALSE,
   stellar_address   TEXT,
   embedded_wallet_address TEXT,
-  muxed_id          BIGINT UNIQUE,
+  muxed_id          BIGINT,
   phone_hash        TEXT UNIQUE,
   phone_verified    BOOLEAN NOT NULL DEFAULT FALSE,
   phone_verified_at TIMESTAMPTZ,
@@ -40,6 +40,7 @@ CREATE INDEX idx_users_google_id    ON users (google_id);
 CREATE INDEX idx_users_phone_hash   ON users (phone_hash);
 CREATE INDEX idx_users_total_score  ON users (total_score DESC);
 CREATE INDEX idx_users_league       ON users (league);
+CREATE UNIQUE INDEX users_muxed_id_unique ON users (muxed_id) WHERE muxed_id IS NOT NULL;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- BRANDS

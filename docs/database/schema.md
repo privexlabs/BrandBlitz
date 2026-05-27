@@ -25,6 +25,20 @@ warmup → active → completed
                 ↘ flagged
 ```
 
+## users
+
+### muxed_id uniqueness
+
+`users.muxed_id` is nullable because most users do not have a muxed Stellar ID. Non-null values must still be unique, enforced by the partial unique index:
+
+```sql
+CREATE UNIQUE INDEX users_muxed_id_unique
+  ON users (muxed_id)
+  WHERE muxed_id IS NOT NULL;
+```
+
+This preserves the intended semantics while keeping NULL-only rows out of the uniqueness index. Equality lookups such as `WHERE muxed_id = $1` can use the partial index because the predicate implies `muxed_id IS NOT NULL`.
+
 ## challenges
 
 ### deposit_memo lookup
