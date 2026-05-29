@@ -2,7 +2,6 @@ import { Router } from "express";
 import { z } from "zod";
 import { getChallengeById, getChallengeQuestions } from "../db/queries/challenges";
 import {
-  createSession,
   getSession,
   markWarmupStarted,
   markWarmupCompleted,
@@ -34,25 +33,21 @@ const AnswerSchema = z.object({
 /**
  * POST /sessions/:challengeId/warmup-start
  * Begin the warm-up phase. Records start time server-side.
+ * Uses DB UNIQUE constraint to atomically create the session (no race).
  */
 router.post(
   "/:challengeId/warmup-start",
   authenticate,
   validateDeviceFingerprint,
+  enforceOneSessionPerChallenge,
   async (req, res) => {
     const challenge = await getChallengeById(req.params.challengeId);
     if (!challenge || challenge.status !== "active") {
       throw createError("Challenge not available", 404);
     }
 
-    const session = await createSession({
-      userId: req.user!.sub,
-      challengeId: challenge.id,
-      deviceId:
-        (req.headers["x-device-id"] as string | undefined) ??
-        (req.headers["x-visitor-id"] as string | undefined),
-      isPractice: req.body.isPractice === true,
-    });
+    const session = (req as any).session;
+    if (!session) throw createError("Session not found", 404);
 
     await markWarmupStarted(session.id);
 
@@ -105,7 +100,6 @@ router.post(
   "/:challengeId/start",
   authenticate,
   challengeStartLimiter,
-  enforceOneSessionPerChallenge,
   async (req, res) => {
     const { challengeToken } = z.object({ challengeToken: z.string() }).parse(req.body);
     const challenge = await getChallengeById(req.params.challengeId);

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import axios from "axios";
 import type { AxiosInstance } from "axios";
 
@@ -101,4 +102,26 @@ export interface StreakResponse {
   nextMilestone: number;
   progress: number;
   milestoneJustHit: boolean;
+}
+
+// ── Runtime validation schemas (catch API shape drift) ─────────────────────────
+
+export const ChallengeSchema = z.object({
+  id: z.string(),
+  brand_id: z.string(),
+  challenge_id: z.string(),
+  pool_amount_stroops: z.string(),
+  pool_amount_usdc: z.string(),
+  status: z.enum(["pending_deposit", "active", "ended", "settled", "payout_failed"]),
+  starts_at: z.string(),
+  ends_at: z.string().nullable(),
+  brand_name: z.string().optional(),
+  tagline: z.string().optional(),
+  logo_url: z.string().optional(),
+  primary_color: z.string().optional(),
+  secondary_color: z.string().optional(),
+});
+
+export function parseChallenge(data: unknown): Challenge {
+  return ChallengeSchema.parse(data);
 }

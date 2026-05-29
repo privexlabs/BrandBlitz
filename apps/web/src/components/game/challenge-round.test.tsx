@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, act } from "@testing-library/react";
-import { ChallengeRound } from "./challenge-round";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ChallengeRound } from "./challenge-round";
 import { ROUND_SECONDS } from "./constants";
 import type { ChallengeQuestion } from "@/lib/api";
@@ -39,42 +37,10 @@ describe("ChallengeRound", () => {
   afterEach(() => {
     vi.runOnlyPendingTimers();
     capturedOnExpire = undefined;
-  });
-
-  afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
   });
 
-  it("submits null on timer expiry", () => {
-    const onAnswer = vi.fn();
-
-    render(
-      <ChallengeRound
-        question={{
-          id: "q1",
-          challenge_id: "c1",
-          round: 1,
-          question_type: "mcq",
-          prompt_type: "logo",
-          question_text: "Pick the correct brand",
-          option_a: "A option",
-          option_b: "B option",
-          option_c: "C option",
-          option_d: "D option",
-        }}
-        round={1}
-        onAnswer={onAnswer}
-      />
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(15_100);
-    });
-
-    expect(onAnswer).toHaveBeenCalledTimes(1);
-    expect(onAnswer).toHaveBeenCalledWith(null, 15_000);
-    expect(onAnswer).not.toHaveBeenCalledWith("A", expect.any(Number));
   it("renders the question prompt and all 4 options", () => {
     const onAnswer = vi.fn();
     render(<ChallengeRound question={buildQuestion()} round={1} onAnswer={onAnswer} />);
@@ -119,7 +85,38 @@ describe("ChallengeRound", () => {
     expect(onAnswer).toHaveBeenCalledWith("A", expect.any(Number));
   });
 
-  it("timer reaching 0 calls onAnswer with sentinel default option A and rtMs = ROUND_SECONDS * 1000", () => {
+  it("submits null on timer expiry", () => {
+    const onAnswer = vi.fn();
+
+    render(
+      <ChallengeRound
+        question={{
+          id: "q1",
+          challenge_id: "c1",
+          round: 1,
+          question_type: "mcq",
+          prompt_type: "logo",
+          question_text: "Pick the correct brand",
+          option_a: "A option",
+          option_b: "B option",
+          option_c: "C option",
+          option_d: "D option",
+        }}
+        round={1}
+        onAnswer={onAnswer}
+      />
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(15_100);
+    });
+
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    expect(onAnswer).toHaveBeenCalledWith(null, 15_000);
+    expect(onAnswer).not.toHaveBeenCalledWith("A", expect.any(Number));
+  });
+
+  it("timer reaching 0 calls onAnswer with null and rtMs = ROUND_SECONDS * 1000", () => {
     const onAnswer = vi.fn();
     render(<ChallengeRound question={buildQuestion()} round={1} onAnswer={onAnswer} />);
 
@@ -127,7 +124,7 @@ describe("ChallengeRound", () => {
     capturedOnExpire!();
 
     expect(onAnswer).toHaveBeenCalledTimes(1);
-    expect(onAnswer).toHaveBeenCalledWith("A", ROUND_SECONDS * 1000);
+    expect(onAnswer).toHaveBeenCalledWith(null, ROUND_SECONDS * 1000);
   });
 
   it("timer expiry does not fire if user already answered", () => {

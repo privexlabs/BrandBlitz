@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createApiClient } from "./api";
+import { createApiClient, parseChallenge } from "./api";
 
 describe("createApiClient", () => {
   it("sets withCredentials to true so cookies are sent on cross-origin requests", () => {
@@ -20,5 +20,47 @@ describe("createApiClient", () => {
   it("does not include an Authorization header when no token is provided", () => {
     const client = createApiClient();
     expect(client.defaults.headers.Authorization).toBeUndefined();
+  });
+});
+
+describe("parseChallenge", () => {
+  const fixture = {
+    id: "ch-123",
+    brand_id: "b-456",
+    challenge_id: "ch-123",
+    pool_amount_stroops: "10000000",
+    pool_amount_usdc: "100",
+    status: "active" as const,
+    starts_at: "2026-05-01T00:00:00.000Z",
+    ends_at: "2026-05-02T00:00:00.000Z",
+    brand_name: "Acme Corp",
+    logo_url: "https://example.com/logo.png",
+    primary_color: "#112233",
+    secondary_color: "#ddeeff",
+  };
+
+  it("parses a valid API response fixture", () => {
+    const result = parseChallenge(fixture);
+    expect(result.id).toBe("ch-123");
+    expect(result.brand_name).toBe("Acme Corp");
+    expect(result.pool_amount_usdc).toBe("100");
+  });
+
+  it("throws on missing required field", () => {
+    const { id, ...incomplete } = fixture;
+    expect(() => parseChallenge(incomplete)).toThrow();
+  });
+
+  it("throws on invalid status value", () => {
+    expect(() => parseChallenge({ ...fixture, status: "invalid" })).toThrow();
+  });
+
+  it("accepts optional fields as absent", () => {
+    const { tagline, ...partial } = fixture;
+    expect(() => parseChallenge(partial)).not.toThrow();
+  });
+
+  it("accepts ends_at as null", () => {
+    expect(() => parseChallenge({ ...fixture, ends_at: null })).not.toThrow();
   });
 });

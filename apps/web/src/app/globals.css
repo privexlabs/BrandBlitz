@@ -97,3 +97,53 @@ a {
   color: inherit;
   text-decoration: none;
 }
+
+/* ── Confetti animation ───────────────────────────────────────────────────── */
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+.confetti-piece {
+  position: fixed;
+  width: 10px;
+  height: 10px;
+  animation: confetti-fall 3s ease-out forwards;
+}
+
+/* ── USDC pulse animation ─────────────────────────────────────────────────── */
+@keyframes usdc-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(34, 197, 94, 0);
+    transform: scale(1.03);
+  }
+}
+
+.usdc-pulse {
+  animation: usdc-pulse 1.5s ease-in-out 2;
+}
+
+/* ── Disable animations for reduced motion ────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .confetti-piece,
+  .usdc-pulse {
+    animation: none !important;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

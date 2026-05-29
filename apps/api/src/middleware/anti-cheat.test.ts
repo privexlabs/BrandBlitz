@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { validateReactionTime, validateDeviceFingerprint, BOT_REACTION_THRESHOLD_MS, MIN_HUMAN_REACTION_MS } from "./anti-cheat";
+import { validateReactionTime, validateDeviceFingerprint, enforceOneSessionPerChallenge, BOT_REACTION_THRESHOLD_MS, MIN_HUMAN_REACTION_MS } from "./anti-cheat";
 import * as fraudQueries from "../db/queries/fraud-flags";
 import { metrics } from "../lib/metrics";
+import * as sessionQueries from "../db/queries/sessions";
 
 vi.mock("../db/queries/fraud-flags");
 vi.mock("../db/queries/sessions");
@@ -145,6 +146,50 @@ describe("anti-cheat middleware", () => {
       await validateDeviceFingerprint(req, res, next);
 
       expect(next).toHaveBeenCalled();
+    });
+  });
+
+  describe("enforceOneSessionPerChallenge", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("attaches new session to req and calls next when claimSession succeeds", async () => {
+      const mockSession = { id: "s1", user_id: "user-1", challenge_id: "challenge-1" };
+      (sessionQueries.claimSession as any).mockResolvedValue(mockSession);
+
+      await enforceOneSessionPerChallenge(req, res, next);
+
+      expect(sessionQueries.claimSession).toHaveBeenCalledWith({
+        userId: "user-1",
+        challengeId: "challenge-1",
+        deviceId: "device-abc",
+        isPractice: false,
+      });
+      expect((req as any).session).toEqual(mockSession);
+      expect(next).toHaveBeenCalledTimes(1);
+    });
+
+    it("fetches existing session on conflict and attaches it to req", async () => {
+      (sessionQueries.claimSession as any).mockResolvedValue(null);
+      const existing = { id: "s1", user_id: "user-1", challenge_id: "challenge-1" };
+      (sessionQueries.getSession as any).mockResolvedValue(existing);
+
+      await enforceOneSessionPerChallenge(req, res, next);
+
+      expect(sessionQueries.getSession).toHaveBeenCalledWith("user-1", "challenge-1");
+      expect((req as any).session).toEqual(existing);
+      expect(next).toHaveBeenCalledTimes(1);
+    });
+
+    it("throws 404 when claimSession fails AND no existing session found", async () => {
+      (sessionQueries.claimSession as any).mockResolvedValue(null);
+      (sessionQueries.getSession as any).mockResolvedValue(null);
+
+      await expect(enforceOneSessionPerChallenge(req, res, next)).rejects.toMatchObject({
+        statusCode: 404,
+      });
+      expect(next).not.toHaveBeenCalled();
     });
   });
 });

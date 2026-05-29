@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { redis } from "../lib/redis";
 import { createFraudFlag } from "../db/queries/fraud-flags";
 import { getConfig } from "../db/queries/config";
-import { getSession } from "../db/queries/sessions";
+import { getSession, claimSession } from "../db/queries/sessions";
 import { logger } from "../lib/logger";
 import { metrics } from "../lib/metrics";
 import { computeFingerprint } from "../lib/fingerprint";
@@ -119,8 +119,8 @@ export async function validateReactionTime(
 }
 
 /**
- * Anti-cheat Layer 5 — Redis rate limiting.
  * Enforces: 1 competitive session per account per challenge.
+ * Uses the DB UNIQUE constraint atomically — no check-then-act race.
  */
 export async function enforceOneSessionPerChallenge(
   req: Request,
@@ -130,28 +130,27 @@ export async function enforceOneSessionPerChallenge(
   const userId = req.user!.sub;
   const { challengeId } = req.params;
 
-  try {
-    const key = `session:lock:${userId}:${challengeId}`;
-    const existing = await redis.get(key);
+  const session = await claimSession({
+    userId,
+    challengeId,
+    deviceId:
+      (req.headers["x-device-id"] as string | undefined) ??
+      (req.headers["x-visitor-id"] as string | undefined),
+    isPractice: req.body.isPractice === true,
+  });
 
-    if (existing) {
-      throw createError("Already played this challenge", 409, "ALREADY_PLAYED");
-    }
-
-    // TTL of 2 hours to auto-expire if session never completes
-    await redis.set(key, "1", "EX", 7200);
-  } catch (error) {
-    if ((error as { statusCode?: number }).statusCode === 409) {
-      throw error;
-    }
-
-    logger.warn("Redis unavailable during one-session enforcement; failing open", {
-      challengeId,
-      userId,
-      error: (error as Error).message,
-    });
+  if (session) {
+    (req as any).session = session;
+    next();
+    return;
   }
 
+  // Session already exists — fetch and return existing one idempotently
+  const existing = await getSession(userId, challengeId);
+  if (!existing) {
+    throw createError("Session not found", 404);
+  }
+  (req as any).session = existing;
   next();
 }
 

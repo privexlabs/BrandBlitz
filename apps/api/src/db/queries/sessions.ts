@@ -59,6 +59,22 @@ export async function createSession(data: {
   return result.rows[0];
 }
 
+export async function claimSession(data: {
+  userId: string;
+  challengeId: string;
+  deviceId?: string;
+  isPractice?: boolean;
+}): Promise<GameSession | null> {
+  const result = await query<GameSession>(
+    `INSERT INTO game_sessions (user_id, challenge_id, device_id, is_practice)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (user_id, challenge_id) DO NOTHING
+     RETURNING *`,
+    [data.userId, data.challengeId, data.deviceId ?? null, data.isPractice ?? false]
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function getSession(userId: string, challengeId: string): Promise<GameSession | null> {
   const result = await query<GameSession>(
     "SELECT * FROM game_sessions WHERE user_id = $1 AND challenge_id = $2",

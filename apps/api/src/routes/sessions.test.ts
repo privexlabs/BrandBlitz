@@ -22,7 +22,11 @@ vi.mock("../middleware/authenticate", () => ({
   },
 }));
 vi.mock("../middleware/anti-cheat", () => ({
-  enforceOneSessionPerChallenge: (req: any, res: any, next: any) => next(),
+  enforceOneSessionPerChallenge: (req: any, res: any, next: any) => {
+    // Attach a mock session so the handler can use it
+    req.session = { id: "s1", user_id: "user123" };
+    next();
+  },
   validateReactionTime: (req: any, res: any, next: any) => next(),
   validateDeviceFingerprint: (req: any, res: any, next: any) => next(),
 }));
