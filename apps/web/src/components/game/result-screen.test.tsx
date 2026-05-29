@@ -2,7 +2,7 @@
 import type { AnchorHTMLAttributes } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResultScreen } from "./result-screen";
 
 vi.mock("next/link", () => ({
@@ -12,6 +12,19 @@ vi.mock("next/link", () => ({
     </a>
   ),
 }));
+
+beforeAll(() => {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: true,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+});
 
 describe("ResultScreen", () => {
   let clipboardWrite: ReturnType<typeof vi.spyOn>;

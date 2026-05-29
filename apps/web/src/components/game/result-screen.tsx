@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,12 +13,77 @@ interface ResultScreenProps {
   challengeId: string;
 }
 
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setReduced(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  return reduced;
+}
+
+function useCountUp(target: number, duration: number, disabled: boolean): number {
+  const [current, setCurrent] = useState(() => (disabled ? target : 0));
+  const frameRef = useRef(0);
+
+  useEffect(() => {
+    if (disabled) {
+      setCurrent(target);
+      return;
+    }
+
+    const startTime = performance.now();
+
+    function easeOutCubic(t: number): number {
+      return 1 - Math.pow(1 - t, 3);
+    }
+
+    function animate(now: number) {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      setCurrent(Math.round(easeOutCubic(progress) * target));
+
+      if (progress < 1) {
+        frameRef.current = requestAnimationFrame(animate);
+      }
+    }
+
+    frameRef.current = requestAnimationFrame(animate);
+
+    return () => cancelAnimationFrame(frameRef.current);
+  }, [target, duration, disabled]);
+
+  return current;
+}
+
 export function ResultScreen({ totalScore, rank, estimatedUsdc, challengeId }: ResultScreenProps) {
   const [shareToast, setShareToast] = useState<string | null>(null);
+  const prefersReduced = useReducedMotion();
+  const animatedScore = useCountUp(totalScore, 1200, prefersReduced);
+  const confettiFired = useRef(false);
+
+  useEffect(() => {
+    if (rank != null && rank <= 10 && !confettiFired.current && !prefersReduced) {
+      confettiFired.current = true;
+      import("canvas-confetti").then((mod) => {
+        mod.default({
+          particleCount: 120,
+          spread: 80,
+          origin: { y: 0.6 },
+        });
+      });
+    }
+  }, [rank, prefersReduced]);
+
   const shareText = `I just scored ${formatScore(totalScore)} in a BrandBlitz challenge${estimatedUsdc ? ` and earned ~${formatUsdc(estimatedUsdc)} USDC` : ""}! 🏆`;
   const leaderboardHref = `/challenge/${challengeId}`;
 
-  async function handleShare(): Promise<void> {
+  const handleShare = useCallback(async () => {
     if (navigator.share) {
       await navigator.share({ text: shareText, url: window.location.href });
       return;
@@ -26,7 +91,7 @@ export function ResultScreen({ totalScore, rank, estimatedUsdc, challengeId }: R
 
     await navigator.clipboard.writeText(shareText);
     setShareToast("Result copied to clipboard.");
-  }
+  }, [shareText]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
@@ -36,7 +101,12 @@ export function ResultScreen({ totalScore, rank, estimatedUsdc, challengeId }: R
         </CardHeader>
         <CardContent className="space-y-6">
           <div>
-            <p className="text-6xl font-bold text-[var(--primary)]">{formatScore(totalScore)}</p>
+            <p
+              className="text-6xl font-bold text-[var(--primary)] tabular-nums"
+              aria-live="polite"
+            >
+              {formatScore(animatedScore)}
+            </p>
             <p className="text-[var(--muted-foreground)] mt-1">points</p>
           </div>
 
@@ -47,7 +117,7 @@ export function ResultScreen({ totalScore, rank, estimatedUsdc, challengeId }: R
           )}
 
           {estimatedUsdc && (
-            <div className="rounded-lg bg-green-50 border border-green-200 p-4">
+            <div className="rounded-lg bg-green-50 border border-green-200 p-4 motion-safe:animate-pulse">
               <p className="text-sm text-green-700">Estimated earnings</p>
               <p className="text-2xl font-bold text-green-800">{formatUsdc(estimatedUsdc)} USDC</p>
               <p className="text-xs text-green-600 mt-1">Paid out when challenge ends</p>
