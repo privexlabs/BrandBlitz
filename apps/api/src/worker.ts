@@ -8,6 +8,7 @@ import { createArchiveWorker, scheduleArchiveJob } from "./queues/archive.queue"
 import { createLeagueWorker } from "./queues/processors/league.processor";
 import { createGdprErasureWorker } from "./queues/processors/gdpr-erasure.processor";
 import { ensureLeagueRepeatableJobs } from "./queues/league.queue";
+import { drainSharedAgent } from "@brandblitz/stellar";
 import { logger } from "./lib/logger";
 
 async function startWorker(): Promise<void> {
@@ -32,6 +33,7 @@ async function startWorker(): Promise<void> {
     await gdprErasureWorker.close();
     await closeDb();
     await redis.disconnect();
+    drainSharedAgent();
     logger.info("Worker shutdown complete");
     process.exit(0);
   };
