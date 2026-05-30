@@ -22,19 +22,20 @@ This document explains the canonical BrandBlitz schema, the current table relati
 
 ## Domain ownership
 
-| Table | Ownership |
-|---|---|
-| `users` | identity / auth |
-| `brands` | brand management |
-| `challenges` | challenge lifecycle |
-| `challenge_questions` | challenge content |
-| `game_sessions` | gameplay state |
-| `session_round_scores` | gameplay scoring |
-| `payouts` | settlement / finance |
-| `fraud_flags` | anti-cheat / risk |
-| `league_assignments` | ranking / leaderboard |
-| `user_badges` | achievements |
-| `referrals` | growth / referral |
+| Table                  | Ownership             |
+| ---------------------- | --------------------- |
+| `users`                | identity / auth       |
+| `brands`               | brand management      |
+| `challenges`           | challenge lifecycle   |
+| `challenge_questions`  | challenge content     |
+| `game_sessions`        | gameplay state        |
+| `session_round_scores` | gameplay scoring      |
+| `payouts`              | settlement / finance  |
+| `fraud_flags`          | anti-cheat / risk     |
+| `league_assignments`   | ranking / leaderboard |
+| `user_badges`          | achievements          |
+| `referrals`            | growth / referral     |
+| `referral_payouts`     | growth / referral     |
 
 ## Soft delete and retention
 
@@ -53,6 +54,8 @@ This document explains the canonical BrandBlitz schema, the current table relati
   - `google_id`: unique
   - `username`: unique
   - `phone_hash`: unique
+  - `embedded_wallet_address`: optional wallet address used when a user has an embedded wallet instead of a Stellar address
+  - `referral_code`: unique 6-character invite code
   - `role`: `player` / `brand` / `admin`
   - `league`: enforced to `bronze`, `silver`, or `gold`
   - `total_score`, `total_earned_usdc`, `challenges_played`
@@ -251,6 +254,26 @@ This document explains the canonical BrandBlitz schema, the current table relati
 - FK semantics: referral rows are removed if either user is deleted.
 - Soft delete: none.
 - Retention: referral history is retained indefinitely.
+- Domain owner: growth / referral.
+
+## referral_payouts
+
+- Purpose: track referral bonus payouts for both the referrer and the referred user.
+- Key columns
+  - `id`: PK
+  - `referral_id`: FK to `referrals(id)` with `ON DELETE CASCADE`
+  - `challenge_id`: optional FK to `challenges(id)` for bonus attribution
+  - `referrer_id`, `referred_id`
+  - `referrer_amount_stroops`, `referred_amount_stroops`
+  - `status`: `pending`, `sent`, or `failed`
+- Constraints
+  - `UNIQUE (referral_id)` ensures each referral earns at most one bonus payout row.
+- Indexes
+  - `idx_referral_payouts_referrer_id`
+  - `idx_referral_payouts_referred_id`
+  - `idx_referral_payouts_status`
+- FK semantics: rows are removed if the underlying referral or users are deleted.
+- Retention: referral bonus history is retained indefinitely.
 - Domain owner: growth / referral.
 
 ## refunds

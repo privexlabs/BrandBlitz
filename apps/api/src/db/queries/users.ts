@@ -16,6 +16,7 @@ export interface User {
   kyc_complete: boolean;
   stellar_address: string | null;
   embedded_wallet_address: string | null;
+  referral_code: string | null;
   league: "bronze" | "silver" | "gold" | null;
   total_score: number;
   total_earned_usdc: string;
@@ -40,23 +41,73 @@ export interface PublicUser {
 }
 
 export async function findUserByEmail(email: string): Promise<User | null> {
-  const result = await query<User>("SELECT * FROM users WHERE email = $1 LIMIT 1", [email]);
+  const result = await query<User>(
+    "SELECT * FROM users WHERE email = $1 LIMIT 1",
+    [email],
+  );
   return result.rows[0] ?? null;
 }
 
-export async function findUserByGoogleId(googleId: string): Promise<User | null> {
-  const result = await query<User>("SELECT * FROM users WHERE google_id = $1 LIMIT 1", [googleId]);
+export async function findUserByGoogleId(
+  googleId: string,
+): Promise<User | null> {
+  const result = await query<User>(
+    "SELECT * FROM users WHERE google_id = $1 LIMIT 1",
+    [googleId],
+  );
   return result.rows[0] ?? null;
 }
 
 export async function findUserById(id: string): Promise<User | null> {
-  const result = await query<User>("SELECT * FROM users WHERE id = $1 LIMIT 1", [id]);
+  const result = await query<User>(
+    "SELECT * FROM users WHERE id = $1 LIMIT 1",
+    [id],
+  );
   return result.rows[0] ?? null;
 }
 
-export async function findUserByPhoneHash(phoneHash: string): Promise<User | null> {
-  const result = await query<User>("SELECT * FROM users WHERE phone_hash = $1 LIMIT 1", [phoneHash]);
+export async function findUserByPhoneHash(
+  phoneHash: string,
+): Promise<User | null> {
+  const result = await query<User>(
+    "SELECT * FROM users WHERE phone_hash = $1 LIMIT 1",
+    [phoneHash],
+  );
   return result.rows[0] ?? null;
+}
+
+export async function findUserByReferralCode(
+  referralCode: string,
+): Promise<User | null> {
+  const result = await query<User>(
+    "SELECT * FROM users WHERE referral_code = $1 LIMIT 1",
+    [referralCode],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getUserReferralCode(
+  userId: string,
+): Promise<string | null> {
+  const result = await query<{ referral_code: string | null }>(
+    "SELECT referral_code FROM users WHERE id = $1 LIMIT 1",
+    [userId],
+  );
+  return result.rows[0]?.referral_code ?? null;
+}
+
+export async function setUserReferralCode(
+  userId: string,
+  referralCode: string,
+): Promise<void> {
+  await query(
+    `UPDATE users
+     SET referral_code = $1,
+         updated_at = NOW()
+     WHERE id = $2
+       AND referral_code IS NULL`,
+    [referralCode, userId],
+  );
 }
 
 function slugifyUsername(value: string): string {
@@ -73,15 +124,18 @@ function slugifyUsername(value: string): string {
 async function allocateUsername(
   client: PoolClient,
   displayName: string,
-  email: string
+  email: string,
 ): Promise<string> {
-  const base = slugifyUsername(displayName) || slugifyUsername(email.split("@")[0] ?? "") || "player";
+  const base =
+    slugifyUsername(displayName) ||
+    slugifyUsername(email.split("@")[0] ?? "") ||
+    "player";
   const prefix = `${base}-%`;
   const result = await client.query<{ username: string }>(
     `SELECT username
      FROM users
      WHERE username = $1 OR username LIKE $2`,
-    [base, prefix]
+    [base, prefix],
   );
 
   const taken = new Set(result.rows.map((row) => row.username));
@@ -97,12 +151,14 @@ async function allocateUsername(
   return `${base}-${suffix}`;
 }
 
-export async function getUserPublicProfileByUsername(username: string): Promise<PublicUser | null> {
+export async function getUserPublicProfileByUsername(
+  username: string,
+): Promise<PublicUser | null> {
   const result = await query<PublicUser>(
     `SELECT display_name, username, league, total_earned_usdc, challenges_played, avatar_url, streak
      FROM users
      WHERE username = $1`,
-    [username]
+    [username],
   );
   return result.rows[0] ?? null;
 }
@@ -113,7 +169,8 @@ export async function upsertUser(data: {
   name?: string;
   avatarUrl?: string;
 }): Promise<User> {
-  const displayName = data.name?.trim() || data.email.split("@")[0] || "BrandBlitz User";
+  const displayName =
+    data.name?.trim() || data.email.split("@")[0] || "BrandBlitz User";
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const client = await pool.connect();
@@ -131,13 +188,24 @@ export async function upsertUser(data: {
                avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
                updated_at = NOW()
          RETURNING *`,
-        [data.email, data.googleId, displayName, username, data.avatarUrl ?? null]
+        [
+          data.email,
+          data.googleId,
+          displayName,
+          username,
+          data.avatarUrl ?? null,
+        ],
       );
       await client.query("COMMIT");
       return result.rows[0];
     } catch (error) {
       await client.query("ROLLBACK");
-      if (attempt < 2 && error instanceof Error && "code" in error && (error as { code?: string }).code === "23505") {
+      if (
+        attempt < 2 &&
+        error instanceof Error &&
+        "code" in error &&
+        (error as { code?: string }).code === "23505"
+      ) {
         continue;
       }
       throw error;
@@ -151,25 +219,31 @@ export async function upsertUser(data: {
 
 export async function updateUserWallet(
   userId: string,
-  stellarAddress: string
+  stellarAddress: string,
 ): Promise<void> {
   await query(
     "UPDATE users SET stellar_address = $1, updated_at = NOW() WHERE id = $2",
-    [stellarAddress, userId]
+    [stellarAddress, userId],
   );
 }
 
-export async function incrementUserEarnings(userId: string, amountUsdc: string): Promise<void> {
+export async function incrementUserEarnings(
+  userId: string,
+  amountUsdc: string,
+): Promise<void> {
   await query(
     `UPDATE users
      SET total_earned_usdc = total_earned_usdc + $1::numeric,
          updated_at = NOW()
      WHERE id = $2`,
-    [amountUsdc, userId]
+    [amountUsdc, userId],
   );
 }
 
-export async function markPhoneVerified(userId: string, phoneHash: string): Promise<void> {
+export async function markPhoneVerified(
+  userId: string,
+  phoneHash: string,
+): Promise<void> {
   await query(
     `UPDATE users
      SET phone_hash = $1,
@@ -177,7 +251,7 @@ export async function markPhoneVerified(userId: string, phoneHash: string): Prom
          phone_verified_at = NOW(),
          updated_at = NOW()
      WHERE id = $2`,
-    [phoneHash, userId]
+    [phoneHash, userId],
   );
 }
 

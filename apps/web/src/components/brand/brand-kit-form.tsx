@@ -174,7 +174,7 @@ const FormSchema = z.object({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="primaryColor">Primary Color</Label>
               <div className="flex items-center gap-2">
@@ -194,11 +194,18 @@ const FormSchema = z.object({
                   className="font-mono"
                   pattern="^#[0-9a-f]{6}$"
                   aria-invalid={!HEX_COLOR_PATTERN.test(fields.primaryColor)}
+                  aria-describedby={
+                    !HEX_COLOR_PATTERN.test(fields.primaryColor)
+                      ? "primaryColorHexError"
+                      : undefined
+                  }
                   spellCheck={false}
                 />
               </div>
               {!HEX_COLOR_PATTERN.test(fields.primaryColor) ? (
-                <p className="text-xs text-red-500">Use format `#rrggbb` in lowercase.</p>
+                <p id="primaryColorHexError" className="text-xs text-red-500">
+                  Use format `#rrggbb` in lowercase.
+                </p>
               ) : null}
             </div>
             <div className="space-y-2">
@@ -220,11 +227,18 @@ const FormSchema = z.object({
                   className="font-mono"
                   pattern="^#[0-9a-f]{6}$"
                   aria-invalid={!HEX_COLOR_PATTERN.test(fields.secondaryColor)}
+                  aria-describedby={
+                    !HEX_COLOR_PATTERN.test(fields.secondaryColor)
+                      ? "secondaryColorHexError"
+                      : undefined
+                  }
                   spellCheck={false}
                 />
               </div>
               {!HEX_COLOR_PATTERN.test(fields.secondaryColor) ? (
-                <p className="text-xs text-red-500">Use format `#rrggbb` in lowercase.</p>
+                <p id="secondaryColorHexError" className="text-xs text-red-500">
+                  Use format `#rrggbb` in lowercase.
+                </p>
               ) : null}
             </div>
           </div>
@@ -308,7 +322,11 @@ const FormSchema = z.object({
       </Card>
 
       {error && (
-        <p className="text-sm text-red-500 bg-red-50 border border-red-200 rounded-lg p-3">
+        <p
+          role="alert"
+          aria-live="assertive"
+          className="text-sm text-red-500 bg-red-50 border border-red-200 rounded-lg p-3"
+        >
           {error}
         </p>
       )}

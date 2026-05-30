@@ -31,6 +31,21 @@ jobs:
         # The second call enforces runbooks strictly because they are the
         # critical operational documents (rotate-secrets.md, cdn-purge.md, …)
 
+  validate-env-example:
+    name: Validate .env.example against API config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm validate-env-example
+
   # ── Unit tests ───────────────────────────────────────────────────────────────
   test-api:
     name: API unit tests
