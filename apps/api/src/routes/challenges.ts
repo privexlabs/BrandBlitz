@@ -2,14 +2,15 @@ import { Router } from "express";
 import { z } from "zod";
 import {
   getActiveChallenges,
-  getChallengeById,
+  getChallengeByIdAny,
   getChallengesByBrandId,
   getChallengeQuestions,
 } from "../db/queries/challenges";
 import { getBrandById } from "../db/queries/brands";
-import { getLeaderboard } from "../db/queries/sessions";
+import { getLeaderboard, getArchivedLeaderboard } from "../db/queries/sessions";
 import { optionalAuth } from "../middleware/authenticate";
 import { createError } from "../middleware/error";
+import { cached } from "../lib/cache";
 
 const router = Router();
 
@@ -42,7 +43,11 @@ router.get("/", optionalAuth, async (req, res) => {
     return;
   }
 
-  const challenges = await getActiveChallenges(limit, offset);
+  const challenges = await cached(
+    `challenges:active:${limit}:${offset}`,
+    60,
+    () => getActiveChallenges(limit, offset)
+  );
   res.json({ challenges });
 });
 

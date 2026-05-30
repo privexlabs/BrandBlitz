@@ -12,7 +12,8 @@
     "lint": "eslint src",
     "type-check": "tsc --noEmit",
     "docs:db": "cd ../../ && pnpm docs:db",
-    "test": "corepack pnpm exec vitest run"
+    "test": "corepack pnpm exec vitest run",
+    "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1019.0",

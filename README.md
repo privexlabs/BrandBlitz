@@ -333,6 +333,34 @@ pnpm dev  # Turborepo runs all packages in parallel
 
 ---
 
+## Local Dev — Seed Data
+
+Starting from an empty database makes it hard to exercise any game flow. The seed script creates deterministic local fixtures so you can click through every page immediately.
+
+```bash
+# Seed once (idempotent — safe to re-run)
+pnpm --filter @brandblitz/api seed
+
+# Reset and re-seed from scratch
+pnpm --filter @brandblitz/api seed -- --reset
+```
+
+What it creates:
+- **50 users** — 1 admin (`seed-admin@brandblitz.test`), 3 brand owners, 46 players with varied leagues
+- **3 brands** — Stellar Pay, NovaMint, AetherShop (with logo fixtures at `apps/api/scripts/fixtures/logos/`)
+- **6 challenges** — 2 active, 2 completed, 2 draft (2 per brand)
+- **200 game sessions** — mix of completed and flagged (≈10% flagged, including fraud flags)
+
+**Auto-seed on `docker compose up`:**
+
+```bash
+SEED_DEV=1 docker compose up
+```
+
+Set `SEED_DEV=1` in your shell or `.env` and the API container will run the seed script before starting. This is a no-op if fixtures already exist.
+
+---
+
 ## Environment Variables
 
 See [`.env.example`](./.env.example) for all variables with inline documentation. Minimum to get running:
@@ -350,6 +378,7 @@ See [`.env.example`](./.env.example) for all variables with inline documentation
 | `S3_*` | Storage endpoint, credentials, bucket (`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`) |
 | `WEBHOOK_SECRET` | Protects `/webhooks/stellar` |
 | `PHONE_HASH_SALT` | HMAC salt for phone-number hashing (32-byte random) |
+| `SESSION_INTEGRITY_KEY` | HMAC key for session tamper-detection — generate with `openssl rand -hex 32` |
 | `NEXTAUTH_API_URL` | Internal URL next-auth uses to reach the API (e.g. `http://localhost/api`) |
 
 ---

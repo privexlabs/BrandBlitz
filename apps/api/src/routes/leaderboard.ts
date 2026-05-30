@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { getActiveChallenges } from "../db/queries/challenges";
 import { getLeaderboard, getTopSessionsPerChallenge } from "../db/queries/sessions";
-import { redis } from "../lib/redis";
+import { cached } from "../lib/cache";
 
 const router = Router();
 
@@ -98,37 +98,30 @@ router.get("/stream", async (req, res) => {
  * Single aggregated query via ROW_NUMBER() — no N+1.
  */
 router.get("/global", async (_req, res) => {
-  const cacheKey = "leaderboard:global";
-  const cached = await redis.get(cacheKey);
+  const response = await cached("leaderboard:global", 300, async () => {
+    const challenges = await getActiveChallenges(10);
+    const challengeIds = challenges.map((c) => c.id);
+    const topSessions = await getTopSessionsPerChallenge(challengeIds, 10);
 
-  if (cached) {
-    res.json(JSON.parse(cached));
-    return;
-  }
+    const rankPerChallenge = new Map<string, number>();
+    const allSessions = topSessions.map((s) => {
+      const rank = (rankPerChallenge.get(s.challenge_id) ?? 0) + 1;
+      rankPerChallenge.set(s.challenge_id, rank);
+      return {
+        rank,
+        challengeId: s.challenge_id,
+        userId: s.user_id,
+        username: s.username,
+        displayName: s.display_name,
+        league: s.league,
+        avatarUrl: s.avatar_url,
+        totalScore: s.total_score,
+        totalEarned: s.total_earned_usdc,
+      };
+    });
 
-  const challenges = await getActiveChallenges(10);
-  const challengeIds = challenges.map((c) => c.id);
-  const topSessions = await getTopSessionsPerChallenge(challengeIds, 10);
-
-  const rankPerChallenge = new Map<string, number>();
-  const allSessions = topSessions.map((s) => {
-    const rank = (rankPerChallenge.get(s.challenge_id) ?? 0) + 1;
-    rankPerChallenge.set(s.challenge_id, rank);
-    return {
-      rank,
-      challengeId: s.challenge_id,
-      userId: s.user_id,
-      username: s.username,
-      displayName: s.display_name,
-      league: s.league,
-      avatarUrl: s.avatar_url,
-      totalScore: s.total_score,
-      totalEarned: s.total_earned_usdc,
-    };
+    return { leaderboard: allSessions, cachedAt: new Date().toISOString() };
   });
-
-  const response = { leaderboard: allSessions, cachedAt: new Date().toISOString() };
-  await redis.set(cacheKey, JSON.stringify(response), "EX", 300);
 
   res.json(response);
 });

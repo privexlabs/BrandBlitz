@@ -10,6 +10,7 @@ import webhooksRoutes from "./webhooks";
 import leaguesRoutes from "./leagues";
 import adminConfigRoutes from "./admin/config";
 import adminUsersRoutes from "./admin/users";
+import adminFraudRoutes from "./admin/fraud";
 import deleteAccountRoutes from "./me/delete-account";
 
 export function registerRoutes(app: Express): void {
@@ -24,5 +25,6 @@ export function registerRoutes(app: Express): void {
   app.use("/leagues", leaguesRoutes);
   app.use("/admin/config", adminConfigRoutes);
   app.use("/admin/users", adminUsersRoutes);
+  app.use("/admin/fraud-flags", adminFraudRoutes);
   app.use("/me/delete-account", deleteAccountRoutes);
 }
