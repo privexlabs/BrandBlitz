@@ -1,6 +1,39 @@
 import axios from "axios";
-import type { AxiosInstance } from "axios";
+import type { AxiosError, AxiosInstance } from "axios";
 import { z } from "zod";
+
+declare module "axios" {
+  export interface AxiosRequestConfig {
+    skipErrorToast?: boolean;
+  }
+}
+
+function errorMessageFromResponse(error: AxiosError): string {
+  const data = error.response?.data;
+
+  if (data && typeof data === "object") {
+    const body = data as Record<string, unknown>;
+    if (typeof body.message === "string" && body.message.trim()) {
+      return body.message;
+    }
+    if (typeof body.error === "string" && body.error.trim()) {
+      return body.error;
+    }
+  }
+
+  return "Something went wrong. Please try again.";
+}
+
+async function showApiErrorToast(error: AxiosError): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (error.config?.skipErrorToast) return;
+
+  const status = error.response?.status;
+  if (!status || status < 400 || status > 599) return;
+
+  const { toast } = await import("./toast");
+  toast.error(errorMessageFromResponse(error));
+}
 
 let BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -31,22 +64,25 @@ export function createApiClient(token?: string): AxiosInstance {
     timeout: 10_000,
   });
 
-  if (token && typeof window !== "undefined") {
-    client.interceptors.response.use(
-      (response) => response,
-      async (error) => {
+  client.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+      if (axios.isAxiosError(error)) {
+        await showApiErrorToast(error);
+
         if (
-          axios.isAxiosError(error) &&
+          token &&
+          typeof window !== "undefined" &&
           error.response?.status === 401 &&
           !error.config?.url?.startsWith("/auth/")
         ) {
           const { signOut } = await import("next-auth/react");
           await signOut({ callbackUrl: "/login" });
         }
-        return Promise.reject(error);
       }
-    );
-  }
+      return Promise.reject(error);
+    }
+  );
 
   return client;
 }

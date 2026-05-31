@@ -88,17 +88,21 @@ const FormSchema = z.object({
 
         // Note: The API expects S3 keys (logoKey, productImageKeys).
         // The backend handles the conversion from these keys to public URLs after optimizing.
-        const brandRes = await api.post("/brands", {
-          name: fields.name,
-          tagline: fields.tagline,
-          brandStory: fields.brandStory,
-          primaryColor: fields.primaryColor,
-          secondaryColor: fields.secondaryColor,
-          logoKey,
-          usp: fields.tagline || undefined,
-          productImage1Key: productImageKeys[0],
-          productImage2Key: productImageKeys[1],
-        });
+        const brandRes = await api.post(
+          "/brands",
+          {
+            name: fields.name,
+            tagline: fields.tagline,
+            brandStory: fields.brandStory,
+            primaryColor: fields.primaryColor,
+            secondaryColor: fields.secondaryColor,
+            logoKey,
+            usp: fields.tagline || undefined,
+            productImage1Key: productImageKeys[0],
+            productImage2Key: productImageKeys[1],
+          },
+          { skipErrorToast: true }
+        );
 
         const brandId = brandRes.data.brand.id;
         const parsedDurationHours = Number.parseInt(fields.durationHours, 10);
@@ -109,11 +113,15 @@ const FormSchema = z.object({
 
         // Fix path if it should be /challenges instead of /brands/challenges or vice-versa
         // Assuming backend uses /brands/challenges based on the routes
-        const challengeRes = await api.post("/brands/challenges", {
-          brandId,
-          poolAmountUsdc: fields.poolAmountUsdc,
-          endsAt,
-        });
+        const challengeRes = await api.post(
+          "/brands/challenges",
+          {
+            brandId,
+            poolAmountUsdc: fields.poolAmountUsdc,
+            endsAt,
+          },
+          { skipErrorToast: true }
+        );
 
         const { hotWalletAddress, memo, amount } = challengeRes.data.depositInstructions;
 
