@@ -18,6 +18,12 @@ import {
   ensureSessionTimeoutSweepJob,
   sessionTimeoutQueue,
 } from "./queues/session-timeout.queue";
+import {
+  createDlqWorkers,
+  payoutDlqQueue,
+  referralBonusDlqQueue,
+  leagueDlqQueue,
+} from "./queues/dlq";
 import { drainSharedAgent } from "@brandblitz/stellar";
 import { logger } from "./lib/logger";
 
@@ -31,12 +37,13 @@ async function startWorker(): Promise<void> {
   const gdprErasureWorker = createGdprErasureWorker();
   const referralBonusWorker = createReferralBonusWorker();
   const sessionTimeoutWorker = createSessionTimeoutWorker();
+  const dlqWorkers = createDlqWorkers();
   await scheduleArchiveJob();
   await ensureLeagueRepeatableJobs();
   await ensureSessionTimeoutSweepJob();
   const evictionMonitor = startRedisEvictionMonitor();
   logger.info(
-    "BullMQ worker started — processing payout + archive + league + gdpr-erasure + referral-bonus + session-timeout jobs",
+    "BullMQ worker started — processing payout + archive + league + gdpr-erasure + referral-bonus + session-timeout jobs + dead-letter queues",
   );
 
   const shutdown = async (signal: string) => {
@@ -48,8 +55,12 @@ async function startWorker(): Promise<void> {
     await gdprErasureWorker.close();
     await referralBonusWorker.close();
     await sessionTimeoutWorker.close();
+    await Promise.all(dlqWorkers.map((w) => w.close()));
     await referralBonusQueue.close();
     await sessionTimeoutQueue.close();
+    await payoutDlqQueue.close();
+    await referralBonusDlqQueue.close();
+    await leagueDlqQueue.close();
     await closeDb();
     await redis.disconnect();
     drainSharedAgent();

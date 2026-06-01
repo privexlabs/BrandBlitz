@@ -3,6 +3,7 @@ import { redis } from "../../lib/redis";
 import { processPayout } from "../../services/payout";
 import { logger } from "../../lib/logger";
 import { config } from "../../lib/config";
+import { forwardToDlq, payoutDlqQueue } from "../dlq";
 
 export const PAYOUT_WORKER_CONCURRENCY = config.PAYOUT_WORKER_CONCURRENCY;
 
@@ -32,6 +33,14 @@ export function createPayoutWorker(WorkerImpl: typeof Worker = Worker): Worker {
       jobId: job?.id,
       error: err.message,
       attempts: job?.attemptsMade,
+    });
+    // Once all retries are exhausted, dead-letter the job so the stranded
+    // payout row is reconciled and an audit_log record is written.
+    void forwardToDlq(payoutDlqQueue, job, err).catch((dlqErr) => {
+      logger.error("Failed to forward payout job to DLQ", {
+        jobId: job?.id,
+        error: (dlqErr as Error).message,
+      });
     });
   });
 
