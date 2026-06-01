@@ -1,3 +1,4 @@
+import "dotenv/config";
 import fetch from "node-fetch";
 import crypto from "crypto";
 import { Redis } from "ioredis";
@@ -6,7 +7,9 @@ import { config } from "./config";
 import { logger } from "./logger";
 
 const LAST_LEDGER_KEY = "stellar:deposit_monitor:last_ledger";
-const redis = new Redis(config.REDIS_URL);
+const redis = new Redis(config.REDIS_URL, {
+  lazyConnect: true,
+});
 
 /**
  * Sign webhook payload following the same logic as apps/api/src/middleware/verify-webhook.ts
@@ -110,7 +113,11 @@ async function poll(): Promise<void> {
 }
 
 let isRunning = true;
+
 export async function main() {
+  await redis.connect();
+  logger.info("Redis connected");
+
   logger.info("Deposit monitor starting", {
     network: config.STELLAR_NETWORK,
     hotWallet: config.HOT_WALLET_PUBLIC_KEY,

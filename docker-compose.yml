@@ -149,6 +149,7 @@ services:
       HOT_WALLET_PUBLIC_KEY: ${HOT_WALLET_PUBLIC_KEY}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
       API_URL: http://api:3001
+      DEPOSIT_POLL_INTERVAL_MS: ${DEPOSIT_POLL_INTERVAL_MS:-5000}
     depends_on:
       redis:
         condition: service_healthy
