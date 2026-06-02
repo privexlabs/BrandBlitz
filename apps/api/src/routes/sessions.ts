@@ -83,7 +83,7 @@ router.post(
 /**
  * POST /sessions/:challengeId/warmup-complete
  * Completes warm-up and issues a short-lived challenge token.
- * Server enforces that minimum exposure time has passed.
+ * Server enforces that minimum exposure time has passed using server-side timestamp.
  */
 router.post("/:challengeId/warmup-complete", authenticate, async (req, res) => {
   const challengeId = String(req.params.challengeId);
@@ -94,10 +94,23 @@ router.post("/:challengeId/warmup-complete", authenticate, async (req, res) => {
   if (!session) throw createError("Session not found", 404);
   if (session.user_id !== req.user!.sub) throw createError("Forbidden", 403);
 
-  // Enforce server-side warmup minimum
+  // Validate client timestamp if provided (optional telemetry)
+  const { clientTimestamp } = req.body as { clientTimestamp?: number };
+  if (clientTimestamp !== undefined) {
+    const serverTime = Date.now();
+    const clockSkewMs = Math.abs(serverTime - clientTimestamp);
+    const MAX_CLOCK_SKEW_MS = 5000; // ±5 seconds tolerance
+
+    if (clockSkewMs > MAX_CLOCK_SKEW_MS) {
+      throw createError("Client clock skew too large", 400, "CLOCK_SKEW");
+    }
+  }
+
+  // Enforce server-side warmup minimum using server timestamp only
   const unlockAt = await redis.get(`warmup:unlock:${session.id}`);
   if (unlockAt) {
-    const remainingMs = parseInt(unlockAt) - Date.now();
+    const serverNow = Date.now();
+    const remainingMs = parseInt(unlockAt) - serverNow;
     if (remainingMs > 0) {
       const error = createError("Warm-up minimum not yet elapsed", 400, "WARMUP_TOO_FAST");
       (error as any).remainingMs = remainingMs;

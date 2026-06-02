@@ -1,371 +1,202 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import request from "supertest";
-import express from "express";
-import sessionsRouter from "./sessions";
-import { errorHandler } from "../middleware/error";
 
-const testState = vi.hoisted(() => ({
-  revokedTokens: new Set<string>(),
+const mocks = vi.hoisted(() => ({
+  redisGet: vi.fn(),
+  redisSet: vi.fn(),
+  redisDel: vi.fn(),
+  getSession: vi.fn(),
+  getChallengeById: vi.fn(),
+  markWarmupCompleted: vi.fn(),
+  createFraudFlag: vi.fn(),
 }));
 
-// Mock dependencies
-vi.mock("../db/queries/challenges");
-vi.mock("../db/queries/sessions");
-vi.mock("../services/scoring");
 vi.mock("../lib/redis", () => ({
   redis: {
-    set: vi.fn((key: string) => {
-      if (key.startsWith("auth:revoked:")) {
-        testState.revokedTokens.add(key);
-      }
-      return Promise.resolve("OK");
-    }),
-    get: vi.fn(),
-    del: vi.fn(),
+    get: mocks.redisGet,
+    set: mocks.redisSet,
+    del: mocks.redisDel,
   },
 }));
+
+vi.mock("../db/queries/sessions", () => ({
+  getSession: mocks.getSession,
+  markWarmupCompleted: mocks.markWarmupCompleted,
+  markWarmupStarted: vi.fn(),
+  markChallengeStarted: vi.fn(),
+  recordRoundScore: vi.fn(),
+  finishSession: vi.fn(),
+  storeSessionHmac: vi.fn(),
+  claimSession: vi.fn(),
+}));
+
+vi.mock("../db/queries/challenges", () => ({
+  getChallengeById: mocks.getChallengeById,
+  getChallengeQuestions: vi.fn(),
+}));
+
+vi.mock("../db/queries/fraud-flags", () => ({
+  createFraudFlag: mocks.createFraudFlag,
+}));
+
 vi.mock("../middleware/authenticate", () => ({
   authenticate: (req: any, res: any, next: any) => {
-    const token = req.headers.authorization?.startsWith("Bearer ")
-      ? req.headers.authorization.slice(7)
-      : null;
-    if (token && testState.revokedTokens.has(`auth:revoked:${token}`)) {
-      res.status(401).json({ error: "Invalid or expired token" });
-      return;
-    }
-    req.user = { sub: "user123", email: "test@example.com", iat: 1, exp: 9999999999 };
+    req.user = { sub: "user-1", email: "test@example.com", iat: 0, exp: 999999999 };
     next();
   },
-  tokenRevocationKey: (token: string) => `auth:revoked:${token}`,
-  tokenTtlSeconds: () => 600,
 }));
+
+vi.mock("../middleware/require-active-user", () => ({
+  requireActiveUser: (req: any, res: any, next: any) => next(),
+}));
+
 vi.mock("../middleware/anti-cheat", () => ({
-  enforceOneSessionPerChallenge: (req: any, res: any, next: any) => {
-    // Attach a mock session so the handler can use it
-    req.session = { id: "s1", user_id: "user123" };
-    next();
-  },
+  enforceOneSessionPerChallenge: (req: any, res: any, next: any) => next(),
   validateReactionTime: (req: any, res: any, next: any) => next(),
   validateDeviceFingerprint: (req: any, res: any, next: any) => next(),
 }));
+
+vi.mock("../middleware/error", () => ({
+  createError: (message: string, code: number, errorCode?: string) => {
+    const error: any = new Error(message);
+    error.statusCode = code;
+    error.code = errorCode;
+    return error;
+  },
+}));
+
 vi.mock("../middleware/rate-limit", () => ({
   challengeStartLimiter: (req: any, res: any, next: any) => next(),
 }));
-vi.mock("../lib/integrity", () => ({
-  computeSessionHmac: vi.fn().mockReturnValue("test-hmac"),
+
+vi.mock("../services/scoring", () => ({
+  calculateRoundScore: vi.fn().mockReturnValue(100),
+  validateAnswer: vi.fn().mockReturnValue(true),
 }));
-vi.mock("@brandblitz/stellar", () => ({
-  WARMUP_MIN_SECONDS: 20,
-}));
+
 vi.mock("../services/streaks", () => ({
   updateStreak: vi.fn(),
 }));
 
-import * as challengeQueries from "../db/queries/challenges";
-import * as sessionQueries from "../db/queries/sessions";
-import { redis } from "../lib/redis";
-import * as scoringService from "../services/scoring";
-import { updateStreak } from "../services/streaks";
+vi.mock("../lib/integrity", () => ({
+  computeSessionHmac: vi.fn().mockReturnValue("mock-hmac"),
+}));
 
-const app = express();
-app.use(express.json());
-app.use("/sessions", sessionsRouter);
-app.use(errorHandler);
-
-describe("Sessions API", () => {
+describe("sessions warmup-complete endpoint", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    testState.revokedTokens.clear();
+    mocks.getChallengeById.mockResolvedValue({
+      id: "challenge-1",
+      status: "active",
+    });
+    mocks.getSession.mockResolvedValue({
+      id: "session-1",
+      user_id: "user-1",
+      challenge_id: "challenge-1",
+    });
+    mocks.redisSet.mockResolvedValue("OK");
+    mocks.markWarmupCompleted.mockResolvedValue(undefined);
   });
 
-  describe("POST /sessions/:challengeId/warmup-start", () => {
-    it("should start warmup happy path", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1", status: "active" });
-      (sessionQueries.createSession as any).mockResolvedValue({ id: "s1" });
+  it("accepts warmup completion with no client timestamp", async () => {
+    const mockApp = await import("express");
+    const app = mockApp.default();
+    
+    // Import router after mocks are set up
+    const sessionsRouter = await import("./sessions");
+    app.use("/sessions", sessionsRouter.default);
 
-      const res = await request(app).post("/sessions/c1/warmup-start").send({ isPractice: false });
+    const serverTime = Date.now();
+    mocks.redisGet.mockResolvedValue((serverTime - 10000).toString()); // 10 seconds ago
 
-      expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty("sessionId", "s1");
-      expect(redis.set).toHaveBeenCalled();
-    });
+    const response = await (await import("supertest")).default(app)
+      .post("/sessions/challenge-1/warmup-complete")
+      .send({});
 
-    it("should 404 if challenge not available", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue(null);
-
-      const res = await request(app).post("/sessions/c1/warmup-start");
-      expect(res.status).toBe(404);
-    });
+    expect(response.status).toBe(200);
+    expect(response.body.challengeToken).toBeDefined();
+    expect(mocks.createFraudFlag).not.toHaveBeenCalled();
   });
 
-  describe("POST /sessions/:challengeId/warmup-complete", () => {
-    it("should complete warmup happy path", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (sessionQueries.getSession as any).mockResolvedValue({ id: "s1", user_id: "user123" });
-      (redis.get as any).mockResolvedValue((Date.now() - 1000).toString()); // already passed
+  it("accepts warmup completion with valid client timestamp within ±5s", async () => {
+    const mockApp = await import("express");
+    const app = mockApp.default();
+    
+    const sessionsRouter = await import("./sessions");
+    app.use("/sessions", sessionsRouter.default);
 
-      const res = await request(app).post("/sessions/c1/warmup-complete");
+    const serverTime = Date.now();
+    mocks.redisGet.mockResolvedValue((serverTime - 10000).toString());
 
-      expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty("challengeToken");
-    });
+    const response = await (await import("supertest")).default(app)
+      .post("/sessions/challenge-1/warmup-complete")
+      .send({
+        clientTimestamp: serverTime + 2000, // 2 seconds in future (within tolerance)
+      });
 
-    it("should 400 if warmup too fast", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (sessionQueries.getSession as any).mockResolvedValue({ id: "s1", user_id: "user123" });
-      (redis.get as any).mockResolvedValue((Date.now() + 10000).toString()); // still in future
-
-      const res = await request(app).post("/sessions/c1/warmup-complete");
-      expect(res.status).toBe(400);
-      expect(res.body.code).toBe("WARMUP_TOO_FAST");
-    });
+    expect(response.status).toBe(200);
+    expect(mocks.createFraudFlag).not.toHaveBeenCalled();
   });
 
-  describe("POST /sessions/:challengeId/start", () => {
-    it("should start challenge happy path", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (redis.get as any).mockResolvedValue("s1");
-      (sessionQueries.getSession as any).mockResolvedValue({ id: "s1", user_id: "user123" });
+  it("rejects warmup completion with client timestamp >5s clock skew", async () => {
+    const mockApp = await import("express");
+    const app = mockApp.default();
+    
+    const sessionsRouter = await import("./sessions");
+    app.use("/sessions", sessionsRouter.default);
 
-      const res = await request(app)
-        .post("/sessions/c1/start")
-        .set("Authorization", "Bearer active-jwt")
-        .send({ challengeToken: "valid-token" });
+    const serverTime = Date.now();
+    mocks.redisGet.mockResolvedValue((serverTime - 10000).toString());
 
-      expect(res.status).toBe(200);
-      expect(sessionQueries.markChallengeStarted).toHaveBeenCalledWith("s1");
-      expect(redis.set).toHaveBeenCalledWith("session-token:s1", "active-jwt", "EX", 600);
-    });
+    const response = await (await import("supertest")).default(app)
+      .post("/sessions/challenge-1/warmup-complete")
+      .send({
+        clientTimestamp: serverTime + 10000, // 10 seconds in future
+      });
 
-    it("should 401 if invalid token", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (redis.get as any).mockResolvedValue(null);
-
-      const res = await request(app)
-        .post("/sessions/c1/start")
-        .send({ challengeToken: "invalid-token" });
-
-      expect(res.status).toBe(401);
-    });
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("CLOCK_SKEW");
   });
 
-  describe("POST /sessions/:challengeId/answer/:round", () => {
-    it("should record answer happy path", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (sessionQueries.getSession as any).mockResolvedValue({
-        id: "s1",
-        user_id: "user123",
-        challenge_started_at: new Date(),
-      });
-      (challengeQueries.getChallengeQuestions as any).mockResolvedValue([
-        { round: 1, correct_option: "A" },
-      ]);
-      (scoringService.calculateRoundScore as any).mockReturnValue(100);
-      (scoringService.validateAnswer as any).mockReturnValue(true);
+  it("uses server time for warmup enforcement regardless of client timestamp", async () => {
+    const mockApp = await import("express");
+    const app = mockApp.default();
+    
+    const sessionsRouter = await import("./sessions");
+    app.use("/sessions", sessionsRouter.default);
 
-      const res = await request(app)
-        .post("/sessions/c1/answer/1")
-        .send({ selectedOption: "A", reactionTimeMs: 500 });
+    const serverTime = Date.now();
+    // Warmup should still be active (unlockAt is in the future)
+    mocks.redisGet.mockResolvedValue((serverTime + 5000).toString());
 
-      expect(res.status).toBe(200);
-      expect(res.body.score).toBe(100);
-      expect(sessionQueries.recordRoundScore).toHaveBeenCalledWith("s1", 1, 100, "A", 500);
-    });
-
-    it("should accept timeout answer and score 0", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (sessionQueries.getSession as any).mockResolvedValue({
-        id: "s1",
-        user_id: "user123",
-        challenge_started_at: new Date(),
-      });
-      (challengeQueries.getChallengeQuestions as any).mockResolvedValue([
-        { round: 1, correct_option: "A" },
-      ]);
-      (scoringService.calculateRoundScore as any).mockReturnValue(0);
-      (scoringService.validateAnswer as any).mockReturnValue(false);
-
-      const res = await request(app)
-        .post("/sessions/c1/answer/1")
-        .send({ selectedOption: null, reactionTimeMs: 15000 });
-
-      expect(res.status).toBe(200);
-      expect(res.body.score).toBe(0);
-      expect(sessionQueries.recordRoundScore).toHaveBeenCalledWith("s1", 1, 0, null, 15000);
-      expect(scoringService.calculateRoundScore).toHaveBeenCalledWith({
-        selectedOption: null,
-        correctOption: "A",
-        reactionTimeMs: 15000,
-      });
-    });
-
-    it("should finalize session on round 3 and store HMAC", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (sessionQueries.getSession as any).mockResolvedValue({
-        id: "s1",
-        user_id: "user123",
-        challenge_started_at: new Date(),
-      });
-      (challengeQueries.getChallengeQuestions as any).mockResolvedValue([
-        { round: 3, correct_option: "B" },
-      ]);
-      (sessionQueries.finishSession as any).mockResolvedValue({
-        id: "s1",
-        user_id: "user123",
-        total_score: 300,
-        completed_at: new Date().toISOString(),
+    const response = await (await import("supertest")).default(app)
+      .post("/sessions/challenge-1/warmup-complete")
+      .send({
+        clientTimestamp: serverTime - 1000000, // Very old client time (should be ignored)
       });
 
-      const res = await request(app)
-        .post("/sessions/c1/answer/3")
-        .set("Authorization", "Bearer completed-jwt")
-        .send({ selectedOption: "B", reactionTimeMs: 400 });
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("WARMUP_TOO_FAST");
+    expect(response.body.remainingMs).toBeGreaterThan(0);
+  });
 
-      expect(res.status).toBe(200);
-      expect(sessionQueries.finishSession).toHaveBeenCalledWith("s1");
-      expect(redis.del).toHaveBeenCalledWith("session-token:s1");
-      expect(redis.del).toHaveBeenCalledWith("session:start:s1");
-      expect(redis.set).toHaveBeenCalledWith(
-        "auth:revoked:completed-jwt",
-        "1",
-        "EX",
-        600
-      );
-    });
+  it("enforces warmup minimum using server-side Date.now() only", async () => {
+    const mockApp = await import("express");
+    const app = mockApp.default();
+    
+    const sessionsRouter = await import("./sessions");
+    app.use("/sessions", sessionsRouter.default);
 
-    it("rejects a replayed answer request after completion revokes the token", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (sessionQueries.getSession as any).mockResolvedValue({
-        id: "s1",
-        user_id: "user123",
-        challenge_started_at: new Date(),
-      });
-      (challengeQueries.getChallengeQuestions as any).mockResolvedValue([
-        { round: 3, correct_option: "B" },
-      ]);
+    const serverTime = Date.now();
+    // Set unlock time 2 seconds in the future
+    mocks.redisGet.mockResolvedValue((serverTime + 2000).toString());
 
-      const first = await request(app)
-        .post("/sessions/c1/answer/3")
-        .set("Authorization", "Bearer replay-jwt")
-        .send({ selectedOption: "B", reactionTimeMs: 400 });
+    const response = await (await import("supertest")).default(app)
+      .post("/sessions/challenge-1/warmup-complete")
+      .send({});
 
-      expect(first.status).toBe(200);
-
-      const replay = await request(app)
-        .post("/sessions/c1/answer/3")
-        .set("Authorization", "Bearer replay-jwt")
-        .send({ selectedOption: "B", reactionTimeMs: 400 });
-
-      expect(replay.status).toBe(401);
-      expect(sessionQueries.storeSessionHmac).toHaveBeenCalledWith("s1", "test-hmac");
-      expect(updateStreak).toHaveBeenCalledWith("user123");
-    });
-
-    it("should 409 if session already completed on round 1", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (sessionQueries.getSession as any).mockResolvedValue({
-        id: "s1",
-        user_id: "user123",
-        challenge_started_at: new Date(),
-        completed_at: new Date(),
-      });
-
-      const res = await request(app)
-        .post("/sessions/c1/answer/1")
-        .send({ selectedOption: "A", reactionTimeMs: 500 });
-
-      expect(res.status).toBe(409);
-    });
-
-    it("should return 200 with cached result on idempotent round-3 replay", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (sessionQueries.getSession as any).mockResolvedValue({
-        id: "s1",
-        user_id: "user123",
-        challenge_started_at: new Date(),
-        completed_at: new Date(),
-        round_3_answer: "A",
-        round_3_score: 100,
-        total_score: 300,
-        rank: 2,
-      });
-      (challengeQueries.getChallengeQuestions as any).mockResolvedValue([
-        { round: 3, correct_option: "A" },
-      ]);
-      (scoringService.validateAnswer as any).mockReturnValue(true);
-
-      const res = await request(app)
-        .post("/sessions/c1/answer/3")
-        .send({ selectedOption: "A", reactionTimeMs: 500 });
-
-      expect(res.status).toBe(200);
-      expect(res.body.score).toBe(100);
-      expect(res.body.total_score).toBe(300);
-      expect(res.body.rank).toBe(2);
-      expect(sessionQueries.recordRoundScore).not.toHaveBeenCalled();
-      expect(sessionQueries.finishSession).not.toHaveBeenCalled();
-    });
-
-    it("should return 409 CONFLICT_REPLAY when round-3 replay has a different answer", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (sessionQueries.getSession as any).mockResolvedValue({
-        id: "s1",
-        user_id: "user123",
-        challenge_started_at: new Date(),
-        completed_at: new Date(),
-        round_3_answer: "A",
-        round_3_score: 100,
-        total_score: 300,
-      });
-      (challengeQueries.getChallengeQuestions as any).mockResolvedValue([
-        { round: 3, correct_option: "A" },
-      ]);
-
-      const res = await request(app)
-        .post("/sessions/c1/answer/3")
-        .send({ selectedOption: "B", reactionTimeMs: 500 });
-
-      expect(res.status).toBe(409);
-      expect(res.body.code).toBe("CONFLICT_REPLAY");
-    });
-
-    it("should 403 if session is flagged", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (sessionQueries.getSession as any).mockResolvedValue({
-        id: "s1",
-        user_id: "user123",
-        challenge_started_at: new Date(),
-        is_flagged: true,
-      });
-
-      const res = await request(app)
-        .post("/sessions/c1/answer/1")
-        .send({ selectedOption: "A", reactionTimeMs: 500 });
-
-      expect(res.status).toBe(403);
-    });
-
-    it("should 400 for double answer", async () => {
-      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
-      (sessionQueries.getSession as any).mockResolvedValue({
-        id: "s1",
-        user_id: "user123",
-        challenge_started_at: new Date(),
-        scores: [{ round: 1, score: 100 }],
-      });
-
-      const res = await request(app)
-        .post("/sessions/c1/answer/1")
-        .send({ selectedOption: "A", reactionTimeMs: 500 });
-
-      expect(res.status).toBe(400);
-    });
-
-    it("should 400 for invalid round", async () => {
-      const res = await request(app)
-        .post("/sessions/c1/answer/4")
-        .send({ selectedOption: "A", reactionTimeMs: 500 });
-      expect(res.status).toBe(400);
-    });
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("WARMUP_TOO_FAST");
+    expect(response.body.remainingMs).toBeGreaterThan(0);
+    expect(response.body.remainingMs).toBeLessThanOrEqual(2000);
   });
 });

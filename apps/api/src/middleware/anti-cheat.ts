@@ -12,6 +12,7 @@ export const BOT_REACTION_THRESHOLD_MS = 80;
 // Fallback defaults — override at runtime via PATCH /admin/config/anti_cheat.thresholds
 export const MIN_HUMAN_REACTION_MS = 150;
 export const MAX_HUMAN_REACTION_MS = 30_000;
+export const MAX_CLOCK_SKEW_MS = 5000; // ±5 seconds tolerance for client timestamps
 
 const THRESHOLDS_CACHE_KEY = "config:cache:anti_cheat.thresholds";
 const THRESHOLDS_CONFIG_KEY = "anti_cheat.thresholds";
@@ -72,6 +73,47 @@ async function recordFraudFlag(
 
   const severity = (details?.severity as string) || "warning";
   metrics.inc("antiCheat.flags_total", { severity, type: flagType });
+}
+
+/**
+ * Anti-cheat Layer 4 — client clock skew detection.
+ * Validates client-supplied timestamps are within ±5 seconds of server time.
+ * Flags requests with excessive clock skew as potential manipulation attempts.
+ */
+export async function detectClockSkew(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> {
+  const { clientTimestamp } = req.body as { clientTimestamp?: number };
+
+  if (clientTimestamp === undefined) {
+    next();
+    return;
+  }
+
+  if (!Number.isFinite(clientTimestamp) || clientTimestamp <= 0) {
+    await recordFraudFlag(req, "invalid_client_timestamp", {
+      clientTimestamp,
+      severity: "warning",
+    }).catch(() => {});
+    throw createError("Invalid client timestamp", 400, "INVALID_TIMESTAMP");
+  }
+
+  const serverTime = Date.now();
+  const clockSkewMs = Math.abs(serverTime - clientTimestamp);
+
+  if (clockSkewMs > MAX_CLOCK_SKEW_MS) {
+    await recordFraudFlag(req, "clock_skew", {
+      clientTimestamp,
+      serverTime,
+      clockSkewMs,
+      severity: "warning",
+    }).catch(() => {});
+    throw createError("Client clock skew too large", 400, "CLOCK_SKEW");
+  }
+
+  next();
 }
 
 /**
