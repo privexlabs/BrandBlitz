@@ -9,6 +9,8 @@ import {
 } from "../../db/queries/referral-payouts";
 import { referralBonusQueue } from "../referral-bonus.queue";
 
+const SHUTDOWN_TIMEOUT_MS = 30000; // 30 seconds
+
 export const referralBonusWorkerOptions = {
   concurrency: 2,
 } as const;
@@ -90,9 +92,45 @@ async function processReferralBonusJob(
 export function createReferralBonusWorker(
   WorkerImpl: typeof Worker = Worker,
 ): Worker {
-  return new WorkerImpl(
+  const worker = new WorkerImpl(
     referralBonusQueue.name,
     processReferralBonusJob,
     referralBonusWorkerOptions,
   );
+
+  setupGracefulShutdown(worker, "referral-bonus");
+
+  return worker;
+}
+
+function setupGracefulShutdown(worker: Worker, workerName: string): void {
+  let isShuttingDown = false;
+
+  const gracefulShutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    logger.info(`${signal} received, gracefully shutting down ${workerName} worker...`);
+
+    const shutdownTimer = setTimeout(() => {
+      logger.warn(`${workerName} worker shutdown timeout exceeded, forcing exit`);
+      process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS);
+
+    try {
+      await worker.close();
+      clearTimeout(shutdownTimer);
+      logger.info(`${workerName} worker closed gracefully`);
+      process.exit(0);
+    } catch (error) {
+      clearTimeout(shutdownTimer);
+      logger.error(`Error during ${workerName} worker shutdown`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      process.exit(1);
+    }
+  };
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 }

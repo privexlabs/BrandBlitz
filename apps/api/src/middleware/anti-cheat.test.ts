@@ -50,6 +50,100 @@ describe("anti-cheat middleware", () => {
     (redis.scard as any).mockResolvedValue(1);
   });
 
+  describe("detectClockSkew", () => {
+    it("allows request with no client timestamp", async () => {
+      const { detectClockSkew } = await import("./anti-cheat");
+      
+      await detectClockSkew(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(fraudQueries.createFraudFlag).not.toHaveBeenCalled();
+    });
+
+    it("allows request with client timestamp within tolerance", async () => {
+      const { detectClockSkew } = await import("./anti-cheat");
+      req.body.clientTimestamp = Date.now();
+
+      await detectClockSkew(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(fraudQueries.createFraudFlag).not.toHaveBeenCalled();
+    });
+
+    it("rejects negative client timestamp", async () => {
+      const { detectClockSkew } = await import("./anti-cheat");
+      req.body.clientTimestamp = -1000;
+
+      await expect(detectClockSkew(req, res, next)).rejects.toMatchObject({
+        statusCode: 400,
+        code: "INVALID_TIMESTAMP",
+      });
+
+      expect(fraudQueries.createFraudFlag).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flagType: "invalid_client_timestamp",
+        })
+      );
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it("rejects zero client timestamp", async () => {
+      const { detectClockSkew } = await import("./anti-cheat");
+      req.body.clientTimestamp = 0;
+
+      await expect(detectClockSkew(req, res, next)).rejects.toMatchObject({
+        statusCode: 400,
+        code: "INVALID_TIMESTAMP",
+      });
+    });
+
+    it("flags and rejects client timestamp >5 seconds in past", async () => {
+      const { detectClockSkew } = await import("./anti-cheat");
+      req.body.clientTimestamp = Date.now() - 10000; // 10 seconds ago
+
+      await expect(detectClockSkew(req, res, next)).rejects.toMatchObject({
+        statusCode: 400,
+        code: "CLOCK_SKEW",
+      });
+
+      expect(fraudQueries.createFraudFlag).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flagType: "clock_skew",
+          details: expect.objectContaining({
+            severity: "warning",
+            clockSkewMs: expect.any(Number),
+          }),
+        })
+      );
+    });
+
+    it("flags and rejects client timestamp >5 seconds in future", async () => {
+      const { detectClockSkew } = await import("./anti-cheat");
+      req.body.clientTimestamp = Date.now() + 10000; // 10 seconds in future
+
+      await expect(detectClockSkew(req, res, next)).rejects.toMatchObject({
+        statusCode: 400,
+        code: "CLOCK_SKEW",
+      });
+
+      expect(fraudQueries.createFraudFlag).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flagType: "clock_skew",
+        })
+      );
+    });
+
+    it("flags and rejects client timestamp 10+ minutes in past", async () => {
+      const { detectClockSkew } = await import("./anti-cheat");
+      req.body.clientTimestamp = Date.now() - 600000; // 10 minutes ago
+
+      await expect(detectClockSkew(req, res, next)).rejects.toMatchObject({
+        statusCode: 400,
+        code: "CLOCK_SKEW",
+      });
+    });
+  });
+
   describe("validateReactionTime", () => {
     it("blocks with 403 if reaction time is below bot threshold", async () => {
       req.body.reactionTimeMs = BOT_REACTION_THRESHOLD_MS - 1;
