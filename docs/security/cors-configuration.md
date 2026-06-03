@@ -1,0 +1,1 @@
+ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
