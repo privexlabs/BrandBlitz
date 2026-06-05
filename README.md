@@ -4,7 +4,7 @@
 
 ---
 
-## Table of Contents
+## Table of Contents.
 
 - [The Problem](#the-problem)
 - [The Insight](#the-insight)
