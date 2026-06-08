@@ -183,6 +183,35 @@ export async function rankAndFlagWeek(weekStart: string): Promise<void> {
   );
 }
 
+export async function getTopGoldUsers(weekStart: string): Promise<{ user_id: string }[]> {
+  const result = await query<{ user_id: string }>(
+    `SELECT user_id FROM league_assignments
+     WHERE week_start = $1 AND league = 'gold'
+       AND rank_in_group IS NOT NULL AND rank_in_group <= 3`,
+    [weekStart]
+  );
+  return result.rows;
+}
+
+export async function getNewlyPromotedUsers(
+  weekStart: string
+): Promise<{ user_id: string; new_league: LeagueTier }[]> {
+  const result = await query<{ user_id: string; new_league: LeagueTier }>(
+    `SELECT la.user_id, la.league AS new_league
+     FROM league_assignments la
+     JOIN league_assignments prev
+       ON prev.user_id = la.user_id
+      AND prev.week_start = (la.week_start::date - INTERVAL '7 days')::date
+     WHERE la.week_start = $1
+       AND (
+         (la.league = 'silver' AND prev.league = 'bronze') OR
+         (la.league = 'gold'   AND prev.league = 'silver')
+       )`,
+    [weekStart]
+  );
+  return result.rows;
+}
+
 export async function seedWeekAssignments(weekStart: string): Promise<void> {
   await query(
     `

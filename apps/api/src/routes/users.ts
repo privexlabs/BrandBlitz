@@ -21,6 +21,7 @@ import { authenticate } from "../middleware/authenticate";
 import { createError } from "../middleware/error";
 import { redis } from "../lib/redis";
 import { apiLimiter } from "../middleware/rate-limit";
+import { getBadgesForUser } from "../services/badges";
 
 const router: Router = Router();
 
@@ -118,6 +119,19 @@ router.get("/profile/:username", apiLimiter, async (req, res) => {
       streak: user.streak,
     },
   });
+});
+
+/**
+ * GET /users/:id/badges
+ * Returns all 8 badge definitions merged with the user's earned status.
+ * Earned badges include awarded_at; locked badges are included with earned=false.
+ */
+router.get("/:id/badges", authenticate, async (req, res) => {
+  const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+  if (id !== req.user!.sub) throw createError("Forbidden", 403, "FORBIDDEN");
+
+  const badges = await getBadgesForUser(id);
+  res.json({ badges });
 });
 
 /**

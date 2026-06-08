@@ -23,6 +23,7 @@ import { challengeStartLimiter } from "../middleware/rate-limit";
 import { redis } from "../lib/redis";
 import { computeSessionHmac } from "../lib/integrity";
 import { updateStreak } from "../services/streaks";
+import { checkAndAwardSessionBadges } from "../services/badges";
 import { WARMUP_MIN_SECONDS } from "@brandblitz/stellar";
 import { tokenRevocationKey, tokenTtlSeconds } from "../middleware/authenticate";
 
@@ -254,6 +255,10 @@ router.post("/:challengeId/answer/:round", authenticate, validateReactionTime, a
       }
       if (!completed.is_practice) {
         await updateStreak(completed.user_id);
+        await checkAndAwardSessionBadges(completed.user_id, {
+          total_score: completed.total_score,
+          is_practice: completed.is_practice,
+        });
       }
     }
   }
