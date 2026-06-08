@@ -9,7 +9,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -24,7 +24,7 @@ jobs:
     name: nginx config regression checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Fail if ssl_prefer_server_ciphers is off
         run: |
@@ -69,7 +69,7 @@ jobs:
     name: compose environment checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Fail if NODE_ENV has a development default in docker-compose.yml
         run: |
