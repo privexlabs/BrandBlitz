@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { UploadField } from "./upload-field";
 import { useSubmitting } from "@/hooks/use-submitting";
+import { challengeEndsAt } from "./challenge-validation";
 
 interface BrandKitFormProps {
   apiToken: string;
@@ -105,11 +106,11 @@ const FormSchema = z.object({
         );
 
         const brandId = brandRes.data.brand.id;
-        const parsedDurationHours = Number.parseInt(fields.durationHours, 10);
-        const durationHours = Number.isFinite(parsedDurationHours) && parsedDurationHours > 0
-          ? parsedDurationHours
-          : 72;
-        const endsAt = new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
+        const endsAt = challengeEndsAt(fields.durationHours);
+        if (!endsAt) {
+          setError("Challenge duration must be between 1 and 720 hours.");
+          return;
+        }
 
         // Fix path if it should be /challenges instead of /brands/challenges or vice-versa
         // Assuming backend uses /brands/challenges based on the routes

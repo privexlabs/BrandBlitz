@@ -25,6 +25,8 @@ import { config } from "../lib/config";
 
 const router = Router();
 
+const MIN_CHALLENGE_DURATION_MS = 60 * 60 * 1000;
+
 const BrandKitSchema = z.object({
   name: z.string().min(1).max(100),
   logoKey: z.string().optional(),
@@ -41,7 +43,14 @@ const ChallengeSchema = z.object({
   brandId: z.string().uuid(),
   poolAmountUsdc: z.string().regex(/^\d+(\.\d{1,7})?$/),
   maxPlayers: z.number().int().positive().optional(),
-  endsAt: z.string().datetime().optional(),
+  endsAt: z
+    .string()
+    .datetime()
+    .refine(
+      (value) => new Date(value).getTime() >= Date.now() + MIN_CHALLENGE_DURATION_MS,
+      "Challenge must end at least 1 hour in the future"
+    )
+    .optional(),
 });
 
 /**

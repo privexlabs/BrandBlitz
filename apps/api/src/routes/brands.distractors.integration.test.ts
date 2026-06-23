@@ -39,6 +39,10 @@ vi.mock("../middleware/authenticate", () => ({
   },
 }));
 
+vi.mock("../middleware/require-tos", () => ({
+  requireCurrentTosAccepted: (_req: any, _res: any, next: any) => next(),
+}));
+
 vi.mock("@brandblitz/storage", () => ({
   optimizeImage: vi.fn(),
   getPublicUrl: (_bucket: string, key: string) => `https://storage.example.com/${key}`,
@@ -55,6 +59,7 @@ vi.mock("../lib/logger", () => ({
 }));
 
 import router from "./brands";
+import { errorHandler } from "../middleware/error";
 
 function buildBrand(params: {
   id: string;
@@ -100,9 +105,7 @@ async function postChallenge(body: Record<string, unknown>) {
   const app = express();
   app.use(express.json());
   app.use("/brands", router);
-  app.use((err: any, _req: any, res: any, _next: any) => {
-    res.status(err?.statusCode ?? 500).json({ error: err?.message ?? "Unexpected error" });
-  });
+  app.use(errorHandler);
 
   const server = app.listen(0);
 
@@ -239,5 +242,27 @@ describe("POST /brands/challenges distractor integration", () => {
     );
 
     expect(hasFallbackOption).toBe(true);
+  });
+
+  it("rejects a challenge whose end time is in the past", async () => {
+    const response = await postChallenge({
+      brandId,
+      poolAmountUsdc: "50.0000000",
+      endsAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    expect(response.status).toBe(400);
+    expect(mocks.createChallenge).not.toHaveBeenCalled();
+  });
+
+  it("rejects a challenge shorter than the one-hour minimum", async () => {
+    const response = await postChallenge({
+      brandId,
+      poolAmountUsdc: "50.0000000",
+      endsAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    });
+
+    expect(response.status).toBe(400);
+    expect(mocks.createChallenge).not.toHaveBeenCalled();
   });
 });
