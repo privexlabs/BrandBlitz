@@ -67,24 +67,47 @@ function BadgeItem({ badge, isNew }: { badge: Badge; isNew: boolean }) {
   );
 }
 
+/**
+ * Deduplicate badge entries by slug, keeping the earliest-awarded entry.
+ * The user_badges table can accumulate duplicate rows when a scoring event
+ * fires more than once (e.g. on a network retry); this guard prevents the
+ * same badge card from appearing twice in the grid (#358).
+ */
+export function deduplicateBadges(badges: Badge[]): Badge[] {
+  const seen = new Map<string, Badge>();
+  for (const badge of badges) {
+    const existing = seen.get(badge.slug);
+    if (!existing) {
+      seen.set(badge.slug, badge);
+      continue;
+    }
+    // Keep the earliest-awarded entry.
+    if (badge.earnedAt && existing.earnedAt && badge.earnedAt < existing.earnedAt) {
+      seen.set(badge.slug, badge);
+    }
+  }
+  return Array.from(seen.values());
+}
+
 export function BadgeGrid({ badges, previouslyEarned = [], onNewBadge }: BadgeGridProps) {
+  const deduplicated = React.useMemo(() => deduplicateBadges(badges), [badges]);
   const prevSet = React.useRef(new Set(previouslyEarned));
 
   React.useEffect(() => {
-    const newlyEarned = badges.filter((b) => b.earned && !prevSet.current.has(b.id));
+    const newlyEarned = deduplicated.filter((b) => b.earned && !prevSet.current.has(b.id));
     for (const badge of newlyEarned) {
       onNewBadge?.(badge);
     }
-    prevSet.current = new Set(badges.filter((b) => b.earned).map((b) => b.id));
-  }, [badges, onNewBadge]);
+    prevSet.current = new Set(deduplicated.filter((b) => b.earned).map((b) => b.id));
+  }, [deduplicated, onNewBadge]);
 
-  if (badges.length === 0) return null;
+  if (deduplicated.length === 0) return null;
 
   return (
     <section aria-label="Badges">
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {badges.map((badge) => (
-          <BadgeItem key={badge.id} badge={badge} isNew={badge.earned && !previouslyEarned.includes(badge.id)} />
+        {deduplicated.map((badge) => (
+          <BadgeItem key={badge.slug} badge={badge} isNew={badge.earned && !previouslyEarned.includes(badge.id)} />
         ))}
       </div>
     </section>

@@ -131,6 +131,19 @@ describe("anti-cheat middleware", () => {
       );
     });
 
+    it("normalizes IPv6 addresses before computing the fingerprint", async () => {
+      req.ip = "2001:db8:abcd:ef12::1234";
+      (redis.scard as any).mockResolvedValue(1);
+
+      await validateDeviceFingerprint(req, res, next);
+
+      expect(computeFingerprint).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ip: "2001:db8:abcd:ef12::/64",
+        })
+      );
+    });
+
     it("calls next without checking Redis when there is no authenticated user", async () => {
       req.user = undefined;
 

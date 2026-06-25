@@ -82,6 +82,32 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("button", { name: "Try Again" })).toBeInTheDocument();
   });
 
+  it("renders brand list without React key warnings (#359)", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    apiGetMock.mockResolvedValueOnce({
+      data: {
+        brands: [
+          { id: "brand-1", name: "Nova Reach", challenges: [] },
+          { id: "brand-2", name: "Apex Labs", challenges: [] },
+        ],
+      },
+    });
+
+    render(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Nova Reach")).toBeInTheDocument();
+    });
+
+    const keyWarnings = consoleError.mock.calls.filter((args) =>
+      typeof args[0] === "string" && args[0].toLowerCase().includes("key prop")
+    );
+    expect(keyWarnings).toHaveLength(0);
+
+    consoleError.mockRestore();
+  });
+
   it("does not fire an error toast when brands load successfully", async () => {
     apiGetMock.mockResolvedValueOnce({
       data: {

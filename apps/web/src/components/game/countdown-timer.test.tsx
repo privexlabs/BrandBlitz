@@ -106,6 +106,34 @@ describe('CountdownTimer', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('timer does not advance while tab is hidden (visibilitychange pause, #346)', () => {
+    // Simulate a visible tab
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true, writable: true });
+
+    render(<CountdownTimer durationSeconds={10} />);
+    expect(screen.getByText('10')).not.toBeNull();
+
+    // Advance 2 seconds while visible
+    act(() => { vi.advanceTimersByTime(2000); });
+    expect(screen.getByText('8')).not.toBeNull();
+
+    // Hide the tab — timer should pause
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true, writable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    // Advance 5 seconds while hidden — displayed time must not change
+    act(() => { vi.advanceTimersByTime(5000); });
+    expect(screen.getByText('8')).not.toBeNull();
+
+    // Restore the tab — timer resumes from where it paused
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true, writable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    // 1 more second passes — should now show 7
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(screen.getByText('7')).not.toBeNull();
+  });
+
   it('parent re-renders with new onExpire identity do not restart the timer', () => {
     const onExpire = vi.fn();
 

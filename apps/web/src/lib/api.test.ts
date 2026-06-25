@@ -1,8 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import axios from "axios";
 import { createApiClient, parseChallenge, parseLeaderboardEntries } from "./api";
 
+const signOutMock = vi.fn();
+const toastErrorMock = vi.fn();
+
 vi.mock("next-auth/react", () => ({
-  signOut: vi.fn(),
+  signOut: signOutMock,
+}));
+
+vi.mock("./toast", () => ({
+  toast: { error: toastErrorMock },
 }));
 
 describe("createApiClient", () => {
@@ -44,6 +52,40 @@ describe("createApiClient", () => {
       handlers: Array<{ fulfilled: unknown; rejected: unknown }>;
     };
     expect(interceptors.handlers.length).toBe(0);
+  });
+
+  it("shows session-expired toast and calls signOut on 401 (#357)", async () => {
+    vi.useFakeTimers();
+
+    const client = createApiClient("my-token");
+
+    // Simulate a 401 from a non-auth endpoint by calling the interceptor's
+    // rejected handler directly (avoids the need for a live HTTP server).
+    const handlers = (client.interceptors.response as unknown as {
+      handlers: Array<{ fulfilled: unknown; rejected: (e: unknown) => Promise<unknown> }>;
+    }).handlers;
+
+    const rejectedHandler = handlers[0]?.rejected;
+    expect(rejectedHandler).toBeDefined();
+
+    const axiosError = Object.assign(new Error("Unauthorized"), {
+      isAxiosError: true,
+      response: { status: 401, data: { error: "Token expired" } },
+      config: { url: "/users/me", skipErrorToast: false, headers: {} },
+    });
+    // Mark it so axios.isAxiosError returns true
+    Object.setPrototypeOf(axiosError, (axios as typeof axios & { AxiosError: typeof Error }).AxiosError?.prototype ?? Error.prototype);
+
+    const promise = rejectedHandler!(axiosError).catch(() => {/* expected rejection */});
+
+    // Advance past the 1 500 ms delay so signOut fires
+    await vi.advanceTimersByTimeAsync(2000);
+    await promise;
+
+    expect(toastErrorMock).toHaveBeenCalledWith(expect.stringContaining("session has expired"));
+    expect(signOutMock).toHaveBeenCalledWith({ callbackUrl: "/login" });
+
+    vi.useRealTimers();
   });
 });
 

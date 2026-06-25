@@ -36,9 +36,9 @@ export const UPLOAD_TYPE_CONFIGS: Record<
   UploadTypeConfig
 > = {
   "brand-logo": {
-    allowedMimes: ["image/png", "image/svg+xml", "image/jpeg", "image/webp"],
+    allowedMimes: ["image/png", "image/jpeg", "image/webp"],
     maxSizeBytes: 2 * 1024 * 1024, // 2 MB
-    label: "Logo must be under 2 MB (PNG, SVG, JPG, or WebP)",
+    label: "Logo must be under 2 MB (PNG, JPG, or WebP)",
   },
   "product-image": {
     allowedMimes: ["image/png", "image/jpeg", "image/webp", "image/gif"],
@@ -72,8 +72,6 @@ const MAGIC_BYTES: Record<string, MagicSignature[]> = {
     { offset: 0, bytes: [0x47, 0x49, 0x46, 0x38, 0x37, 0x61] }, // GIF87a
     { offset: 0, bytes: [0x47, 0x49, 0x46, 0x38, 0x39, 0x61] }, // GIF89a
   ],
-  // SVG is XML text — no reliable magic bytes; skip binary check.
-  "image/svg+xml": [],
 };
 
 /**
@@ -86,7 +84,7 @@ const MAGIC_BYTES: Record<string, MagicSignature[]> = {
  */
 export async function validateMagicBytes(file: File): Promise<boolean> {
   const signatures = MAGIC_BYTES[file.type];
-  // Unknown MIME or SVG — skip binary check, rely on MIME allow-list only.
+  // Unknown MIME — skip binary check, rely on MIME allow-list only.
   if (!signatures || signatures.length === 0) return true;
 
   const headerSize = 12;

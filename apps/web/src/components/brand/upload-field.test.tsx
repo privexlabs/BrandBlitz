@@ -84,9 +84,11 @@ describe("validateMagicBytes", () => {
     expect(await validateMagicBytes(file)).toBe(false);
   });
 
-  it("accepts SVG without a binary check (no magic bytes defined)", async () => {
+  it("rejects SVG (no longer an allowed MIME type for brand-logo uploads)", async () => {
     const svgContent = '<svg xmlns="http://www.w3.org/2000/svg"/>';
     const file = new File([svgContent], "icon.svg", { type: "image/svg+xml" });
+    // validateMagicBytes has no entry for SVG, so it returns true (skip binary check).
+    // SVG is instead rejected at the MIME allow-list check in the UploadField component.
     expect(await validateMagicBytes(file)).toBe(true);
   });
 });
@@ -146,6 +148,22 @@ describe("UploadField — wrong MIME type", () => {
 
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     await userEvent.upload(input, pdfFile);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("rejects SVG files and never calls presign (XSS prevention)", async () => {
+    renderUploadField();
+
+    const svgContent = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
+    const svgFile = new File([svgContent], "icon.svg", { type: "image/svg+xml" });
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(input, svgFile);
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();

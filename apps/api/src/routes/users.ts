@@ -6,6 +6,7 @@ import {
   findUserByPhoneHash,
   markPhoneVerified,
   updateUserWallet,
+  updateUserProfile,
   getUserPublicProfileByUsername,
 } from "../db/queries/users";
 import { getReferralStats } from "../services/referrals";
@@ -20,8 +21,9 @@ import {
 import { authenticate } from "../middleware/authenticate";
 import { createError } from "../middleware/error";
 import { redis } from "../lib/redis";
-import { apiLimiter } from "../middleware/rate-limit";
+import { apiLimiter, phoneRateLimit } from "../middleware/rate-limit";
 import { getBadgesForUser } from "../services/badges";
+import { config } from "../lib/config";
 
 const router: Router = Router();
 
@@ -101,9 +103,17 @@ router.post("/streaks/repair", authenticate, async (req, res) => {
 /**
  * GET /users/profile/:username
  * Public profile — display name, stats. No auth required.
+ * Returns a redirect field if the username has been renamed.
  */
 router.get("/profile/:username", apiLimiter, async (req, res) => {
   const { username } = z.object({ username: z.string() }).parse(req.params);
+
+  // Check for username redirect first
+  const redirectTarget = await redis.get(`username:redirect:${username}`);
+  if (redirectTarget) {
+    res.json({ redirect: redirectTarget });
+    return;
+  }
 
   const user = await getUserPublicProfileByUsername(username);
   if (!user) throw createError("User not found", 404);
@@ -147,18 +157,66 @@ router.patch("/me/wallet", authenticate, async (req, res) => {
 });
 
 /**
+ * PATCH /users/me/profile
+ * Update display name and/or username. Triggers cache revalidation
+ * so Next.js pages reflect the new values immediately.
+ */
+router.patch("/me/profile", authenticate, async (req, res) => {
+  const body = z
+    .object({
+      displayName: z.string().trim().min(1).max(100).optional(),
+      username: z
+        .string()
+        .trim()
+        .min(1)
+        .max(30)
+        .regex(/^[a-z0-9-]+$/, "Username may only contain lowercase letters, numbers, and hyphens")
+        .optional(),
+    })
+    .parse(req.body);
+
+  if (!body.displayName && !body.username) {
+    throw createError("Nothing to update", 400);
+  }
+
+  const { oldUsername, newUsername } = await updateUserProfile(req.user!.sub, body);
+
+  // Store redirect for old username (so visiting /profile/<old> redirects to new URL)
+  if (oldUsername && oldUsername !== newUsername) {
+    await redis.set(`username:redirect:${oldUsername}`, newUsername, "EX", 86400 * 365);
+  }
+
+  // Trigger Next.js cache revalidation so profile pages reflect the new data
+  const revalidatePaths = [
+    `/profile/${oldUsername}`,
+    `/profile/${newUsername}`,
+  ];
+
+  try {
+    await fetch(`${config.WEB_URL}/api/revalidate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        secret: config.WEBHOOK_SECRET,
+        paths: revalidatePaths,
+        tags: [`profile-${oldUsername}`, `profile-${newUsername}`],
+      }),
+    });
+  } catch {
+    // Non-critical — stale cache will eventually expire
+    console.warn("Failed to trigger cache revalidation for profile update");
+  }
+
+  res.json({ success: true, oldUsername, newUsername });
+});
+
+/**
  * POST /users/me/phone/send
  * Send SMS verification code via Twilio.
  */
-router.post("/me/phone/send", authenticate, async (req, res) => {
+router.post("/me/phone/send", authenticate, phoneRateLimit, async (req, res) => {
   const { phone } = z.object({ phone: z.string().min(1) }).parse(req.body);
   const normalizedPhone = normalizePhoneNumber(phone);
-
-  // Rate limit: 3 sends per phone per 5 minutes
-  const key = `phone:send:${normalizedPhone}`;
-  const sends = await redis.incr(key);
-  if (sends === 1) await redis.expire(key, 300);
-  if (sends > 3) throw createError("Too many verification attempts", 429);
 
   await sendVerificationCode(normalizedPhone);
   res.json({ success: true });

@@ -23,6 +23,31 @@ export function Header() {
   }, [pathname]);
 
   useEffect(() => {
+    if (!menuOpen) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenuOpen(false);
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      if (target.closest("[aria-label='Open menu']")) return;
+      if (target.closest("#mobile-menu-panel")) return;
+      setMenuOpen(false);
+    }
+
+    document.addEventListener("click", handleClickOutside, true);
+    return () => document.removeEventListener("click", handleClickOutside, true);
+  }, [menuOpen]);
+
+  useEffect(() => {
     if (!apiToken) {
       return;
     }
@@ -127,7 +152,7 @@ export function Header() {
 
       {/* Mobile menu */}
       {menuOpen && (
-        <div className="md:hidden border-t border-[var(--border)] bg-[var(--background)] px-6 pb-4">
+        <div id="mobile-menu-panel" className="md:hidden border-t border-[var(--border)] bg-[var(--background)] px-6 pb-4">
           <nav className="flex flex-col text-sm pt-3">{navLinks}</nav>
           <div className="mt-4 pt-4 border-t border-[var(--border)]">
             {session ? (

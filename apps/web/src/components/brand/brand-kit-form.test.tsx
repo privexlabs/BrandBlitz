@@ -1,56 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useRouter } from "next/navigation";
 import { BrandKitForm } from "./brand-kit-form";
 import * as apiModule from "@/lib/api";
-
-// Mock next/navigation
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    push: pushMock,
-  }),
-}));
-
-vi.mock("@/lib/api", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-
-  return {
-    ...actual,
-    createApiClient: () => ({
-      post: postMock,
-    }),
-  };
-});
-
-vi.mock("./upload-field", () => ({
-  UploadField: ({
-    label,
-    uploadType,
-    onUploaded,
-  }: {
-    label: string;
-    uploadType: "brand-logo" | "product-image";
-    onUploaded: (key: string, publicUrl: string) => void;
-  }) => (
-    <button
-      type="button"
-      onClick={() => {
-        if (uploadType === "brand-logo") {
-          onUploaded("logo-key-123", "https://cdn.example/logo.webp");
-          return;
-        }
-
-        const count = (globalThis as any).__productUploadCount ?? 0;
-        const nextCount = count + 1;
-        (globalThis as any).__productUploadCount = nextCount;
-        onUploaded(`product-key-${nextCount}`, `https://cdn.example/product-${nextCount}.webp`);
-      }}
-    >
-      Upload {label}
-    </button>
-  ),
-}));
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
@@ -71,18 +23,18 @@ vi.mock("@/lib/api", () => ({
 
 // Mock the upload field
 vi.mock("./upload-field", () => ({
-  UploadField: ({ onUploaded }: any) => (
-    <button onClick={() => onUploaded("test-logo-key")}>Upload Logo</button>
+  UploadField: ({ label, onUploaded }: any) => (
+    <button type="button" onClick={() => onUploaded("test-logo-key")}>
+      {label}
+    </button>
   ),
 }));
 
 describe("BrandKitForm", () => {
-  let mockRouter: any;
   let mockApiClient: any;
 
   beforeEach(() => {
-    mockRouter = { push: vi.fn() };
-    vi.mocked(useRouter).mockReturnValue(mockRouter);
+    mocks.push.mockReset();
 
     mockApiClient = {
       post: vi.fn(),
@@ -123,18 +75,18 @@ describe("BrandKitForm", () => {
     await user.type(screen.getByLabelText(/Prize Pool/i), "100");
 
     // Upload logo
-    await user.click(screen.getByText("Upload Logo"));
+    await user.click(screen.getByText("Upload Brand Logo"));
 
     // Submit form
     await user.click(screen.getByRole("button", { name: /Create Brand Kit/i }));
 
     // Wait for redirect
     await waitFor(() => {
-      expect(mockRouter.push).toHaveBeenCalled();
+      expect(mocks.push).toHaveBeenCalled();
     });
 
     // Verify redirect URL does NOT contain secrets
-    const redirectUrl = mockRouter.push.mock.calls[0][0];
+    const redirectUrl = mocks.push.mock.calls[0][0];
     expect(redirectUrl).toBe("/brand/brand-123");
     expect(redirectUrl).not.toContain("depositAddress");
     expect(redirectUrl).not.toContain("memo");

@@ -164,6 +164,20 @@ export function calculatePayoutShare(
 }
 
 /**
+ * Deduplicate badge slug candidates before passing them to the badge-award
+ * pipeline. The DB layer already enforces uniqueness via
+ * ON CONFLICT (user_id, badge_slug) DO NOTHING, but filtering here
+ * eliminates redundant round-trips when a scoring event fires twice
+ * due to a retry (#358).
+ *
+ * @param slugs - Potentially duplicate list of badge slugs to award.
+ * @returns Array with each slug appearing at most once, in insertion order.
+ */
+export function deduplicateBadgeSlugs(slugs: string[]): string[] {
+  return [...new Set(slugs)];
+}
+
+/**
  * Get top-N winners from sessions eligible for payout.
  * Sorted by total_score DESC, then completed_at ASC (tiebreaker: fastest finish).
  */

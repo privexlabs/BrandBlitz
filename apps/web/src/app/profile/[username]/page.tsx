@@ -1,9 +1,8 @@
-import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatScore, formatUsdc } from "@/lib/format";
+import { formatScore, formatUsdc, safeDivide } from "@/lib/format";
 import { StreakBadge } from "@/components/gamification/streak-badge";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -21,7 +20,11 @@ interface ProfilePageProps {
 
 export async function generateMetadata({ params }: ProfilePageProps): Promise<Metadata> {
   const { username } = await params;
-  const { user } = await getUserProfile(username);
+  const { user, redirect: redirectTarget } = await getUserProfile(username);
+
+  if (redirectTarget) {
+    return { title: "Redirecting…" };
+  }
 
   if (!user) {
     return {
@@ -52,12 +55,21 @@ export async function generateMetadata({ params }: ProfilePageProps): Promise<Me
   };
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+
 async function getUserProfile(
   username: string,
-): Promise<{ user: UserProfile | null; failed: boolean }> {
+): Promise<{ user: UserProfile | null; failed: boolean; redirect?: string }> {
   try {
-    const res = await api.get(`/users/profile/${username}`);
-    return { user: res.data.user, failed: false };
+    const res = await fetch(`${API_URL}/users/profile/${username}`, {
+      next: { tags: [`profile-${username}`] },
+    });
+    if (!res.ok) throw new Error("Failed to fetch");
+    const data = await res.json();
+    if (data.redirect) {
+      return { user: null, failed: false, redirect: data.redirect };
+    }
+    return { user: data.user, failed: false };
   } catch {
     return { user: null, failed: true };
   }
@@ -65,8 +77,10 @@ async function getUserProfile(
 
 async function getUserBadges(userId: string): Promise<UserBadge[]> {
   try {
-    const res = await api.get(`/users/${userId}/badges`);
-    return res.data.badges ?? [];
+    const res = await fetch(`${API_URL}/users/${userId}/badges`);
+    if (!res.ok) throw new Error("Failed to fetch");
+    const data = await res.json();
+    return data.badges ?? [];
   } catch {
     return [];
   }
@@ -75,7 +89,11 @@ async function getUserBadges(userId: string): Promise<UserBadge[]> {
 export default async function ProfilePage({ params }: ProfilePageProps) {
   const { username } = await params;
   if (!username?.trim()) notFound();
-  const { user, failed } = await getUserProfile(username);
+  const { user, failed, redirect: redirectTarget } = await getUserProfile(username);
+
+  if (redirectTarget) {
+    redirect(`/profile/${redirectTarget}`);
+  }
 
   if (!user && failed) {
     return (
@@ -103,7 +121,7 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
   const milestones = [3, 7, 14, 30];
   const nextMilestone =
     milestones.find((m) => m > streak) ?? milestones[milestones.length - 1];
-  const progress = Math.min(1, streak / Math.max(1, nextMilestone));
+  const progress = Math.min(1, safeDivide(streak, nextMilestone, 0));
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">

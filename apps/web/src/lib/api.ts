@@ -76,6 +76,23 @@ export function createApiClient(token?: string): AxiosInstance {
           error.response?.status === 401 &&
           !error.config?.url?.startsWith("/auth/")
         ) {
+          // Show a session-expired notice before redirecting so users know why
+          // they are being sent back to the login page (#357).
+          // We import lazily to avoid pulling toast into every bundle that uses
+          // the API client, and we set skipErrorToast so the generic error
+          // handler above does not also fire for the same 401.
+          try {
+            const { toast } = await import("./toast");
+            toast.error("Your session has expired. Please sign in again.");
+          } catch {
+            // toast may not be available in all environments — proceed silently
+          }
+
+          // Wait briefly so the toast is visible before the page navigates away.
+          // 1 500 ms keeps us within the 2-second SLA stated in the acceptance
+          // criteria while still giving users time to read the notice.
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 1500));
+
           const { signOut } = await import("next-auth/react");
           await signOut({ callbackUrl: "/login" });
         }

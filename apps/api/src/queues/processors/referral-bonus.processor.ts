@@ -9,12 +9,17 @@ import {
 } from "../../db/queries/referral-payouts";
 import { referralBonusQueue } from "../referral-bonus.queue";
 import { forwardToDlq, referralBonusDlqQueue } from "../dlq";
+import {
+  auditReferralBonusSkipped,
+  isFraudSession,
+} from "../../services/referrals";
+import { getSession } from "../../db/queries/sessions";
 
 export const referralBonusWorkerOptions = {
   concurrency: 2,
 } as const;
 
-async function processReferralBonusJob(
+export async function processReferralBonusJob(
   job: Job<{ referralPayoutId: string }>,
 ): Promise<void> {
   const payout = await findReferralPayoutById(job.data.referralPayoutId);
@@ -31,6 +36,31 @@ async function processReferralBonusJob(
       status: payout.status,
     });
     return;
+  }
+
+  if (payout.challenge_id) {
+    const session = await getSession(payout.referred_id, payout.challenge_id);
+    if (session && (await isFraudSession(session.id))) {
+      await updateReferralPayoutStatus(
+        payout.id,
+        "failed",
+        undefined,
+        "Referral bonus skipped because session was flagged as fraud",
+      );
+      await auditReferralBonusSkipped({
+        sessionId: session.id,
+        referrerId: payout.referrer_id,
+        referredId: payout.referred_id,
+        referralId: payout.referral_id,
+        referralPayoutId: payout.id,
+        challengeId: payout.challenge_id,
+      });
+      logger.info("Referral bonus skipped for fraud-flagged session", {
+        referralPayoutId: payout.id,
+        sessionId: session.id,
+      });
+      return;
+    }
   }
 
   if (!payout.referrer_stellar_address || !payout.referred_stellar_address) {

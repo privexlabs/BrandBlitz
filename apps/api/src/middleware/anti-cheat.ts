@@ -7,6 +7,7 @@ import { logger } from "../lib/logger";
 import { metrics } from "../lib/metrics";
 import { computeFingerprint } from "../lib/fingerprint";
 import { createError } from "./error";
+import { normalizeClientIp } from "./rate-limit";
 
 export const BOT_REACTION_THRESHOLD_MS = 80;
 // Fallback defaults — override at runtime via PATCH /admin/config/anti_cheat.thresholds
@@ -184,7 +185,7 @@ export async function validateDeviceFingerprint(
     const fingerprint = computeFingerprint({
       visitorId,
       deviceId,
-      ip: req.ip,
+      ip: normalizeClientIp(req.ip),
       userAgent: req.headers["user-agent"],
     });
 

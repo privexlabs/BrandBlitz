@@ -196,6 +196,28 @@ export async function updateUserWallet(userId: string, stellarAddress: string): 
   ]);
 }
 
+export async function updateUserProfile(
+  userId: string,
+  data: { displayName?: string; username?: string }
+): Promise<{ oldUsername: string | null; newUsername: string | null }> {
+  const current = await query<{ display_name: string; username: string | null }>(
+    `SELECT display_name, username FROM users WHERE id = $1 AND deleted_at IS NULL`,
+    [userId]
+  );
+  if (!current.rows[0]) throw new Error("User not found");
+
+  const oldUsername = current.rows[0].username;
+  const displayName = data.displayName ?? current.rows[0].display_name;
+  const newUsername = data.username ?? current.rows[0].username;
+
+  await query(
+    `UPDATE users SET display_name = $2, username = $3, updated_at = NOW() WHERE id = $1`,
+    [userId, displayName, newUsername]
+  );
+
+  return { oldUsername, newUsername };
+}
+
 export async function incrementUserEarnings(userId: string, amountUsdc: string): Promise<void> {
   await query(
     `UPDATE users

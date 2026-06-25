@@ -22,6 +22,8 @@ import {
   createReferralPayout,
   getReferralPayoutTotalsForUser,
 } from "../db/queries/referral-payouts";
+import { query } from "../db";
+import { getSession } from "../db/queries/sessions";
 import { enqueueReferralBonus } from "../queues/referral-bonus.queue";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -183,6 +185,49 @@ export async function getReferralStats(userId: string): Promise<{
   };
 }
 
+export async function isFraudSession(sessionId: string): Promise<boolean> {
+  const result = await query<{ exists: boolean }>(
+    "SELECT EXISTS (SELECT 1 FROM fraud_flags WHERE session_id = $1) AS exists",
+    [sessionId],
+  );
+  return result.rows[0]?.exists === true;
+}
+
+async function findReferralSessionId(
+  referredUserId: string,
+  challengeId?: string | null,
+): Promise<string | null> {
+  if (!challengeId) return null;
+  const session = await getSession(referredUserId, challengeId);
+  return session?.id ?? null;
+}
+
+export async function auditReferralBonusSkipped(params: {
+  sessionId: string;
+  referrerId: string;
+  referredId: string;
+  referralId?: string | null;
+  referralPayoutId?: string | null;
+  challengeId?: string | null;
+}): Promise<void> {
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_key, after)
+     VALUES (NULL, 'referral_bonus_skipped', 'game_sessions', $1, $2)`,
+    [
+      params.sessionId,
+      {
+        sessionId: params.sessionId,
+        referrerId: params.referrerId,
+        referredId: params.referredId,
+        referralId: params.referralId ?? null,
+        referralPayoutId: params.referralPayoutId ?? null,
+        challengeId: params.challengeId ?? null,
+        reason: "fraud_flag",
+      },
+    ],
+  );
+}
+
 export async function queueReferralBonusForPayout(params: {
   referredUserId: string;
   challengeId?: string | null;
@@ -190,6 +235,18 @@ export async function queueReferralBonusForPayout(params: {
 }): Promise<void> {
   const referral = await findReferralByReferredId(params.referredUserId);
   if (!referral || referral.rewarded) return;
+
+  const sessionId = await findReferralSessionId(params.referredUserId, params.challengeId);
+  if (sessionId && (await isFraudSession(sessionId))) {
+    await auditReferralBonusSkipped({
+      sessionId,
+      referrerId: referral.referrer_id,
+      referredId: referral.referred_id,
+      referralId: referral.id,
+      challengeId: params.challengeId ?? null,
+    });
+    return;
+  }
 
   const [referrerUser, referredUser] = await Promise.all([
     findUserById(referral.referrer_id),

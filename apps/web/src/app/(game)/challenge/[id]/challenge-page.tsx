@@ -39,6 +39,7 @@ export function ChallengePage({ params }: Props) {
   const [challengeToken, setChallengeToken] = React.useState("");
   const [sessionId, setSessionId] = React.useState("");
   const [scores, setScores] = React.useState<number[]>([]);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!challengeId) return;
@@ -51,16 +52,26 @@ export function ChallengePage({ params }: Props) {
     const apiToken = (session as any).apiToken as string;
     const api = createApiClient(apiToken);
 
-    api.get(`/challenges/${challengeId}`).then((res) => {
-      setChallenge(res.data.challenge);
-      setQuestions(res.data.questions);
-      // Send visitorId (FingerprintJS) as deviceId for anti-cheat multi-account detection
-      // If FingerprintJS fails to load, visitorId will be null and backend will flag for review
-      api.post(`/sessions/${challengeId}/warmup-start`, { deviceId: visitorId }).then((r) => {
+    void (async () => {
+      try {
+        const res = await api.get(`/challenges/${challengeId}`);
+        setChallenge(res.data.challenge);
+        setQuestions(res.data.questions);
+      } catch {
+        setLoadError("Couldn't load the challenge. Check your connection and try again.");
+        return;
+      }
+
+      try {
+        // Send visitorId (FingerprintJS) as deviceId for anti-cheat multi-account detection.
+        // If FingerprintJS fails to load, visitorId will be null and backend will flag for review.
+        const r = await api.post(`/sessions/${challengeId}/warmup-start`, { deviceId: visitorId });
         setSessionId(r.data.sessionId);
         setPhase("warmup");
-      });
-    });
+      } catch {
+        setLoadError("Couldn't start the game session. Please try again.");
+      }
+    })();
   }, [challengeId, session, status, router, visitorId]);
 
   const handleWarmupComplete = (token: string) => {
@@ -77,23 +88,40 @@ export function ChallengePage({ params }: Props) {
   // last attempted answer in state so Retry replays the same payload.
   const [answerError, setAnswerError] = React.useState<string | null>(null);
   const lastAnswerRef = React.useRef<{ option: "A" | "B" | "C" | "D"; reactionTimeMs: number } | null>(null);
+  const abortControllerRef = React.useRef<AbortController | null>(null);
+  const mountedRef = React.useRef(true);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const ANSWER_MAX_ATTEMPTS = 3;
   const ANSWER_RETRY_DELAY_MS = 500;
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const submitAnswer = async (option: "A" | "B" | "C" | "D", reactionTimeMs: number) => {
+  const submitAnswer = async (option: "A" | "B" | "C" | "D", reactionTimeMs: number, signal: AbortSignal) => {
     const apiToken = (session as any)?.apiToken as string;
     const api = createApiClient(apiToken);
     let lastError: unknown;
     for (let attempt = 0; attempt < ANSWER_MAX_ATTEMPTS; attempt += 1) {
+      if (signal.aborted) throw new Error("Aborted");
       try {
         const res = await api.post(
           `/sessions/${challengeId}/answer/${currentRound}`,
           { selectedOption: option, reactionTimeMs },
+          { signal }
         );
         return res.data.score as number;
-      } catch (err) {
+      } catch (err: any) {
+        if (err.name === "CanceledError" || err.message === "Aborted") {
+          throw err;
+        }
         lastError = err;
         if (attempt < ANSWER_MAX_ATTEMPTS - 1) {
           await sleep(ANSWER_RETRY_DELAY_MS);
@@ -104,10 +132,17 @@ export function ChallengePage({ params }: Props) {
   };
 
   const handleAnswer = async (option: "A" | "B" | "C" | "D", reactionTimeMs: number) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     lastAnswerRef.current = { option, reactionTimeMs };
     setAnswerError(null);
     try {
-      const score = await submitAnswer(option, reactionTimeMs);
+      const score = await submitAnswer(option, reactionTimeMs, abortController.signal);
+      if (!mountedRef.current) return;
       setScores((prev) => [...prev, score]);
       // Advance ONLY after the server confirms the round was scored.
       // Without this guarantee the `scores` array drifts out of sync
@@ -118,6 +153,7 @@ export function ChallengePage({ params }: Props) {
         setPhase("result");
       }
     } catch (err: any) {
+      if (!mountedRef.current || err.name === "CanceledError" || err.message === "Aborted") return;
       const message =
         err?.response?.data?.message ??
         err?.message ??
@@ -131,6 +167,20 @@ export function ChallengePage({ params }: Props) {
     if (!last) return;
     void handleAnswer(last.option, last.reactionTimeMs);
   };
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-8 text-center">
+        <p className="text-lg font-medium text-[var(--foreground)]">{loadError}</p>
+        <button
+          className="rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-medium text-[var(--primary-foreground)] hover:opacity-90"
+          onClick={() => { setLoadError(null); router.refresh(); }}
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
   if (phase === "loading") {
     return (
