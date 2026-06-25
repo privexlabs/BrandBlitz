@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useCountdown } from "@/hooks/use-countdown";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
@@ -13,6 +14,8 @@ interface CountdownTimerProps {
    */
   deadlineAt?: number;
   onExpire?: () => void;
+  /** Called each second when countdown is ≤5 s for tick sound. */
+  onTick?: () => void;
   className?: string;
   paused?: boolean;
 }
@@ -24,6 +27,13 @@ export function CountdownTimer({ durationSeconds, deadlineAt, onExpire, classNam
   const totalMs = Math.max(durationSeconds, 1) * 1000;
   const progress = (timeLeftMs / totalMs) * 100;
   const isLow = seconds <= 5;
+
+  React.useEffect(() => {
+    if (isLow && seconds < prevSecondsRef.current && onTick) {
+      onTick();
+    }
+    prevSecondsRef.current = seconds;
+  }, [seconds, isLow, onTick]);
 
   return (
     <div className={cn("flex flex-col items-center gap-2", className)}>

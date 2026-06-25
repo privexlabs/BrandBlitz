@@ -82,6 +82,7 @@ export function ChallengePage({ params }: Props) {
   const [phase, setPhase] = React.useState<GamePhase>("loading");
   const [currentRound, setCurrentRound] = React.useState<1 | 2 | 3>(1);
   const [scores, setScores] = React.useState<number[]>([]);
+  const [finalRank, setFinalRank] = React.useState<number | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [answerError, setAnswerError] = React.useState<string | null>(null);
   const [answerState, setAnswerState] = React.useState<ChallengeAnswerState | null>(null);
@@ -373,7 +374,15 @@ export function ChallengePage({ params }: Props) {
   }
 
   if (phase === "result") {
-    return <ResultScreen totalScore={scores.reduce((a, b) => a + b, 0)} challengeId={challengeId} />;
+    return (
+      <ResultScreen
+        totalScore={scores.reduce((a, b) => a + b, 0)}
+        challengeId={challengeId}
+        rank={finalRank ?? undefined}
+        primaryColor={challenge?.primary_color ?? undefined}
+        secondaryColor={challenge?.secondary_color ?? undefined}
+      />
+    );
   }
 
   return null;

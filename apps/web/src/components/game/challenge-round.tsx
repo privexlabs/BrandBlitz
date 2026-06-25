@@ -30,6 +30,8 @@ interface ChallengeRoundProps {
    *  calls. The parent owns the retry payload; the component just
    *  wires the click. */
   onRetry?: () => void;
+  /** Called each second when countdown is ≤5 s for tick sound. */
+  onTick?: () => void;
 }
 
 const OPTIONS: ("A" | "B" | "C" | "D")[] = ["A", "B", "C", "D"];
@@ -45,6 +47,7 @@ export function ChallengeRound({
   pauseTimer = false,
   answerError = null,
   onRetry,
+  onTick,
 }: ChallengeRoundProps) {
   const [localSelected, setLocalSelected] = useState<AnswerOptionKey | null>(null);
   const [localLocked, setLocalLocked] = useState(false);
@@ -126,6 +129,7 @@ export function ChallengeRound({
         <CountdownTimer
           durationSeconds={ROUND_SECONDS}
           onExpire={handleTimeExpire}
+          onTick={onTick}
           className="w-32"
           paused={pauseTimer}
         />
