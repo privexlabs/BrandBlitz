@@ -14,10 +14,11 @@ interface CountdownTimerProps {
   deadlineAt?: number;
   onExpire?: () => void;
   className?: string;
+  paused?: boolean;
 }
 
-export function CountdownTimer({ durationSeconds, deadlineAt, onExpire, className }: CountdownTimerProps) {
-  const { timeLeftMs } = useCountdown({ durationSeconds, deadlineAt, onExpire });
+export function CountdownTimer({ durationSeconds, deadlineAt, onExpire, className, paused = false }: CountdownTimerProps) {
+  const { timeLeftMs } = useCountdown({ durationSeconds, deadlineAt, onExpire, paused });
 
   const seconds = Math.ceil(timeLeftMs / 1000);
   const totalMs = Math.max(durationSeconds, 1) * 1000;

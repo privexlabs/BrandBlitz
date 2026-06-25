@@ -8,6 +8,7 @@ import {
   recordRoundScore,
   finishSession,
   storeSessionHmac,
+  deleteOpenSession,
 } from "../db/queries/sessions";
 import { calculateRoundScore, completeWarmupWithLock, validateAnswer } from "../services/scoring";
 import { authenticate } from "../middleware/authenticate";
@@ -48,6 +49,84 @@ async function revokeSessionToken(sessionId: string, token: string, exp: number)
 const AnswerSchema = z.object({
   selectedOption: z.enum(["A", "B", "C", "D"]).nullable(),
   reactionTimeMs: z.number().int().min(0),
+});
+
+function lastAnsweredRound(session: {
+  round_1_answer?: string | null;
+  round_1_score?: number;
+  round_2_answer?: string | null;
+  round_2_score?: number;
+  round_3_answer?: string | null;
+  round_3_score?: number;
+}): 0 | 1 | 2 | 3 {
+  if (session.round_3_answer || (session.round_3_score ?? 0) > 0) return 3;
+  if (session.round_2_answer || (session.round_2_score ?? 0) > 0) return 2;
+  if (session.round_1_answer || (session.round_1_score ?? 0) > 0) return 1;
+  return 0;
+}
+
+function recoveryStatus(session: {
+  status?: string;
+  completed_at?: string | Date | null;
+  challenge_started_at?: string | Date | null;
+}): "warmup" | "in_progress" | "completed" | "expired" {
+  if (session.completed_at || session.status === "completed") return "completed";
+  if (session.status === "abandoned") return "expired";
+  if (session.challenge_started_at || session.status === "active") return "in_progress";
+  return "warmup";
+}
+
+function remainingTimeMs(session: { challenge_started_at?: string | Date | null }): number {
+  if (!session.challenge_started_at) return 45_000;
+  const startedAt = new Date(session.challenge_started_at).getTime();
+  if (!Number.isFinite(startedAt)) return 45_000;
+  return Math.max(0, 45_000 - (Date.now() - startedAt));
+}
+
+/**
+ * GET /sessions/:challengeId
+ * Return the authenticated user's current session progress for recovery UI.
+ */
+router.get("/:challengeId", authenticate, async (req, res) => {
+  const challengeId = String(req.params.challengeId);
+  const challenge = await getChallengeById(challengeId);
+  if (!challenge) throw createError("Challenge not found", 404);
+
+  const session = await getSession(req.user!.sub, challenge.id);
+  if (!session) throw createError("Session not found", 404);
+  if (session.user_id !== req.user!.sub) throw createError("Forbidden", 403);
+
+  const lastRound = lastAnsweredRound(session);
+  const totalScore =
+    session.total_score ||
+    (session.round_1_score ?? 0) + (session.round_2_score ?? 0) + (session.round_3_score ?? 0);
+
+  res.json({
+    session: {
+      id: session.id,
+      status: recoveryStatus(session),
+      last_answered_round: lastRound,
+      current_round: Math.min(lastRound + 1, 3),
+      remaining_time_ms: remainingTimeMs(session),
+      total_score: totalScore,
+      round_scores: [session.round_1_score, session.round_2_score, session.round_3_score],
+    },
+  });
+});
+
+/**
+ * DELETE /sessions/:challengeId
+ * Forfeit or clear an interrupted session so the player can start fresh.
+ */
+router.delete("/:challengeId", authenticate, async (req, res) => {
+  const challengeId = String(req.params.challengeId);
+  const challenge = await getChallengeById(challengeId);
+  if (!challenge) throw createError("Challenge not found", 404);
+
+  const deleted = await deleteOpenSession(req.user!.sub, challenge.id);
+  if (!deleted) throw createError("No open session to forfeit", 404);
+
+  res.status(204).send();
 });
 
 /**

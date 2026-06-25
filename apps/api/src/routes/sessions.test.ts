@@ -84,6 +84,84 @@ describe("Sessions API", () => {
     testState.revokedTokens.clear();
   });
 
+  describe("GET /sessions/:challengeId", () => {
+    it("returns in-progress recovery details with last answered round", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.getSession as any).mockResolvedValue({
+        id: "s1",
+        user_id: "user123",
+        status: "active",
+        challenge_started_at: new Date(Date.now() - 5000).toISOString(),
+        completed_at: null,
+        round_1_answer: "A",
+        round_1_score: 100,
+        round_2_answer: null,
+        round_2_score: 0,
+        round_3_answer: null,
+        round_3_score: 0,
+        total_score: 100,
+      });
+
+      const res = await request(app).get("/sessions/c1");
+
+      expect(res.status).toBe(200);
+      expect(res.body.session).toEqual(expect.objectContaining({
+        id: "s1",
+        status: "in_progress",
+        last_answered_round: 1,
+        current_round: 2,
+        total_score: 100,
+        round_scores: [100, 0, 0],
+      }));
+      expect(res.body.session.remaining_time_ms).toBeGreaterThan(0);
+    });
+
+    it("maps abandoned sessions to expired recovery status", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.getSession as any).mockResolvedValue({
+        id: "s1",
+        user_id: "user123",
+        status: "abandoned",
+        challenge_started_at: new Date(Date.now() - 60_000).toISOString(),
+        completed_at: null,
+        round_1_answer: "A",
+        round_1_score: 100,
+        round_2_answer: null,
+        round_2_score: 0,
+        round_3_answer: null,
+        round_3_score: 0,
+        total_score: 100,
+      });
+
+      const res = await request(app).get("/sessions/c1");
+
+      expect(res.status).toBe(200);
+      expect(res.body.session.status).toBe("expired");
+      expect(res.body.session.remaining_time_ms).toBe(0);
+    });
+  });
+
+  describe("DELETE /sessions/:challengeId", () => {
+    it("forfeits an open session", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.deleteOpenSession as any).mockResolvedValue(true);
+
+      const res = await request(app).delete("/sessions/c1");
+
+      expect(res.status).toBe(204);
+      expect(sessionQueries.deleteOpenSession).toHaveBeenCalledWith("user123", "c1");
+    });
+
+    it("returns 404 when there is no open session to forfeit", async () => {
+      (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1" });
+      (sessionQueries.deleteOpenSession as any).mockResolvedValue(false);
+
+      const res = await request(app).delete("/sessions/c1");
+
+      expect(res.status).toBe(404);
+    });
+  });
+
   describe("POST /sessions/:challengeId/warmup-start", () => {
     it("should start warmup happy path", async () => {
       (challengeQueries.getChallengeById as any).mockResolvedValue({ id: "c1", status: "active" });

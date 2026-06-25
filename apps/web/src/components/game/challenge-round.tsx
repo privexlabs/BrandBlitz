@@ -4,16 +4,25 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { CountdownTimer } from "./countdown-timer";
-import { cn } from "@/lib/utils";
 import { ROUND_SECONDS } from "./constants";
 import type { ChallengeQuestion } from "@/lib/api";
+import { AnswerOption, type AnswerOptionKey } from "./answer-option";
+
+export interface ChallengeAnswerState {
+  selectedOption: AnswerOptionKey | null;
+  status: "pending" | "settled";
+  correct?: boolean | null;
+}
 
 interface ChallengeRoundProps {
   question: ChallengeQuestion;
   round: 1 | 2 | 3;
-  onAnswer: (option: "A" | "B" | "C" | "D" | null, reactionTimeMs: number) => void;
+  onAnswer: (option: AnswerOptionKey | null, reactionTimeMs: number) => void;
   brandLogoUrl?: string;
   brandProductImageUrl?: string;
+  answerState?: ChallengeAnswerState | null;
+  disabled?: boolean;
+  pauseTimer?: boolean;
   /** #154 — inline error banner when the parent's answer submission
    *  fails after retries. Null / undefined = no error. */
   answerError?: string | null;
@@ -31,26 +40,39 @@ export function ChallengeRound({
   onAnswer,
   brandLogoUrl,
   brandProductImageUrl,
+  answerState = null,
+  disabled = false,
+  pauseTimer = false,
   answerError = null,
   onRetry,
 }: ChallengeRoundProps) {
-  const [selected, setSelected] = useState<"A" | "B" | "C" | "D" | null>(null);
-  const [answered, setAnswered] = useState(false);
+  const [localSelected, setLocalSelected] = useState<AnswerOptionKey | null>(null);
+  const [localLocked, setLocalLocked] = useState(false);
   const startTimeRef = useRef(Date.now());
+  const previousAnswerStateRef = useRef<ChallengeAnswerState | null>(null);
+  const answered = answerState !== null || localLocked;
 
   useEffect(() => {
     startTimeRef.current = Date.now();
-    setSelected(null);
-    setAnswered(false);
+    setLocalSelected(null);
+    setLocalLocked(false);
   }, [round]);
 
-  const handleSelect = useCallback((option: "A" | "B" | "C" | "D") => {
-    if (answered) return;
+  useEffect(() => {
+    if (previousAnswerStateRef.current && !answerState) {
+      setLocalSelected(null);
+      setLocalLocked(false);
+    }
+    previousAnswerStateRef.current = answerState;
+  }, [answerState]);
+
+  const handleSelect = useCallback((option: AnswerOptionKey) => {
+    if (answered || disabled) return;
     const reactionTimeMs = Date.now() - startTimeRef.current;
-    setSelected(option);
-    setAnswered(true);
+    setLocalSelected(option);
+    setLocalLocked(true);
     onAnswer(option, reactionTimeMs);
-  }, [answered, onAnswer]);
+  }, [answered, disabled, onAnswer]);
 
   useEffect(() => {
     if (answered) return;
@@ -83,9 +105,8 @@ export function ChallengeRound({
   }, [answered, handleSelect]);
 
   const handleTimeExpire = () => {
-    if (!answered) {
+    if (!answered && !disabled) {
       const reactionTimeMs = ROUND_SECONDS * 1000;
-      setAnswered(true);
       onAnswer(null, reactionTimeMs);
     }
   };
@@ -106,6 +127,7 @@ export function ChallengeRound({
           durationSeconds={ROUND_SECONDS}
           onExpire={handleTimeExpire}
           className="w-32"
+          paused={pauseTimer}
         />
       </div>
 
@@ -140,25 +162,22 @@ export function ChallengeRound({
 
       {/* Answer options */}
       <div className="grid grid-cols-1 gap-3">
-        {OPTIONS.map((opt) => (
-          <Button
-            key={opt}
-            variant="outline"
-            size="lg"
-            className={cn(
-              "w-full text-left justify-start h-auto py-3 px-4 transition-all",
-              selected === opt && "ring-2 ring-[var(--primary)] bg-[var(--accent)]",
-              answered && "pointer-events-none"
-            )}
-            onClick={() => handleSelect(opt)}
-            aria-label={`${opt}: ${getOptionLabel(opt)}`}
-          >
-            <kbd className="font-bold mr-3 text-[var(--muted-foreground)] inline-flex items-center justify-center min-w-6 h-6 px-1 rounded border border-[var(--border)] bg-[var(--muted)]">
-              {opt}
-            </kbd>
-            <span>{getOptionLabel(opt)}</span>
-          </Button>
-        ))}
+        {OPTIONS.map((opt) => {
+          const selected = answerState ? answerState.selectedOption === opt : localSelected === opt;
+          const pending = answerState ? selected && answerState.status === "pending" : selected && localLocked;
+          return (
+            <AnswerOption
+              key={opt}
+              option={opt}
+              label={getOptionLabel(opt)}
+              selected={selected}
+              pending={pending}
+              correct={selected && answerState?.status === "settled" ? answerState.correct ?? null : null}
+              disabled={disabled || answered}
+              onSelect={handleSelect}
+            />
+          );
+        })}
       </div>
 
       {/* #154 — Answer submission error banner with retry. */}
