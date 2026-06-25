@@ -19,6 +19,8 @@ export const configSchema = z.object({
   JWT_SECRET_PREVIOUS: z.string().min(32).optional(),
   /** Separate signing secret for refresh tokens. Falls back to JWT_SECRET. */
   JWT_REFRESH_SECRET: z.string().min(32).optional(),
+  JWT_ISSUER: z.string().default("brandblitz-api"),
+  JWT_AUDIENCE: z.string().default("brandblitz-client"),
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   WEB_URL: z.string().url().default("http://localhost:3000"),
