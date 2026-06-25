@@ -10,7 +10,7 @@ import { getBrandById } from "../db/queries/brands";
 import { getLeaderboard, getArchivedLeaderboard } from "../db/queries/sessions";
 import { optionalAuth, authenticate } from "../middleware/authenticate";
 import { createError } from "../middleware/error";
-import { cached } from "../lib/cache";
+import { withCoalescing } from "../lib/cache";
 import { config } from "../lib/config";
 
 const router = Router();
@@ -44,7 +44,7 @@ router.get("/", optionalAuth, async (req, res) => {
     return;
   }
 
-  const challenges = await cached(
+  const challenges = await withCoalescing(
     `challenges:active:${limit}:${offset}`,
     60,
     () => getActiveChallenges(limit, offset)
