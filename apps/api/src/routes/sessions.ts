@@ -9,13 +9,14 @@ import {
   finishSession,
   storeSessionHmac,
 } from "../db/queries/sessions";
-import { calculateRoundScore, completeWarmupWithLock, validateAnswer } from "../services/scoring";
+import { calculateRoundScore, completeWarmupWithLock, validateAnswer, validateRoundScore } from "../services/scoring";
 import { authenticate } from "../middleware/authenticate";
 import { requireActiveUser } from "../middleware/require-active-user";
 import {
   enforceOneSessionPerChallenge,
   validateReactionTime,
   validateDeviceFingerprint,
+  assertValidTotalScore,
 } from "../middleware/anti-cheat";
 import { createError } from "../middleware/error";
 import { challengeStartLimiter } from "../middleware/rate-limit";
@@ -199,11 +200,17 @@ router.post(
       reactionTimeMs: body.reactionTimeMs,
     });
 
+    const scoreCheck = validateRoundScore(score);
+    if (!scoreCheck.valid) {
+      throw createError(scoreCheck.message, 422, scoreCheck.code);
+    }
+
     await recordRoundScore(session.id, round, score, body.selectedOption, body.reactionTimeMs);
 
     if (round === 3) {
       const completed = await finishSession(session.id);
       if (completed) {
+        assertValidTotalScore(completed.total_score);
         const hmac = computeSessionHmac(completed.id, completed.total_score, completed.completed_at!);
         if (hmac) {
           await storeSessionHmac(session.id, hmac);

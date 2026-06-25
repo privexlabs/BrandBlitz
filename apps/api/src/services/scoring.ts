@@ -7,6 +7,40 @@ const BASE_POINTS = 100;
 const MAX_SPEED_BONUS = 50;
 const ROUND_DURATION_MS = 15_000;
 
+export const MAX_ROUND_SCORE = BASE_POINTS + MAX_SPEED_BONUS;
+export const MAX_TOTAL_SCORE = MAX_ROUND_SCORE * 3;
+
+export interface ScoreValidationError {
+  valid: false;
+  code: string;
+  message: string;
+  score: number;
+}
+
+export function validateRoundScore(score: number): ScoreValidationError | { valid: true } {
+  if (!Number.isFinite(score) || score < 0 || score > MAX_ROUND_SCORE) {
+    return {
+      valid: false,
+      code: "ROUND_SCORE_OUT_OF_RANGE",
+      message: `Round score ${score} is outside valid range [0, ${MAX_ROUND_SCORE}]`,
+      score,
+    };
+  }
+  return { valid: true };
+}
+
+export function validateTotalScore(score: number): ScoreValidationError | { valid: true } {
+  if (!Number.isFinite(score) || score < 0 || score > MAX_TOTAL_SCORE) {
+    return {
+      valid: false,
+      code: "TOTAL_SCORE_OUT_OF_RANGE",
+      message: `Total score ${score} is outside valid range [0, ${MAX_TOTAL_SCORE}]`,
+      score,
+    };
+  }
+  return { valid: true };
+}
+
 async function withTransaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
   const { pool } = await import("../db");
   const client = await pool.connect();
