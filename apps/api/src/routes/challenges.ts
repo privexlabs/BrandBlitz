@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   getActiveChallenges,
   getActiveChallengesCursor,
+  getFilteredChallenges,
   getChallengeByIdAny,
   getChallengesByBrandId,
   getChallengeQuestions,
@@ -49,20 +50,26 @@ async function getRequiredConfirmations(): Promise<number> {
   return result.rows[0]?.value?.confirmations ?? 5;
 }
 
+const ChallengeFilterSchema = CursorQuerySchema.extend({
+  brandId: z.string().uuid().optional(),
+  status: z.enum(["active", "upcoming", "ended"]).optional(),
+  min_pool: z.coerce.number().min(0).optional(),
+  end_before: z.string().datetime({ offset: true }).optional(),
+});
+
 /**
  * GET /challenges
- * List active challenges (public). Supports keyset cursor pagination via ?cursor.
+ * List challenges (public). Supports keyset cursor pagination via ?cursor.
+ * Optional filters: ?status=, ?min_pool= (USDC), ?end_before= (ISO datetime).
  * Legacy ?offset parameter is accepted but ignored; clients should migrate to ?cursor.
  */
 router.get("/", optionalAuth, async (req, res) => {
-  const parsed = CursorQuerySchema.extend({
-    brandId: z.string().uuid().optional(),
-  }).safeParse(req.query);
+  const parsed = ChallengeFilterSchema.safeParse(req.query);
   if (!parsed.success) {
     throw createError("Invalid query parameters", 400, "INVALID_QUERY");
   }
 
-  const { brandId, limit, cursor } = parsed.data;
+  const { brandId, limit, cursor, status, min_pool, end_before } = parsed.data;
 
   if (brandId) {
     const { challenges, nextCursor } = await getChallengesByBrandId(brandId, limit, cursor);
@@ -70,17 +77,29 @@ router.get("/", optionalAuth, async (req, res) => {
     return;
   }
 
-  const cacheKey = `challenges:active:global:${cursor ?? 'start'}:${limit}`;
+  const hasFilters = status !== undefined || min_pool !== undefined || end_before !== undefined;
 
-  const cacheHit = await redis.get(cacheKey);
-  const result = await withCoalescing(
-    cacheKey,
-    CHALLENGES_CACHE_TTL_SEC,
-    () => getActiveChallengesCursor(cursor, limit)
-  );
+  if (!hasFilters) {
+    const cacheKey = `challenges:active:global:${cursor ?? "start"}:${limit}`;
+    const cacheHit = await redis.get(cacheKey);
+    const result = await withCoalescing(
+      cacheKey,
+      CHALLENGES_CACHE_TTL_SEC,
+      () => getActiveChallengesCursor(cursor, limit)
+    );
+    res.setHeader("X-Cache", cacheHit !== null ? "HIT" : "MISS");
+    res.json({ data: result.challenges, nextCursor: result.nextCursor });
+    return;
+  }
 
-  res.setHeader("X-Cache", cacheHit !== null ? "HIT" : "MISS");
-  res.json({ data: result.challenges, nextCursor: result.nextCursor });
+  const { challenges, nextCursor } = await getFilteredChallenges({
+    status,
+    minPoolUsdc: min_pool,
+    endBefore: end_before,
+    cursor,
+    limit,
+  });
+  res.json({ data: challenges, nextCursor });
 });
 
 /**

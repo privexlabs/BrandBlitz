@@ -180,6 +180,64 @@ export async function getActiveChallenges(
   return { challenges, nextCursor };
 }
 
+export async function getFilteredChallenges(opts: {
+  status?: "active" | "upcoming" | "ended";
+  minPoolUsdc?: number;
+  endBefore?: string;
+  cursor?: string;
+  limit?: number;
+}): Promise<{ challenges: Challenge[]; nextCursor: string | null }> {
+  const { status, minPoolUsdc, endBefore, cursor, limit = 20 } = opts;
+
+  const conditions: string[] = ["c.deleted_at IS NULL", "b.deleted_at IS NULL"];
+  const params: unknown[] = [];
+
+  if (status === "active") {
+    conditions.push("c.status = 'active'");
+  } else if (status === "upcoming") {
+    conditions.push("c.status = 'pending_deposit'");
+  } else if (status === "ended") {
+    conditions.push("c.status IN ('ended', 'settled', 'payout_failed', 'cancelled', 'refunded')");
+  } else {
+    conditions.push(
+      "c.status IN ('active', 'pending_deposit', 'ended', 'settled', 'payout_failed', 'cancelled', 'refunded')"
+    );
+  }
+
+  if (minPoolUsdc !== undefined) {
+    params.push(String(Math.round(minPoolUsdc * 10_000_000)));
+    conditions.push(`c.pool_amount_stroops >= $${params.length}`);
+  }
+
+  if (endBefore) {
+    params.push(endBefore);
+    conditions.push(`c.ends_at < $${params.length}`);
+  }
+
+  if (cursor) {
+    params.push(cursor);
+    conditions.push(`c.id > $${params.length}::uuid`);
+  }
+
+  params.push(limit + 1);
+
+  const result = await query<Challenge>(
+    `SELECT c.*, (c.pool_amount_stroops::numeric / 10000000)::numeric(20,7)::text AS pool_amount_usdc,
+            b.name AS brand_name, b.logo_url, b.primary_color, b.secondary_color
+     FROM challenges c
+     JOIN brands b ON c.brand_id = b.id
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY c.pool_amount_stroops DESC, c.id DESC
+     LIMIT $${params.length}`,
+    params
+  );
+
+  const hasMore = result.rows.length > limit;
+  const challenges = result.rows.slice(0, limit);
+  const nextCursor = hasMore && challenges.length > 0 ? challenges[challenges.length - 1].id : null;
+  return { challenges, nextCursor };
+}
+
 export async function getChallengesByBrandId(
   brandId: string,
   limit = 20,
