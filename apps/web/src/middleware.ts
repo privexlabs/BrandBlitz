@@ -32,7 +32,7 @@ function buildCSPHeader(nonce: string): string {
 
   return [
     `default-src 'self'`,
-    `script-src 'self' 'nonce-${nonce}'`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     `img-src 'self' data: https://${cdnHost}`,
     `font-src 'self' https://fonts.gstatic.com`,
     `style-src 'self' https://fonts.googleapis.com 'unsafe-inline'`,
@@ -94,10 +94,8 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   // DNS prefetch can leak back-end infrastructure topology to network observers.
   response.headers.set("X-DNS-Prefetch-Control", "off");
 
-  // Set CSP header in Report-Only mode
-  // After 7 days of monitoring violations, switch to enforce mode by removing "-Report-Only"
   const cspHeader = buildCSPHeader(nonce);
-  response.headers.set("Content-Security-Policy-Report-Only", cspHeader);
+  response.headers.set("Content-Security-Policy", cspHeader);
 
   return response;
 }
