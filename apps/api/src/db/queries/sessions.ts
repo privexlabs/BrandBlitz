@@ -44,6 +44,15 @@ export interface LeaderboardSession extends GameSession {
   stellar_address: string | null;
 }
 
+export const LEADERBOARD_SORTS = ["score", "rank", "created_at"] as const;
+export type LeaderboardSort = (typeof LEADERBOARD_SORTS)[number];
+
+const leaderboardOrderBy: Record<LeaderboardSort, string> = {
+  score: "gs.total_score DESC, gs.completed_at ASC, gs.id ASC",
+  rank: "gs.total_score DESC, gs.completed_at ASC, gs.id ASC",
+  created_at: "gs.created_at DESC, gs.total_score DESC, gs.id ASC",
+};
+
 export async function createSession(data: {
   userId: string;
   challengeId: string;
@@ -274,8 +283,10 @@ export async function markAbandonedSessions(): Promise<number> {
 export async function getLeaderboard(
   challengeId: string,
   limit = 20,
-  offset = 0
+  offset = 0,
+  sortBy: LeaderboardSort = "score"
 ): Promise<LeaderboardSession[]> {
+  const orderBy = leaderboardOrderBy[sortBy];
   const result = await query<LeaderboardSession>(
     `SELECT gs.*,
             u.email AS username,
@@ -294,7 +305,7 @@ export async function getLeaderboard(
        AND gs.is_practice = FALSE
        AND gs.status = 'completed'
        AND u.deleted_at IS NULL
-     ORDER BY gs.total_score DESC, gs.completed_at ASC
+     ORDER BY ${orderBy}
      LIMIT $2 OFFSET $3`,
     [challengeId, limit, offset]
   );

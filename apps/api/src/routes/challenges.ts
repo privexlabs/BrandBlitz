@@ -8,7 +8,12 @@ import {
   getChallengeQuestions,
 } from "../db/queries/challenges";
 import { getBrandById } from "../db/queries/brands";
-import { getLeaderboard, getArchivedLeaderboard } from "../db/queries/sessions";
+import {
+  getLeaderboard,
+  getArchivedLeaderboard,
+  LEADERBOARD_SORTS,
+  type LeaderboardSort,
+} from "../db/queries/sessions";
 import { optionalAuth, authenticate } from "../middleware/authenticate";
 import { createError } from "../middleware/error";
 import { withCoalescing } from "../lib/cache";
@@ -16,6 +21,20 @@ import { config } from "../lib/config";
 import { query } from "../db/index";
 
 const router = Router();
+
+const LeaderboardSortSchema = z.enum(LEADERBOARD_SORTS).default("score");
+
+function parseLeaderboardSort(query: Record<string, unknown>): LeaderboardSort {
+  const parsed = LeaderboardSortSchema.safeParse(query.sort_by ?? query.order);
+  if (!parsed.success) {
+    throw createError(
+      `Invalid leaderboard sort. Allowed values: ${LEADERBOARD_SORTS.join(", ")}`,
+      400,
+      "INVALID_SORT",
+    );
+  }
+  return parsed.data;
+}
 
 const CursorPaginationSchema = z.object({
   cursor: z.string().optional(),
@@ -113,9 +132,10 @@ router.get("/:id/leaderboard", async (req, res) => {
     limit: z.coerce.number().int().min(1).max(100).default(20),
     offset: z.coerce.number().int().min(0).default(0),
   }).parse(req.query);
+  const sortBy = parseLeaderboardSort(req.query);
   const sessions = challenge.archived
     ? await getArchivedLeaderboard(challenge.id, limit, offset)
-    : await getLeaderboard(challenge.id, limit, offset);
+    : await getLeaderboard(challenge.id, limit, offset, sortBy);
 
   res.json({
     challengeId: challenge.id,

@@ -59,7 +59,7 @@ app.use(
           }
         : false,
     referrerPolicy: {
-      policy: "strict-origin-when-cross-origin",
+      policy: config.REFERRER_POLICY,
     },
     xFrameOptions: {
       action: "deny",

@@ -33,14 +33,12 @@ export async function createPayout(data: {
      VALUES ($1,$2,$3,$4)
      ON CONFLICT (challenge_id, user_id) DO UPDATE
        SET stellar_address = EXCLUDED.stellar_address,
-           amount_usdc = EXCLUDED.amount_usdc,
+           amount_stroops = EXCLUDED.amount_stroops,
            status = CASE
              WHEN payouts.status = 'failed' THEN 'pending'
              ELSE payouts.status
            END,
            error_message = NULL
-     RETURNING *`,
-    [data.challengeId, data.userId, data.stellarAddress, data.amountUsdc]
      RETURNING *, (amount_stroops::numeric / 10000000)::numeric(20,7)::text AS amount_usdc`,
     [data.challengeId, data.userId, data.stellarAddress, amountStroops]
   );

@@ -18,6 +18,11 @@ import { webhookRotationLimiter } from "../middleware/rate-limit";
 
 const router = Router();
 
+// Admin leaderboard-style queries must follow the same rule as
+// routes/leaderboard.ts: validate sort params against an allowlist before
+// choosing an ORDER BY expression. This file currently has no user-controlled
+// leaderboard ORDER BY clauses.
+
 router.use(authenticate);
 
 router.use(async (req, _res, next) => {

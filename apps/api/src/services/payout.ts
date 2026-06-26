@@ -36,7 +36,8 @@ export function isFraudBlockError(err: unknown): boolean {
  * Enqueue a payout job for a completed challenge.
  * The actual Stellar transactions are processed by the BullMQ worker.
  */
-
+export async function enqueuePayout(challengeId: string, requestId?: string): Promise<void> {
+  await enqueuePayoutJob(challengeId);
   await enqueueLeaderboardRefresh(challengeId);
   logger.info("Payout job enqueued", { challengeId, requestId });
 }

@@ -24,7 +24,8 @@ export const configSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   WEB_URL: z.string().url().default("http://localhost:3000"),
-
+  GOOGLE_REDIRECT_URI: z.string().url().optional(),
+  GOOGLE_OAUTH_PKCE_TTL_SECONDS: z.coerce.number().int().positive().max(900).default(300),
   /**
    * Comma-separated list of origins permitted by CORS. Required in EVERY
    * environment — there is intentionally no default and no wildcard fallback.
@@ -49,6 +50,9 @@ export const configSchema = z.object({
     .refine((origins) => !origins.includes("*"), {
       message: "ALLOWED_ORIGINS must not contain a wildcard '*'",
     }),
+  REFERRER_POLICY: z
+    .enum(["strict-origin-when-cross-origin", "no-referrer"])
+    .default("strict-origin-when-cross-origin"),
 
   // Stellar
   STELLAR_NETWORK: z.enum(["testnet", "public"]).default("testnet"),

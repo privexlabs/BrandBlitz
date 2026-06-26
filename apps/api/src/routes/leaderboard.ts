@@ -5,10 +5,33 @@ import {
   getLeaderboard,
   getTopSessionsPerChallenge,
   getGlobalLeaderboardFromView,
+  LEADERBOARD_SORTS,
+  type LeaderboardSort,
 } from "../db/queries/sessions";
 import { withCoalescing } from "../lib/cache";
+import { createError } from "../middleware/error";
 
 const router = Router();
+
+// Keep leaderboard ORDER BY clauses static or selected from this allowlist only.
+// User query params must never be concatenated directly into SQL strings.
+const LeaderboardSortSchema = z.enum(LEADERBOARD_SORTS).default("score");
+
+function parseLeaderboardSort(query: unknown): LeaderboardSort {
+  const raw =
+    typeof query === "object" && query !== null
+      ? ((query as Record<string, unknown>).sort_by ?? (query as Record<string, unknown>).order)
+      : undefined;
+  const parsed = LeaderboardSortSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw createError(
+      `Invalid leaderboard sort. Allowed values: ${LEADERBOARD_SORTS.join(", ")}`,
+      400,
+      "INVALID_SORT"
+    );
+  }
+  return parsed.data;
+}
 
 function writeSse(res: any, payload: unknown) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -23,6 +46,7 @@ function writeSse(res: any, payload: unknown) {
  *  - intervalMs?: number (default 2000, min 500)
  */
 router.get("/stream", async (req, res) => {
+  parseLeaderboardSort(req.query);
   const { challengeId, intervalMs } = z.object({
     challengeId: z.string().optional(),
     intervalMs: z.coerce.number().min(500).max(30_000).default(2000),
@@ -102,14 +126,15 @@ router.get("/stream", async (req, res) => {
  * Single aggregated query via ROW_NUMBER() — no N+1.
  */
 router.get("/global", async (req, res) => {
+  const sortBy = parseLeaderboardSort(req.query);
   const { limit, cursor } = z.object({
     limit: z.coerce.number().min(1).max(100).default(50),
     cursor: z.string().optional(),
   }).parse(req.query);
 
   const cacheKey = cursor
-    ? `leaderboard:global:${cursor}:${limit}`
-    : `leaderboard:global:first:${limit}`;
+    ? `leaderboard:global:${sortBy}:${cursor}:${limit}`
+    : `leaderboard:global:${sortBy}:first:${limit}`;
 
   const response = await withCoalescing(cacheKey, 300, async () => {
     const challenges = await getActiveChallenges(10);
@@ -141,6 +166,7 @@ router.get("/global", async (req, res) => {
     const nextCursor = page.length > 0 ? String(page[page.length - 1].rank) : null;
 
     return {
+      leaderboard: page,
       data: page,
       nextCursor: hasMore ? nextCursor : null,
       cachedAt: new Date().toISOString(),
@@ -154,8 +180,10 @@ router.get("/global", async (req, res) => {
  * GET /leaderboard/:challengeId
  */
 router.get("/:challengeId", async (req, res) => {
-  const { limit, cursor } = z.object({
-    limit: z.coerce.number().default(20),
+  const sortBy = parseLeaderboardSort(req.query);
+  const { limit, offset, cursor } = z.object({
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    offset: z.coerce.number().int().min(0).default(0),
     cursor: z.string().optional(),
   }).parse(req.query);
 
@@ -169,7 +197,7 @@ router.get("/:challengeId", async (req, res) => {
     cursorId = parts[1];
   }
 
-  const sessions = await getLeaderboard(req.params.challengeId, limit + 1, 0);
+  const sessions = await getLeaderboard(req.params.challengeId, limit + 1, offset, sortBy);
 
   // Apply cursor filter on the result set
   let filtered = sessions;
@@ -186,18 +214,21 @@ router.get("/:challengeId", async (req, res) => {
   const lastItem = page[page.length - 1];
   const nextCursor = lastItem ? `${lastItem.total_score}:${lastItem.id}` : null;
 
+  const mappedSessions = page.map((s, i) => ({
+    rank: offset + i + 1,
+    userId: s.user_id,
+    username: s.username,
+    displayName: s.display_name,
+    league: s.league,
+    avatarUrl: s.avatar_url,
+    totalScore: s.total_score,
+    totalEarned: s.total_earned_usdc,
+    endedAt: s.completed_at,
+  }));
+
   res.json({
-    data: page.map((s, i) => ({
-      rank: i + 1,
-      userId: s.user_id,
-      username: s.username,
-      displayName: s.display_name,
-      league: s.league,
-      avatarUrl: s.avatar_url,
-      totalScore: s.total_score,
-      totalEarned: s.total_earned_usdc,
-      endedAt: s.completed_at,
-    })),
+    sessions: mappedSessions,
+    data: mappedSessions,
     nextCursor: hasMore ? nextCursor : null,
   });
 });
