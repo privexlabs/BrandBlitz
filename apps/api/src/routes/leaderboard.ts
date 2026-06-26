@@ -9,9 +9,12 @@ import {
   type LeaderboardSort,
 } from "../db/queries/sessions";
 import { withCoalescing } from "../lib/cache";
+import { redis } from "../lib/redis";
 import { createError } from "../middleware/error";
 
 const router = Router();
+
+const LEADERBOARD_CACHE_TTL_SEC = 30;
 
 // Keep leaderboard ORDER BY clauses static or selected from this allowlist only.
 // User query params must never be concatenated directly into SQL strings.
@@ -187,6 +190,16 @@ router.get("/:challengeId", async (req, res) => {
     cursor: z.string().optional(),
   }).parse(req.query);
 
+  const cacheKey = `leaderboard:${sortBy}:${req.params.challengeId}:${limit}:${offset}`;
+
+  // Check cache first
+  const cachedValue = await redis.get(cacheKey);
+  if (cachedValue !== null) {
+    res.setHeader("X-Cache", "HIT");
+    res.json(JSON.parse(cachedValue));
+    return;
+  }
+
   // cursor is last seen total_score,encoded as just the score value
   // We fetch limit+1 to detect if there are more
   let cursorScore: number | undefined;
@@ -203,8 +216,8 @@ router.get("/:challengeId", async (req, res) => {
   let filtered = sessions;
   if (cursorScore !== undefined && cursorId !== undefined) {
     filtered = sessions.filter(s =>
-      s.total_score < cursorScore ||
-      (s.total_score === cursorScore && s.id > cursorId)
+      s.total_score < cursorScore! ||
+      (s.total_score === cursorScore && s.id > cursorId!)
     );
   }
 
@@ -226,11 +239,15 @@ router.get("/:challengeId", async (req, res) => {
     endedAt: s.completed_at,
   }));
 
-  res.json({
+  const responseBody = {
     sessions: mappedSessions,
     data: mappedSessions,
     nextCursor: hasMore ? nextCursor : null,
-  });
+  };
+
+  await redis.set(cacheKey, JSON.stringify(responseBody), "EX", LEADERBOARD_CACHE_TTL_SEC);
+  res.setHeader("X-Cache", "MISS");
+  res.json(responseBody);
 });
 
 export default router;
