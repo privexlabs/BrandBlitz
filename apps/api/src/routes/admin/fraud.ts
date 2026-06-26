@@ -24,7 +24,7 @@ const ListQuerySchema = CursorQuerySchema.extend({
 const PatchBodySchema = z.object({
   status: z.enum(["resolved", "escalated"]),
   reason: z.string().min(1, "Resolution reason is required"),
-});
+}).strict();
 
 /**
  * GET /admin/fraud-flags

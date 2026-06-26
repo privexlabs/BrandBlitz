@@ -7,6 +7,7 @@ export interface GameSession {
   user_id: string;
   challenge_id: string;
   device_id: string | null;
+  status: "warmup" | "active" | "completed" | "flagged" | "abandoned";
   warmup_started_at: string | null;
   warmup_completed_at: string | null;
   challenge_started_at: string | null;
@@ -43,6 +44,15 @@ export interface LeaderboardSession extends GameSession {
   total_earned_usdc: string;
   stellar_address: string | null;
 }
+
+export const LEADERBOARD_SORTS = ["score", "rank", "created_at"] as const;
+export type LeaderboardSort = (typeof LEADERBOARD_SORTS)[number];
+
+const leaderboardOrderBy: Record<LeaderboardSort, string> = {
+  score: "gs.total_score DESC, gs.completed_at ASC, gs.id ASC",
+  rank: "gs.total_score DESC, gs.completed_at ASC, gs.id ASC",
+  created_at: "gs.created_at DESC, gs.total_score DESC, gs.id ASC",
+};
 
 export async function createSession(data: {
   userId: string;
@@ -83,6 +93,19 @@ export async function getSession(userId: string, challengeId: string): Promise<G
     [userId, challengeId]
   );
   return result.rows[0] ?? null;
+}
+
+export async function deleteOpenSession(userId: string, challengeId: string): Promise<boolean> {
+  const result = await query(
+    `DELETE FROM game_sessions
+     WHERE user_id = $1
+       AND challenge_id = $2
+       AND status IN ('warmup', 'active', 'abandoned')
+     RETURNING id`,
+    [userId, challengeId]
+  );
+
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function markWarmupStarted(sessionId: string): Promise<void> {
@@ -262,8 +285,12 @@ export async function getLeaderboard(
   challengeId: string,
   limit = 20,
   cursor?: string,
+  sortBy: LeaderboardSort = "score"
 ): Promise<{ sessions: LeaderboardSession[]; nextCursor: string | null }> {
+  const orderBy = leaderboardOrderBy[sortBy];
   const cursorValues = decodeCursorSafe(cursor, ["total_score", "completed_at", "id"]);
+  const scoreDir = sortBy === "score" ? "DESC" : "ASC";
+  const scoreOp = sortBy === "score" ? "<" : ">";
 
   let whereExtra = "";
   const params: unknown[] = [challengeId];
@@ -272,7 +299,7 @@ export async function getLeaderboard(
     const score = cursorValues.total_score;
     const completedAt = cursorValues.completed_at;
     const id = cursorValues.id as string;
-    whereExtra = `AND (gs.total_score < $${params.length + 1} OR (gs.total_score = $${params.length + 1} AND (gs.completed_at > $${params.length + 2} OR (gs.completed_at = $${params.length + 2} AND gs.id > $${params.length + 3}))))`;
+    whereExtra = `AND (gs.total_score ${scoreOp} $${params.length + 1} OR (gs.total_score = $${params.length + 1} AND (gs.completed_at > $${params.length + 2} OR (gs.completed_at = $${params.length + 2} AND gs.id > $${params.length + 3}))))`;
     params.push(score, completedAt, id);
   }
 
@@ -297,7 +324,7 @@ export async function getLeaderboard(
        AND gs.status = 'completed'
        AND u.deleted_at IS NULL
      ${whereExtra}
-     ORDER BY gs.total_score DESC, gs.completed_at ASC, gs.id ASC
+     ORDER BY ${orderBy}, gs.id ASC
      LIMIT $${params.length}`,
     params,
   );

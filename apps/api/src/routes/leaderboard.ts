@@ -5,11 +5,34 @@ import {
   getLeaderboard,
   getTopSessionsPerChallenge,
   getGlobalLeaderboardFromView,
+  LEADERBOARD_SORTS,
+  type LeaderboardSort,
 } from "../db/queries/sessions";
 import { withCoalescing } from "../lib/cache";
 import { CursorQuerySchema } from "../db/pagination";
+import { createError } from "../middleware/error";
 
 const router = Router();
+
+// Keep leaderboard ORDER BY clauses static or selected from this allowlist only.
+// User query params must never be concatenated directly into SQL strings.
+const LeaderboardSortSchema = z.enum(LEADERBOARD_SORTS).default("score");
+
+function parseLeaderboardSort(query: unknown): LeaderboardSort {
+  const raw =
+    typeof query === "object" && query !== null
+      ? ((query as Record<string, unknown>).sort_by ?? (query as Record<string, unknown>).order)
+      : undefined;
+  const parsed = LeaderboardSortSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw createError(
+      `Invalid leaderboard sort. Allowed values: ${LEADERBOARD_SORTS.join(", ")}`,
+      400,
+      "INVALID_SORT"
+    );
+  }
+  return parsed.data;
+}
 
 function writeSse(res: any, payload: unknown) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -24,6 +47,7 @@ function writeSse(res: any, payload: unknown) {
  *  - intervalMs?: number (default 2000, min 500)
  */
 router.get("/stream", async (req, res) => {
+  parseLeaderboardSort(req.query);
   const { challengeId, intervalMs } = z.object({
     challengeId: z.string().optional(),
     intervalMs: z.coerce.number().min(500).max(30_000).default(2000),
@@ -103,17 +127,16 @@ router.get("/stream", async (req, res) => {
  * Single aggregated query via ROW_NUMBER() — no N+1.
  */
 router.get("/global", async (req, res) => {
+  const sortBy = parseLeaderboardSort(req.query);
   const { limit } = CursorQuerySchema.parse(req.query);
 
-  const response = await withCoalescing(`leaderboard:global:${limit}`, 300, async () => {
+  const response = await withCoalescing(`leaderboard:global:${sortBy}:${limit}`, 300, async () => {
     const { challenges } = await getActiveChallenges(10);
     const challengeIds = challenges.map((c) => c.id);
 
-    // Cold path: query the pre-computed materialised view instead of a raw
-    // aggregate scan, so cache misses are no longer expensive.
     const viewRows = await getGlobalLeaderboardFromView(challengeIds, 10);
 
-    const leaderboard = viewRows.map((s) => ({
+    const data = viewRows.map((s) => ({
       rank: s.rank,
       challengeId: s.challenge_id,
       userId: s.user_id,
@@ -126,7 +149,8 @@ router.get("/global", async (req, res) => {
     }));
 
     return {
-      leaderboard,
+      data,
+      nextCursor: null,
       cachedAt: new Date().toISOString(),
     };
   });
@@ -139,21 +163,24 @@ router.get("/global", async (req, res) => {
  * Paginated leaderboard for a challenge. Supports keyset cursor pagination.
  */
 router.get("/:challengeId", async (req, res) => {
+  const sortBy = parseLeaderboardSort(req.query);
   const { limit, cursor } = CursorQuerySchema.parse(req.query);
 
-  const result = await getLeaderboard(req.params.challengeId, limit, cursor);
+  const result = await getLeaderboard(req.params.challengeId, limit, cursor, sortBy);
+
+  const data = result.sessions.map((s) => ({
+    userId: s.user_id,
+    username: s.username,
+    displayName: s.display_name,
+    league: s.league,
+    avatarUrl: s.avatar_url,
+    totalScore: s.total_score,
+    totalEarned: s.total_earned_usdc,
+  }));
 
   res.json({
+    data,
     nextCursor: result.nextCursor,
-    sessions: result.sessions.map((s) => ({
-      userId: s.user_id,
-      username: s.username,
-      displayName: s.display_name,
-      league: s.league,
-      avatarUrl: s.avatar_url,
-      totalScore: s.total_score,
-      totalEarned: s.total_earned_usdc,
-    })),
   });
 });
 

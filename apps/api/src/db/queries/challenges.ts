@@ -24,6 +24,7 @@ export interface Challenge {
   secondary_color?: string | null;
   status: ChallengeStatus;
   deposit_tx_hash: string | null;
+  deposit_confirmations: number;
   payout_tx_hashes: string[] | null;
   max_players: number | null;
   starts_at: string;
@@ -110,6 +111,29 @@ export async function getChallengeByIdAny(id: string): Promise<Challenge & { arc
   return result.rows[0] ?? null;
 }
 
+export async function getActiveChallengesCursor(
+  cursor?: string,
+  limit = 20
+): Promise<{ challenges: Challenge[]; nextCursor: string | null }> {
+  const result = await query<Challenge>(
+    `SELECT c.*, (c.pool_amount_stroops::numeric / 10000000)::numeric(20,7)::text AS pool_amount_usdc,
+            b.name as brand_name, b.logo_url, b.primary_color, b.secondary_color
+     FROM challenges c
+     JOIN brands b ON c.brand_id = b.id
+     WHERE c.status = 'active' AND c.deleted_at IS NULL AND b.deleted_at IS NULL
+       AND ($1::uuid IS NULL OR c.id > $1::uuid)
+     ORDER BY c.id
+     LIMIT $2`,
+    [cursor ?? null, limit + 1]
+  );
+
+  const hasMore = result.rows.length > limit;
+  const challenges = result.rows.slice(0, limit);
+  const nextCursor = challenges.length > 0 ? challenges[challenges.length - 1].id : null;
+
+  return { challenges, nextCursor: hasMore ? nextCursor : null };
+}
+
 export async function getActiveChallenges(
   limit = 20,
   cursor?: string,
@@ -120,7 +144,7 @@ export async function getActiveChallenges(
   const params: unknown[] = [];
 
   if (cursorValues) {
-    const { clause, params: cursorParams } = buildCursorWhereSimple(
+    const { clause } = buildCursorWhereSimple(
       "c.pool_amount_stroops",
       "DESC",
       cursorValues.pool_amount_stroops,
@@ -132,7 +156,6 @@ export async function getActiveChallenges(
   }
 
   params.push(limit);
-
   const result = await query<Challenge>(
     `SELECT c.*, (c.pool_amount_stroops::numeric / 10000000)::numeric(20,7)::text AS pool_amount_usdc,
             b.name as brand_name, b.logo_url, b.primary_color, b.secondary_color
@@ -264,4 +287,49 @@ export async function getChallengeQuestions(challengeId: string): Promise<Challe
     [challengeId]
   );
   return result.rows;
+}
+
+/**
+ * Increment deposit confirmations for a challenge.
+ * Returns the updated confirmation count.
+ * If confirmations reach required threshold, transitions to active status.
+ */
+export async function incrementDepositConfirmations(
+  challengeId: string,
+  requiredConfirmations: number
+): Promise<{ confirmations: number; activated: boolean }> {
+  const result = await query<{ deposit_confirmations: number; status: ChallengeStatus }>(
+    `UPDATE challenges
+     SET deposit_confirmations = LEAST(deposit_confirmations + 1, $2),
+         status = CASE 
+           WHEN (deposit_confirmations + 1) >= $2 AND status = 'pending_deposit'
+             THEN 'active'
+           ELSE status
+         END,
+         updated_at = NOW()
+     WHERE id = $1 AND status IN ('pending_deposit', 'active')
+     RETURNING deposit_confirmations, status`,
+    [challengeId, requiredConfirmations]
+  );
+
+  if (!result.rows[0]) {
+    throw new Error(`Challenge ${challengeId} not found or not in pending/active status`);
+  }
+
+  const { deposit_confirmations, status } = result.rows[0];
+  return {
+    confirmations: deposit_confirmations,
+    activated: status === "active" && deposit_confirmations >= requiredConfirmations,
+  };
+}
+
+/**
+ * Get current deposit confirmation count for a challenge.
+ */
+export async function getDepositConfirmations(challengeId: string): Promise<number | null> {
+  const result = await query<{ deposit_confirmations: number }>(
+    "SELECT deposit_confirmations FROM challenges WHERE id = $1 AND status IN ('pending_deposit', 'active')",
+    [challengeId]
+  );
+  return result.rows[0]?.deposit_confirmations ?? null;
 }

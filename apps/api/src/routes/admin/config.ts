@@ -10,8 +10,6 @@ const router = Router();
 router.use(authenticate);
 router.use(requireAdmin);
 
-import { z } from "zod";
-
 const KnownConfigSchema = z.discriminatedUnion("key", [
   z.object({
     key: z.literal("anti_cheat"),
@@ -27,12 +25,27 @@ const KnownConfigSchema = z.discriminatedUnion("key", [
   z.object({
     key: z.literal("payout"),
     value: z.record(z.unknown()), // Fallback schema for payout
-  })
+  }),
+  z.object({
+    key: z.literal("deposit_required_confirmations"),
+    value: z.object({
+      confirmations: z.number().int().min(1).max(100),
+    }),
+  }),
+  z.object({
+    key: z.literal("escrow_multisig_threshold"),
+    value: z.object({
+      required: z.number().int().min(1),
+      total: z.number().int().min(1),
+    }),
+  }),
 ]);
 
+// .strict() rejects any extra keys in the PATCH body (e.g. {value: ..., injected: ...}).
+// The value shape itself is validated by KnownConfigSchema after body parsing.
 const PatchConfigSchema = z.object({
   value: z.any(),
-});
+}).strict();
 
 /**
  * PATCH /admin/config/:key
