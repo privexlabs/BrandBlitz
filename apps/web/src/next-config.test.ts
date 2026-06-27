@@ -25,7 +25,7 @@ describe("next image remote patterns", () => {
     `);
   });
 
-  it("sets Referrer-Policy on all page responses", async () => {
+  it("sets Referrer-Policy and Permissions-Policy on all page responses", async () => {
     await expect(nextConfig.headers?.()).resolves.toEqual([
       {
         source: "/:path*",
@@ -33,6 +33,10 @@ describe("next image remote patterns", () => {
           {
             key: "Referrer-Policy",
             value: "strict-origin-when-cross-origin",
+          },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=(), payment=()",
           },
         ],
       },

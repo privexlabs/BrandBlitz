@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import withBundleAnalyzer from "@next/bundle-analyzer";
+import { DISABLED_FEATURES } from "../../packages/stellar/src/constants";
 
 const withAnalyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
@@ -8,7 +9,10 @@ const withAnalyzer = withBundleAnalyzer({
 function getAllowedOrigins() {
   const envOrigins = process.env.ALLOWED_ORIGINS;
   if (envOrigins) {
-    return envOrigins.split(",").map((o) => o.trim()).filter(Boolean);
+    return envOrigins
+      .split(",")
+      .map((o) => o.trim())
+      .filter(Boolean);
   }
 
   // Fallbacks
@@ -95,6 +99,10 @@ const nextConfig: NextConfig = {
           {
             key: "Referrer-Policy",
             value: process.env.REFERRER_POLICY ?? "strict-origin-when-cross-origin",
+          },
+          {
+            key: "Permissions-Policy",
+            value: DISABLED_FEATURES.map((f) => `${f}=()`).join(", "),
           },
         ],
       },

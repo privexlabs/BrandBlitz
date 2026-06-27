@@ -4,9 +4,22 @@ import request from "supertest";
 
 let app: Express;
 
+vi.mock("sharp", () => ({}));
+
+vi.mock("./queues/payout.queue", () => ({
+  payoutQueue: { close: vi.fn() },
+}));
+vi.mock("./queues/league.queue", () => ({
+  leagueQueue: { close: vi.fn() },
+}));
+vi.mock("./queues/leaderboard-refresh.queue", () => ({
+  leaderboardRefreshQueue: { close: vi.fn() },
+}));
+
 vi.mock("@brandblitz/stellar", () => ({
   MIN_POOL_STROOPS: 1_000_000_000,
   WARMUP_MIN_SECONDS: 10,
+  DISABLED_FEATURES: ["camera", "microphone", "geolocation", "payment"],
   EscrowClient: vi.fn(),
   feeBumpTransaction: vi.fn(),
   getHorizonServer: vi.fn(),
@@ -63,7 +76,10 @@ describe("Helmet Security Headers", () => {
     expect(response.headers["x-frame-options"]).toBe("DENY");
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
     expect(response.headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
-    
+    expect(response.headers["permissions-policy"]).toBe(
+      "camera=(), microphone=(), geolocation=(), payment=()"
+    );
+
     const csp = response.headers["content-security-policy"];
     expect(csp).toBeDefined();
     expect(csp).toContain("default-src 'self'");
