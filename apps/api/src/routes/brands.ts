@@ -5,9 +5,12 @@ import {
   createBrand,
   getBrandsByOwner,
   getBrandById,
+  getPublicBrandById,
+  getPublicBrands,
   getBrandMetaById,
   getActiveDistractorBrands,
   toBrandApi,
+  toPublicBrandApi,
   updateBrand,
   deleteBrand,
   getBrandChallengeStats,
@@ -33,6 +36,9 @@ import { query } from "../db/index";
 import { sanitizeSvgText } from "../lib/svg-sanitize";
 
 const router = Router();
+const PublicBrandsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
 
 const BrandKitSchema = z.object({
   name: z

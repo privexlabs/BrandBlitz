@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { generateChallengeQuestions } from "./questions";
 import type { Brand } from "../db/queries/brands";
 
@@ -13,7 +13,7 @@ function makeBrand(overrides: Partial<Brand> = {}): Brand {
     logo_url: null,
     primary_color: null,
     secondary_color: null,
-    product_image_keys: ["img1.png"],
+    product_image_keys: ["img1.png", "img2.png"],
     question_template: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -22,16 +22,25 @@ function makeBrand(overrides: Partial<Brand> = {}): Brand {
   };
 }
 
-const distractorPool = Array.from({ length: 10 }, (_, i) => ({
-  name: `Distractor${i}`,
+const distractorPool = Array.from({ length: 20 }).map((_, i) => ({
+  name: `Brand${i}`,
   tagline: `Tagline ${i}`,
   usp: `USP ${i}`,
 }));
 
-describe("generateChallengeQuestions", () => {
+describe("Questions Generation Engine", () => {
+  // -------------------------
+  // BASIC GENERATION
+  // -------------------------
   it("generates exactly 3 questions when full brand data is provided", () => {
     const result = generateChallengeQuestions("challenge-1", makeBrand(), distractorPool);
-    expect(result).toHaveLength(3);
+
+    expect(result.length).toBe(3);
+
+    const types = result.map((q) => q.question_type);
+    expect(types).toContain("which_tagline");
+    expect(types).toContain("which_brand");
+    expect(types).toContain("which_product");
   });
 
   it("assigns rounds 1, 2, and 3", () => {
@@ -40,9 +49,72 @@ describe("generateChallengeQuestions", () => {
     expect(rounds).toEqual([1, 2, 3]);
   });
 
+  // -------------------------
+  // FALLBACK TAGLINE
+  // -------------------------
+  it("falls back to brand name when tagline is missing", () => {
+    const result = generateChallengeQuestions(
+      "challenge-1",
+      makeBrand({ tagline: null }),
+      distractorPool,
+    );
+
+    const fallbackQ = result.find((q) => q.question_text === "What is the name of this brand?");
+
+    expect(fallbackQ?.correct_answer).toBe("BrandX");
+  });
+
+  // -------------------------
+  // DISTRACTOR LOGIC
+  // -------------------------
+  it("uses distractors from pool without duplicates or correct answer", () => {
+    const result = generateChallengeQuestions("challenge-1", makeBrand(), distractorPool);
+
+    result.forEach((q) => {
+      const options = [q.option_a, q.option_b, q.option_c, q.option_d];
+
+      // correct answer not duplicated in distractors
+      const occurrences = options.filter((o) => o === q.correct_answer);
+      expect(occurrences.length).toBe(1);
+    });
+  });
+
+  // -------------------------
+  // EMPTY POOL HANDLING
+  // -------------------------
+  it("falls back to Option A/B/C when distractor pool is empty", () => {
+    const result = generateChallengeQuestions("challenge-1", makeBrand(), []);
+
+    result.forEach((q) => {
+      const options = [q.option_a, q.option_b, q.option_c, q.option_d];
+      expect(options).toContain("Option A");
+      expect(options).toContain("Option B");
+      expect(options).toContain("Option C");
+    });
+  });
+
+  // -------------------------
+  // CORRECT OPTION SHUFFLING
+  // -------------------------
+  it("assigns correct_option consistently after shuffle", () => {
+    const result = generateChallengeQuestions("challenge-1", makeBrand(), distractorPool);
+
+    result.forEach((q) => {
+      const options = [q.option_a, q.option_b, q.option_c, q.option_d];
+      const correctIndex = options.indexOf(q.correct_answer);
+      expect(q.correct_option).toBe(["A", "B", "C", "D"][correctIndex]);
+    });
+  });
+
+  // -------------------------
+  // TEMPLATE OVERRIDES (#487)
+  // -------------------------
   it("uses defaults when question_template is null", () => {
-    const brand = makeBrand({ question_template: null });
-    const result = generateChallengeQuestions("challenge-1", brand, distractorPool);
+    const result = generateChallengeQuestions(
+      "challenge-1",
+      makeBrand({ question_template: null }),
+      distractorPool,
+    );
 
     const r1 = result.find((q) => q.round === 1)!;
     expect(r1.question_text).toBe("Which tagline belongs to this brand?");
@@ -86,43 +158,14 @@ describe("generateChallengeQuestions", () => {
   });
 
   it("falls back to generic questions when brand data is sparse", () => {
-    const brand = makeBrand({ tagline: null, usp: null, product_image_keys: [] });
-    const result = generateChallengeQuestions("challenge-1", brand, distractorPool);
+    const result = generateChallengeQuestions(
+      "challenge-1",
+      makeBrand({ tagline: null, usp: null, product_image_keys: [] }),
+      distractorPool,
+    );
     expect(result).toHaveLength(3);
     result.forEach((q) => {
       expect(q.question_text).toBe("What is the name of this brand?");
-    });
-  });
-
-  it("uses fallback Option A/B/C when distractor pool is empty", () => {
-    const result = generateChallengeQuestions("challenge-1", makeBrand(), []);
-    result.forEach((q) => {
-      const options = [q.option_a, q.option_b, q.option_c, q.option_d];
-      const fallbacks = options.filter((o) => o?.startsWith("Option"));
-      expect(fallbacks.length).toBeGreaterThan(0);
-    });
-  });
-
-  it("sets correct_option to the letter matching correct_answer position", () => {
-    const brand = makeBrand();
-    const result = generateChallengeQuestions("challenge-1", brand, distractorPool);
-    result.forEach((q) => {
-      const opts: Record<string, string | undefined> = {
-        A: q.option_a,
-        B: q.option_b,
-        C: q.option_c,
-        D: q.option_d,
-      };
-      expect(opts[q.correct_option]).toBe(q.correct_answer);
-    });
-  });
-
-  it("does not include the correct answer as a distractor", () => {
-    const result = generateChallengeQuestions("challenge-1", makeBrand(), distractorPool);
-    result.forEach((q) => {
-      const options = [q.option_a, q.option_b, q.option_c, q.option_d];
-      const occurrences = options.filter((o) => o === q.correct_answer);
-      expect(occurrences).toHaveLength(1);
     });
   });
 

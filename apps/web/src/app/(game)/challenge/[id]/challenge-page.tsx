@@ -34,6 +34,33 @@ const ResultScreen = dynamic(() => import("@/components/game/result-screen").the
 
 type GamePhase = "loading" | "preview" | "warmup" | "challenge" | "result";
 
+type CachedChallengeDetail = {
+  etag: string;
+  challenge: Challenge;
+  questions: ChallengeQuestion[];
+};
+
+function challengeDetailStorageKey(challengeId: string): string {
+  return `brandblitz:challenge-detail:${challengeId}`;
+}
+
+function getCachedChallengeDetail(challengeId: string): CachedChallengeDetail | null {
+  try {
+    const stored = window.sessionStorage.getItem(challengeDetailStorageKey(challengeId));
+    return stored ? JSON.parse(stored) as CachedChallengeDetail : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeChallengeDetail(challengeId: string, detail: CachedChallengeDetail): void {
+  try {
+    window.sessionStorage.setItem(challengeDetailStorageKey(challengeId), JSON.stringify(detail));
+  } catch {
+    // Session storage may be unavailable (private browsing or quota pressure).
+  }
+}
+
 interface Props {
   params: Promise<{ id: string }>;
 }
