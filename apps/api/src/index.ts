@@ -21,6 +21,7 @@ import { leagueQueue } from "./queues/league.queue";
 import { leaderboardRefreshQueue } from "./queues/leaderboard-refresh.queue";
 import { logger } from "./lib/logger";
 import { config } from "./lib/config";
+import { PERMISSIONS_POLICY_HEADER } from "@brandblitz/config";
 
 const app = express();
 const PORT = config.PORT;
@@ -74,6 +75,11 @@ app.use(
     },
   }),
 );
+// Helmet 8 does not set Permissions-Policy; add it explicitly after Helmet.
+app.use((_req, res, next) => {
+  res.setHeader("Permissions-Policy", PERMISSIONS_POLICY_HEADER);
+  next();
+});
 // ── CORS — explicit, non-wildcard allow-list enforced at startup ────────────
 // `config.ALLOWED_ORIGINS` is validated by Zod (required, no wildcard) so the
 // process never starts with a permissive origin list. This defensive guard

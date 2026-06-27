@@ -9,6 +9,7 @@ import {
   finishSession,
   storeSessionHmac,
   deleteOpenSession,
+  abandonSession,
 } from "../db/queries/sessions";
 import { calculateRoundScore, completeWarmupWithLock, validateAnswer, validateRoundScore } from "../services/scoring";
 import { authenticate } from "../middleware/authenticate";
@@ -118,15 +119,18 @@ router.get("/:challengeId", authenticate, async (req, res) => {
 
 /**
  * DELETE /sessions/:challengeId
- * Forfeit or clear an interrupted session so the player can start fresh.
+ * Explicitly quit an active or warmup session, recording abandon_reason = 'explicit'.
+ * The row is soft-abandoned (not deleted) so the reason is preserved for analytics
+ * and fraud detection. A subsequent warmup-start call will detect the abandoned
+ * session and create a fresh one via enforceOneSessionPerChallenge.
  */
 router.delete("/:challengeId", authenticate, async (req, res) => {
   const challengeId = String(req.params.challengeId);
   const challenge = await getChallengeById(challengeId);
   if (!challenge) throw createError("Challenge not found", 404);
 
-  const deleted = await deleteOpenSession(req.user!.sub, challenge.id);
-  if (!deleted) throw createError("No open session to forfeit", 404);
+  const abandoned = await abandonSession(req.user!.sub, challenge.id, "explicit");
+  if (!abandoned) throw createError("No open session to forfeit", 404);
 
   res.status(204).send();
 });

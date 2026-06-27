@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import withBundleAnalyzer from "@next/bundle-analyzer";
+import { PERMISSIONS_POLICY_HEADER } from "@brandblitz/config";
 
 const withAnalyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
@@ -95,6 +96,10 @@ const nextConfig: NextConfig = {
           {
             key: "Referrer-Policy",
             value: process.env.REFERRER_POLICY ?? "strict-origin-when-cross-origin",
+          },
+          {
+            key: "Permissions-Policy",
+            value: PERMISSIONS_POLICY_HEADER,
           },
         ],
       },

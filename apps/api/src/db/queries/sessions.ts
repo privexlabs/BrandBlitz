@@ -24,6 +24,7 @@ export interface GameSession {
   flag_reasons: string[] | null;
   is_practice: boolean;
   integrity_hmac: string | null;
+  abandon_reason: "timeout" | "error" | "explicit" | null;
   created_at: string;
 }
 
@@ -32,6 +33,7 @@ export interface RoundScore {
   session_id: string;
   round: 1 | 2 | 3;
   score: number;
+  reaction_time_ms: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -264,11 +266,32 @@ export async function flagSession(
   );
 }
 
+export async function abandonSession(
+  userId: string,
+  challengeId: string,
+  reason: "timeout" | "error" | "explicit"
+): Promise<boolean> {
+  const result = await query(
+    `UPDATE game_sessions
+     SET status = 'abandoned',
+         abandon_reason = $3,
+         completed_at = COALESCE(completed_at, NOW()),
+         updated_at = NOW()
+     WHERE user_id = $1
+       AND challenge_id = $2
+       AND status IN ('warmup', 'active')
+     RETURNING id`,
+    [userId, challengeId, reason]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function markAbandonedSessions(): Promise<number> {
   const result = await query<{ count: number }>(
     `WITH abandoned AS (
        UPDATE game_sessions
        SET status = 'abandoned',
+           abandon_reason = 'timeout',
            completed_at = COALESCE(completed_at, NOW()),
            updated_at = NOW()
        WHERE status IN ('warmup', 'active')

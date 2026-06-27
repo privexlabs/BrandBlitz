@@ -12,6 +12,7 @@ export interface Brand {
   brand_story: string | null;
   usp: string | null;
   product_image_keys: string[];
+  question_template: Record<string, unknown> | null;
   deleted_at?: string | null;
   created_at: string;
 }
@@ -164,6 +165,7 @@ const UPDATABLE_BRAND_COLUMNS = [
   "usp",
   "product_image_1_url",
   "product_image_2_url",
+  "question_template",
 ] as const;
 
 type UpdatableBrandColumn = (typeof UPDATABLE_BRAND_COLUMNS)[number];

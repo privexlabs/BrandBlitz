@@ -78,6 +78,24 @@ const ChallengeSchema = z.object({
 const MIN_CHALLENGE_DURATION_MS = 60 * 60 * 1000;
 const CHALLENGE_DURATION_GRACE_MS = 5_000;
 
+const QuestionRoundTemplateSchema = z.object({
+  question_text: z.string().max(500).optional(),
+  prompt_type: z.enum(["logo", "tagline", "productImage1"]).optional(),
+}).strict();
+
+const QuestionTemplateSchema = z
+  .object({
+    round_1: QuestionRoundTemplateSchema.optional(),
+    round_2: QuestionRoundTemplateSchema.optional(),
+    round_3: QuestionRoundTemplateSchema.optional(),
+  })
+  .strict()
+  .nullable();
+
+const PatchBrandSchema = z.object({
+  question_template: QuestionTemplateSchema.optional(),
+});
+
 function validateChallengeEndsAt(endsAt: string): void {
   const endsAtMs = new Date(endsAt).getTime();
   const nowMs = Date.now();
@@ -173,6 +191,36 @@ router.get("/:id/analytics", authenticate, async (req, res) => {
 
   const analytics = await getBrandAnalytics(brand.id, from, to);
   res.json({ analytics });
+});
+
+/**
+ * PATCH /brands/:id
+ * Update mutable brand fields. Currently accepts question_template to allow
+ * brand owners to override question text and prompt type per round.
+ * Sends 422 on invalid question_template shape.
+ */
+router.patch("/:id", authenticate, async (req, res) => {
+  const brand = await getBrandById(req.params.id);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
+
+  const result = PatchBrandSchema.safeParse(req.body);
+  if (!result.success) {
+    throw createError("Invalid request body", 422, "INVALID_QUESTION_TEMPLATE");
+  }
+
+  const { question_template } = result.data;
+  if (question_template === undefined) {
+    res.json({ brand: toBrandApi(brand) });
+    return;
+  }
+
+  const updated = await updateBrand(req.params.id, req.user!.sub, {
+    question_template: question_template as Record<string, unknown> | null,
+  } as Parameters<typeof updateBrand>[2]);
+
+  if (!updated) throw createError("Brand not found", 404);
+  res.json({ brand: toBrandApi(updated) });
 });
 
 /**
