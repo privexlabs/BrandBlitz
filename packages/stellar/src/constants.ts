@@ -26,3 +26,6 @@ export const MAX_ROUNDS = 3;
 // Minimum pool amount in stroops (100 USDC = 1,000,000,000 stroops)
 // Used by challenge creation validation to prevent dust-level prize pools
 export const MIN_POOL_STROOPS = 1_000_000_000;
+
+// Security: list of browser features disabled by Permissions-Policy header
+export const DISABLED_FEATURES = ["camera", "microphone", "geolocation", "payment"] as const;

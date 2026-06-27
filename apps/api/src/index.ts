@@ -21,6 +21,7 @@ import { leagueQueue } from "./queues/league.queue";
 import { leaderboardRefreshQueue } from "./queues/leaderboard-refresh.queue";
 import { logger } from "./lib/logger";
 import { config } from "./lib/config";
+import { DISABLED_FEATURES } from "@brandblitz/stellar";
 
 const app = express();
 const PORT = config.PORT;
@@ -35,11 +36,7 @@ app.use(
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"], // Allow inline styles for error pages
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: [
-          "'self'",
-          "https://api.stellar.expert",
-          config.S3_PUBLIC_URL,
-        ],
+        connectSrc: ["'self'", "https://api.stellar.expert", config.S3_PUBLIC_URL],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         mediaSrc: ["'self'"],
@@ -72,25 +69,35 @@ app.use(
     xPermittedCrossDomainPolicies: {
       permittedPolicies: "none",
     },
-  }),
+    permissionsPolicy: {
+      features: DISABLED_FEATURES.reduce(
+        (acc, feature) => {
+          acc[feature] = [];
+          return acc;
+        },
+        {} as Record<string, string[]>
+      ),
+    },
+  })
 );
+app.use((req, res, next) => {
+  res.setHeader("Permissions-Policy", DISABLED_FEATURES.map((f) => `${f}=()`).join(", "));
+  next();
+});
 // ── CORS — explicit, non-wildcard allow-list enforced at startup ────────────
 // `config.ALLOWED_ORIGINS` is validated by Zod (required, no wildcard) so the
 // process never starts with a permissive origin list. This defensive guard
 // re-asserts that invariant at the middleware layer.
 const allowedOrigins = config.ALLOWED_ORIGINS;
 if (allowedOrigins.length === 0 || allowedOrigins.includes("*")) {
-  throw new Error(
-    "ALLOWED_ORIGINS must be an explicit, non-wildcard list of origins",
-  );
+  throw new Error("ALLOWED_ORIGINS must be an explicit, non-wildcard list of origins");
 }
 
 // ALLOWED_ORIGINS entries may be full URLs ("http://localhost:3000") or
 // host[:port] ("localhost:3000") — the latter form is shared with the web
 // app's Next.js Server Actions config. Browser Origin headers always carry a
 // scheme, so we compare on a scheme-stripped host to accept either form.
-const stripScheme = (value: string): string =>
-  value.replace(/^https?:\/\//, "");
+const stripScheme = (value: string): string => value.replace(/^https?:\/\//, "");
 const allowedOriginHosts = new Set(allowedOrigins.map(stripScheme));
 const isOriginAllowed = (origin: string): boolean =>
   allowedOrigins.includes(origin) || allowedOriginHosts.has(stripScheme(origin));
@@ -121,7 +128,7 @@ app.use(
       callback(null, false);
     },
     credentials: true,
-  }),
+  })
 );
 app.use(cookieParser());
 app.use(requireHttps);
@@ -137,14 +144,11 @@ app.use(
   express.json({
     limit: "1mb",
     verify: (req, _res, buf) => {
-      if (
-        req.headers["x-webhook-signature"] ||
-        req.path.startsWith("/webhooks")
-      ) {
+      if (req.headers["x-webhook-signature"] || req.path.startsWith("/webhooks")) {
         (req as any).rawBody = buf;
       }
     },
-  }),
+  })
 );
 app.use(express.urlencoded({ extended: true }));
 
