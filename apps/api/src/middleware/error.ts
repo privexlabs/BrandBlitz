@@ -4,6 +4,7 @@ import { logger } from "../lib/logger";
 import { captureExceptionSync } from "../lib/sentry";
 import { BadRequestError } from "@stellar/stellar-sdk";
 import { config } from "../lib/config";
+import { query } from "../db/index";
 
 export interface ApiError extends Error {
   statusCode?: number;
@@ -21,6 +22,22 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ): void {
+  // Best-effort: if an active/warmup session is attached to this request,
+  // mark it abandoned with reason 'error' so analytics can distinguish
+  // server-error closures from timeouts and explicit quits.
+  const sessionId = (req as any).session?.id as string | undefined;
+  if (sessionId) {
+    void query(
+      `UPDATE game_sessions
+       SET status = 'abandoned',
+           abandon_reason = 'error',
+           completed_at = COALESCE(completed_at, NOW()),
+           updated_at = NOW()
+       WHERE id = $1 AND status IN ('warmup', 'active')`,
+      [sessionId]
+    ).catch(() => {});
+  }
+
   let statusCode = err.statusCode;
   let message = err.message;
 

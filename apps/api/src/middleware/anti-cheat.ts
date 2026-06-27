@@ -126,6 +126,8 @@ export async function validateReactionTime(
 /**
  * Enforces: 1 competitive session per account per challenge.
  * Uses the DB UNIQUE constraint atomically — no check-then-act race.
+ * If the existing session is abandoned (explicit quit or timeout), it is
+ * atomically replaced so the player can start fresh without a UNIQUE conflict.
  */
 export async function enforceOneSessionPerChallenge(
   req: Request,
@@ -134,14 +136,16 @@ export async function enforceOneSessionPerChallenge(
 ): Promise<void> {
   const userId = req.user!.sub;
   const { challengeId } = req.params;
+  const deviceId =
+    (req.headers["x-device-id"] as string | undefined) ??
+    (req.headers["x-visitor-id"] as string | undefined);
+  const isPractice = req.body.isPractice === true;
 
   const session = await claimSession({
     userId,
     challengeId,
-    deviceId:
-      (req.headers["x-device-id"] as string | undefined) ??
-      (req.headers["x-visitor-id"] as string | undefined),
-    isPractice: req.body.isPractice === true,
+    deviceId,
+    isPractice,
   });
 
   if (session) {
@@ -150,11 +154,44 @@ export async function enforceOneSessionPerChallenge(
     return;
   }
 
-  // Session already exists — fetch and return existing one idempotently
+  // Session already exists — fetch to check its status.
   const existing = await getSession(userId, challengeId);
   if (!existing) {
     throw createError("Session not found", 404);
   }
+
+  if (existing.status === "abandoned") {
+    // Atomically delete the abandoned session and insert a fresh one.
+    // The CTE guards against the race where two concurrent requests both
+    // see the abandoned row: only the request whose DELETE matches (rowCount
+    // = 1) proceeds to INSERT; the other falls through to the refetch below.
+    const result = await query<import("../db/queries/sessions").GameSession>(
+      `WITH del AS (
+         DELETE FROM game_sessions
+         WHERE user_id = $1 AND challenge_id = $2 AND status = 'abandoned'
+         RETURNING id
+       )
+       INSERT INTO game_sessions (user_id, challenge_id, device_id, is_practice)
+       SELECT $1, $2, $3, $4
+       WHERE EXISTS (SELECT 1 FROM del)
+       ON CONFLICT (user_id, challenge_id) DO NOTHING
+       RETURNING *`,
+      [userId, challengeId, deviceId ?? null, isPractice]
+    );
+    const fresh = result.rows[0] ?? null;
+    if (!fresh) {
+      // Concurrent request won the race and already created a new session.
+      const refetched = await getSession(userId, challengeId);
+      if (!refetched) throw createError("Session not found", 404);
+      (req as any).session = refetched;
+      next();
+      return;
+    }
+    (req as any).session = fresh;
+    next();
+    return;
+  }
+
   (req as any).session = existing;
   next();
 }
