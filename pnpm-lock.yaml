@@ -235,6 +235,9 @@ importers:
       '@auth/core':
         specifier: 0.34.3
         version: 0.34.3
+      '@fingerprintjs/fingerprintjs-pro-react':
+        specifier: ^2.7.1
+        version: 2.7.1
       '@radix-ui/react-dialog':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.1.6(@types/react@19.1.8))(@types/react@19.1.8)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -966,6 +969,12 @@ packages:
     peerDependenciesMeta:
       '@noble/hashes':
         optional: true
+
+  '@fingerprintjs/fingerprintjs-pro-react@2.7.1':
+    resolution: {integrity: sha512-/vQtjd+P8C9OFU8Wvd4AScoNRP6RKDIvYQwwaY/b31PcRBNDqVV9xm7DDBg9uTdDv4KZM3ubEY4JyyVWkXs4EA==}
+
+  '@fingerprintjs/fingerprintjs-pro-spa@1.3.3':
+    resolution: {integrity: sha512-jM5k30S9RT/WW6gnmNWACc7UHeK1md9NbZg8kUsdxvPtDeW8xKnA6tb58Rqfkg6kvqHTq5aHFzw9hgsTH3DbNQ==}
 
   '@fingerprintjs/fingerprintjs-pro@3.12.9':
     resolution: {integrity: sha512-MiM8ASp9nQgY/abPK+1+LaZHvn6aaTX9Zze1ghCDO/Y86k1dbRnDeBr5Zg5fmEhwMda9J7+6zl54lds6GENZUw==}
@@ -6924,6 +6933,16 @@ snapshots:
     optionalDependencies:
       '@noble/hashes': 1.8.0
 
+  '@fingerprintjs/fingerprintjs-pro-react@2.7.1':
+    dependencies:
+      '@fingerprintjs/fingerprintjs-pro-spa': 1.3.3
+      fast-deep-equal: 3.1.3
+
+  '@fingerprintjs/fingerprintjs-pro-spa@1.3.3':
+    dependencies:
+      '@fingerprintjs/fingerprintjs-pro': 3.12.9
+      tslib: 2.8.1
+
   '@fingerprintjs/fingerprintjs-pro@3.12.9': {}
 
   '@humanfs/core@0.19.1': {}
@@ -9624,7 +9643,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.57.2(eslint@10.1.0(jiti@2.7.0))(typescript@6.0.2))(eslint@10.1.0(jiti@2.7.0)))(eslint@10.1.0(jiti@2.7.0)):
+  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@10.1.0(jiti@2.7.0)):
     dependencies:
       '@nolyfill/is-core-module': 1.0.39
       debug: 4.4.3
@@ -9639,14 +9658,14 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.57.2(eslint@10.1.0(jiti@2.7.0))(typescript@6.0.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.57.2(eslint@10.1.0(jiti@2.7.0))(typescript@6.0.2))(eslint@10.1.0(jiti@2.7.0)))(eslint@10.1.0(jiti@2.7.0)))(eslint@10.1.0(jiti@2.7.0)):
+  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.57.2(eslint@10.1.0(jiti@2.7.0))(typescript@6.0.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1)(eslint@10.1.0(jiti@2.7.0)):
     dependencies:
       debug: 3.2.7
     optionalDependencies:
       '@typescript-eslint/parser': 8.57.2(eslint@10.1.0(jiti@2.7.0))(typescript@6.0.2)
       eslint: 10.1.0(jiti@2.7.0)
       eslint-import-resolver-node: 0.3.9
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.57.2(eslint@10.1.0(jiti@2.7.0))(typescript@6.0.2))(eslint@10.1.0(jiti@2.7.0)))(eslint@10.1.0(jiti@2.7.0))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@10.1.0(jiti@2.7.0))
     transitivePeerDependencies:
       - supports-color
 
@@ -9661,7 +9680,7 @@ snapshots:
       doctrine: 2.1.0
       eslint: 10.1.0(jiti@2.7.0)
       eslint-import-resolver-node: 0.3.9
-      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.57.2(eslint@10.1.0(jiti@2.7.0))(typescript@6.0.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.57.2(eslint@10.1.0(jiti@2.7.0))(typescript@6.0.2))(eslint@10.1.0(jiti@2.7.0)))(eslint@10.1.0(jiti@2.7.0)))(eslint@10.1.0(jiti@2.7.0))
+      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.57.2(eslint@10.1.0(jiti@2.7.0))(typescript@6.0.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1)(eslint@10.1.0(jiti@2.7.0))
       hasown: 2.0.2
       is-core-module: 2.16.1
       is-glob: 4.0.3

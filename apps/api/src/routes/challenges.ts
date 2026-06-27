@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   getActiveChallenges,
@@ -25,6 +26,31 @@ import { CursorQuerySchema } from "../db/pagination";
 import { query, pool } from "../db/index";
 
 const router = Router();
+const CHALLENGE_DETAIL_CACHE_TTL_SECONDS = 60;
+
+type ChallengeDetailPayload = {
+  challenge: Awaited<ReturnType<typeof getChallengeByIdAny>> extends infer T
+    ? Exclude<T, null>
+    : never;
+  questions: Array<Record<string, unknown>>;
+};
+
+function challengeDetailCacheKey(id: string): string {
+  return `challenge:detail:${id}`;
+}
+
+function createEtag(payload: unknown): string {
+  const hash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+  return `"${hash}"`;
+}
+
+function etagMatches(ifNoneMatch: string | undefined, etag: string): boolean {
+  if (!ifNoneMatch) return false;
+  return ifNoneMatch.split(",").some((candidate) => {
+    const tag = candidate.trim();
+    return tag === "*" || tag.replace(/^W\//, "") === etag;
+  });
+}
 
 const CHALLENGES_CACHE_TTL_SEC = 10;
 
@@ -109,13 +135,31 @@ router.get("/", optionalAuth, async (req, res) => {
  * For pending_deposit challenges, includes confirmation count and requirement.
  */
 router.get("/:id", optionalAuth, async (req, res) => {
-  const challenge = await getChallengeByIdAny(req.params.id);
-  if (!challenge) throw createError("Challenge not found", 404);
+  const cacheKey = challengeDetailCacheKey(req.params.id);
+  const cachedDetail = await redis.get(cacheKey);
+  let payload: ChallengeDetailPayload;
 
-  // Return questions without correct_answer and correct_option fields
-  const questions = await getChallengeQuestions(challenge.id);
-  const safeQuestions = questions.map(({ correct_answer, correct_option, ...q }) => q);
+  if (cachedDetail !== null) {
+    payload = JSON.parse(cachedDetail) as ChallengeDetailPayload;
+  } else {
+    const challenge = await getChallengeByIdAny(req.params.id);
+    if (!challenge) throw createError("Challenge not found", 404);
 
+    // Return questions without correct_answer and correct_option fields
+    const questions = await getChallengeQuestions(challenge.id);
+    const safeQuestions = questions.map(({ correct_answer, correct_option, ...q }) => q);
+    payload = { challenge, questions: safeQuestions };
+    await redis.set(cacheKey, JSON.stringify(payload), "EX", CHALLENGE_DETAIL_CACHE_TTL_SECONDS);
+  }
+
+  const etag = createEtag(payload);
+  res.set({ ETag: etag, "Cache-Control": "no-cache" });
+  if (etagMatches(req.get("If-None-Match"), etag)) {
+    res.status(304).end();
+    return;
+  }
+
+  res.json(payload);
   // For pending_deposit challenges, include confirmation info
   let confirmationInfo = null;
   if (challenge.status === "pending_deposit") {

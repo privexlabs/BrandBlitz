@@ -22,6 +22,8 @@ import deleteAccountRoutes from "./me/delete-account";
 import docsRoutes from "./docs";
 import cspReportRoutes from "./csp-report";
 import legalRoutes from "./legal";
+import configRoutes from "./config";
+import adminCacheRoutes from "./admin/cache";
 import metricsRoutes from "./metrics";
 import waitlistRoutes from "./waitlist";
 
@@ -33,6 +35,7 @@ export function registerRoutes(app: Express): void {
   app.use("/metrics", metricsRoutes);
   app.use("/csp-report", cspReportRoutes);
   app.use("/legal", legalRoutes);
+  app.use("/config", configRoutes);
   app.use("/auth", authRoutes);
   app.use("/brands", brandsRoutes);
   app.use("/challenges", challengesRoutes);
@@ -46,6 +49,7 @@ export function registerRoutes(app: Express): void {
   app.use("/admin/users", adminUsersRoutes);
   app.use("/admin/fraud-flags", adminFraudRoutes);
   app.use("/admin/challenges", adminChallengesRoutes);
+  app.use("/admin/cache", adminCacheRoutes);
   app.use("/admin/escrow", adminEscrowRoutes);
   app.use("/admin/audit-log", adminAuditLogRoutes);
   app.use("/admin/payouts", adminPayoutsRoutes);

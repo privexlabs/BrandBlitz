@@ -309,6 +309,10 @@ router.post(
           await revokeSessionToken(session.id, token, req.user!.exp);
         }
       }
+      const token = bearerToken(req);
+      if (token) {
+        await revokeSessionToken(session.id, token, req.user!.exp);
+      }
     }
 
     res.json({
