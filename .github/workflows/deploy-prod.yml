@@ -60,7 +60,7 @@ jobs:
 
       - name: Deploy (pull exact tagged images)
         id: deploy
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.PROD_SSH_HOST }}
           username: ${{ secrets.PROD_SSH_USER }}
@@ -81,7 +81,7 @@ jobs:
 
       - name: Auto-rollback on failure (previous tag)
         if: failure() && steps.tags.outputs.prev_tag != ''
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.PROD_SSH_HOST }}
           username: ${{ secrets.PROD_SSH_USER }}
