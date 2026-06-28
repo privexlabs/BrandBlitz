@@ -9,6 +9,13 @@ const mocks = vi.hoisted(() => ({
   createChallenge: vi.fn(),
   insertChallengeQuestions: vi.fn(),
   loggerWarn: vi.fn(),
+  authUser: {
+    sub: "owner-user-1",
+    email: "owner@example.com",
+    iat: 0,
+    exp: 0,
+  } as any,
+  tosAccepted: true,
 }));
 
 vi.mock("../db/queries/brands", () => ({
@@ -28,19 +35,24 @@ vi.mock("../db/queries/challenges", () => ({
 }));
 
 vi.mock("../middleware/authenticate", () => ({
-  authenticate: (req: any, _res: any, next: any) => {
-    req.user = {
-      sub: "owner-user-1",
-      email: "owner@example.com",
-      iat: 0,
-      exp: 0,
-    };
+  authenticate: (req: any, res: any, next: any) => {
+    if (!mocks.authUser) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    req.user = mocks.authUser;
     next();
   },
 }));
 
 vi.mock("../middleware/require-tos", () => ({
-  requireCurrentTosAccepted: (_req: any, _res: any, next: any) => next(),
+  requireCurrentTosAccepted: (_req: any, res: any, next: any) => {
+    if (!mocks.tosAccepted) {
+      res.status(403).json({ error: "Terms of Service acceptance required" });
+      return;
+    }
+    next();
+  },
 }));
 
 vi.mock("@brandblitz/storage", () => ({
@@ -59,6 +71,9 @@ vi.mock("../lib/logger", () => ({
 }));
 
 import router from "./brands";
+import { errorHandler } from "../middleware/error";
+
+const STELLAR_TEXT_MEMO_MAX_BYTES = 28;
 
 function buildBrand(params: {
   id: string;
@@ -78,7 +93,7 @@ function buildBrand(params: {
     tagline: params.tagline,
     brand_story: null,
     usp: params.usp,
-    product_image_keys: params.hasProductImage ?? true ? ["product.webp"] : [],
+    product_image_keys: (params.hasProductImage ?? true) ? ["product.webp"] : [],
     created_at: "2026-04-24T00:00:00.000Z",
   };
 }
@@ -88,15 +103,28 @@ function buildChallenge(brandId: string): Challenge {
     id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     brand_id: brandId,
     challenge_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    deposit_memo: "bb-bbbbbbbbbbbbbbbbbbbbbbbbb",
     pool_amount_stroops: "500000000",
     pool_amount_usdc: "50.0000000",
     status: "pending_deposit",
-    stellar_deposit_tx: null,
+    deposit_tx_hash: null,
+    deposit_confirmations: 0,
     payout_tx_hashes: null,
     max_players: null,
     starts_at: "2026-04-24T00:00:00.000Z",
     ends_at: null,
+    reported_count: 0,
+    deleted_at: null,
     created_at: "2026-04-24T00:00:00.000Z",
+  };
+}
+
+function validChallengePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    brandId: "11111111-1111-4111-8111-111111111111",
+    poolAmountUsdc: "100.0000000",
+    endsAt: "2026-12-01T00:00:00.000Z",
+    ...overrides,
   };
 }
 
@@ -104,9 +132,7 @@ async function postChallenge(body: Record<string, unknown>) {
   const app = express();
   app.use(express.json());
   app.use("/brands", router);
-  app.use((err: any, _req: any, res: any, _next: any) => {
-    res.status(err?.statusCode ?? 500).json({ error: err?.message ?? "Unexpected error" });
-  });
+  app.use(errorHandler);
 
   const server = app.listen(0);
 
@@ -122,7 +148,16 @@ async function postChallenge(body: Record<string, unknown>) {
       body: JSON.stringify(body),
     });
 
-    const data = await response.json();
+    const responseText = await response.text();
+    const data = responseText
+      ? (() => {
+          try {
+            return JSON.parse(responseText);
+          } catch {
+            return { raw: responseText };
+          }
+        })()
+      : {};
     return { status: response.status, data };
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -138,6 +173,13 @@ describe("POST /brands/challenges distractor integration", () => {
     mocks.createChallenge.mockReset();
     mocks.insertChallengeQuestions.mockReset();
     mocks.loggerWarn.mockReset();
+    mocks.authUser = {
+      sub: "owner-user-1",
+      email: "owner@example.com",
+      iat: 0,
+      exp: 0,
+    };
+    mocks.tosAccepted = true;
 
     process.env.HOT_WALLET_PUBLIC_KEY = "GTESTHOTWALLETADDRESS";
 
@@ -151,6 +193,94 @@ describe("POST /brands/challenges distractor integration", () => {
     );
     mocks.createChallenge.mockResolvedValue(buildChallenge(brandId));
     mocks.insertChallengeQuestions.mockResolvedValue(undefined);
+    mocks.getActiveDistractorBrands.mockResolvedValue([]);
+  });
+
+  it("returns 401 before creating a challenge when the request is unauthenticated", async () => {
+    mocks.authUser = null;
+
+    const response = await postChallenge(validChallengePayload());
+
+    expect(response.status).toBe(401);
+    expect(response.data.error).toBe("Unauthorized");
+    expect(mocks.createChallenge).not.toHaveBeenCalled();
+    expect(mocks.insertChallengeQuestions).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 before creating a challenge when current terms are not accepted", async () => {
+    mocks.tosAccepted = false;
+
+    const response = await postChallenge(validChallengePayload());
+
+    expect(response.status).toBe(403);
+    expect(response.data.error).toBe("Terms of Service acceptance required");
+    expect(mocks.createChallenge).not.toHaveBeenCalled();
+    expect(mocks.insertChallengeQuestions).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing required challenge fields before touching the database", async () => {
+    const response = await postChallenge({});
+
+    expect(response.status).toBe(400);
+    expect(response.data.error).toBe("Validation Error");
+    expect(mocks.getBrandById).not.toHaveBeenCalled();
+    expect(mocks.createChallenge).not.toHaveBeenCalled();
+    expect(mocks.insertChallengeQuestions).not.toHaveBeenCalled();
+  });
+
+  it("returns deposit instructions with a Stellar-compatible text memo for a new pending-deposit challenge", async () => {
+    const response = await postChallenge(validChallengePayload());
+
+    expect(response.status).toBe(201);
+    expect(response.data.challenge).toMatchObject({
+      brand_id: brandId,
+      status: "pending_deposit",
+    });
+    expect(response.data.depositInstructions).toMatchObject({
+      hotWalletAddress: expect.stringMatching(/^G[A-Z0-9]+$/),
+      memo: expect.any(String),
+      amount: "100.0000000",
+      asset: "USDC",
+    });
+
+    const memo = response.data.depositInstructions.memo as string;
+    expect(Buffer.byteLength(memo, "utf8")).toBeLessThanOrEqual(STELLAR_TEXT_MEMO_MAX_BYTES);
+    expect(memo).toMatch(/^bb-[0-9a-f]{25}$/i);
+    expect(mocks.createChallenge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brandId,
+        challengeId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+        ),
+        depositMemo: memo,
+        poolAmountUsdc: "100.0000000",
+      })
+    );
+  });
+
+  it("generates unique Stellar memo values for sequential challenge creations", async () => {
+    mocks.createChallenge.mockImplementation(async ({ brandId: createdBrandId, depositMemo }) => ({
+      ...buildChallenge(createdBrandId),
+      deposit_memo: depositMemo,
+    }));
+
+    const first = await postChallenge(validChallengePayload());
+    const second = await postChallenge(validChallengePayload({ maxPlayers: 75 }));
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+
+    const firstMemo = first.data.depositInstructions.memo;
+    const secondMemo = second.data.depositInstructions.memo;
+    expect(firstMemo).not.toBe(secondMemo);
+    expect(mocks.createChallenge).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ depositMemo: firstMemo })
+    );
+    expect(mocks.createChallenge).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ depositMemo: secondMemo, maxPlayers: 75 })
+    );
   });
 
   it("uses real distractor brand names in generated question options", async () => {
@@ -181,7 +311,7 @@ describe("POST /brands/challenges distractor integration", () => {
 
     const response = await postChallenge({
       brandId,
-      poolAmountUsdc: "50.0000000",
+      poolAmountUsdc: "100.0000000",
       endsAt: "2026-12-01T00:00:00.000Z",
     });
 
@@ -217,7 +347,7 @@ describe("POST /brands/challenges distractor integration", () => {
 
     const response = await postChallenge({
       brandId,
-      poolAmountUsdc: "50.0000000",
+      poolAmountUsdc: "100.0000000",
       endsAt: "2026-12-01T00:00:00.000Z",
     });
 
@@ -248,7 +378,7 @@ describe("POST /brands/challenges distractor integration", () => {
   it("rejects challenge creation when endsAt is in the past", async () => {
     const response = await postChallenge({
       brandId,
-      poolAmountUsdc: "50.0000000",
+      poolAmountUsdc: "100.0000000",
       endsAt: "2020-01-01T00:00:00.000Z",
     });
 
@@ -260,7 +390,7 @@ describe("POST /brands/challenges distractor integration", () => {
   it("rejects challenge creation when duration is less than one hour", async () => {
     const response = await postChallenge({
       brandId,
-      poolAmountUsdc: "50.0000000",
+      poolAmountUsdc: "100.0000000",
       endsAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     });
 

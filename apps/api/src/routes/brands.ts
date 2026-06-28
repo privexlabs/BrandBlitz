@@ -47,8 +47,14 @@ const BrandKitSchema = z.object({
     .max(100)
     .refine((v) => !/<[^>]*>/.test(v), { message: "Brand name must not contain HTML tags" }),
   logoKey: z.string().optional(),
-  primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-  secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  primaryColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
+  secondaryColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
   tagline: z.string().max(100).optional(),
   brandStory: z.string().max(500).optional(),
   usp: z.string().max(200).optional(),
@@ -77,11 +83,14 @@ const ChallengeSchema = z.object({
 
 const MIN_CHALLENGE_DURATION_MS = 60 * 60 * 1000;
 const CHALLENGE_DURATION_GRACE_MS = 5_000;
+const STELLAR_TEXT_MEMO_MAX_BYTES = 28;
 
-const QuestionRoundTemplateSchema = z.object({
-  question_text: z.string().max(500).optional(),
-  prompt_type: z.enum(["logo", "tagline", "productImage1"]).optional(),
-}).strict();
+const QuestionRoundTemplateSchema = z
+  .object({
+    question_text: z.string().max(500).optional(),
+    prompt_type: z.enum(["logo", "tagline", "productImage1"]).optional(),
+  })
+  .strict();
 
 const QuestionTemplateSchema = z
   .object({
@@ -106,12 +115,14 @@ function validateChallengeEndsAt(endsAt: string): void {
   }
 
   if (endsAtMs < minEndsAtMs - CHALLENGE_DURATION_GRACE_MS) {
-    throw createError(
-      "Challenge duration must be at least 1 hour",
-      400,
-      "ENDS_AT_TOO_SOON"
-    );
+    throw createError("Challenge duration must be at least 1 hour", 400, "ENDS_AT_TOO_SOON");
   }
+}
+
+function generateDepositMemo(): string {
+  return `bb-${randomUUID()
+    .replace(/-/g, "")
+    .slice(0, STELLAR_TEXT_MEMO_MAX_BYTES - 3)}`;
 }
 
 /**
@@ -299,7 +310,10 @@ router.post("/:id/questions/:questionId/regenerate", authenticate, async (req, r
   const newDraft = regenerated.find((q) => q.round === existing.round) ?? regenerated[0];
 
   await deleteChallengeQuestion(questionId);
-  const inserted = await insertChallengeQuestion({ ...newDraft, challenge_id: existing.challenge_id });
+  const inserted = await insertChallengeQuestion({
+    ...newDraft,
+    challenge_id: existing.challenge_id,
+  });
 
   res.json({ question: inserted });
 });
@@ -360,8 +374,13 @@ router.post("/", authenticate, async (req, res) => {
     }
   } catch (error) {
     if (error instanceof StorageError || (error as any).name === "StorageError") {
-      console.error(`[api] Image optimization failed for body key. Reason: ${(error as Error).message}`);
-      throw createError("Image upload could not be processed. Please try again with a valid image.", 400);
+      console.error(
+        `[api] Image optimization failed for body key. Reason: ${(error as Error).message}`
+      );
+      throw createError(
+        "Image upload could not be processed. Please try again with a valid image.",
+        400
+      );
     }
     throw error;
   }
@@ -395,9 +414,11 @@ router.post("/challenges", authenticate, requireCurrentTosAccepted, async (req, 
   if (brand.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
 
   const challengeId = randomUUID();
+  const depositMemo = generateDepositMemo();
   const challenge = await createChallenge({
     brandId: body.brandId,
     challengeId,
+    depositMemo,
     poolAmountUsdc: body.poolAmountUsdc,
     maxPlayers: body.maxPlayers,
     endsAt: body.endsAt,
@@ -419,10 +440,10 @@ router.post("/challenges", authenticate, requireCurrentTosAccepted, async (req, 
     challenge,
     depositInstructions: {
       hotWalletAddress: config.HOT_WALLET_PUBLIC_KEY,
-      memo: challengeId,
+      memo: depositMemo,
       amount: body.poolAmountUsdc,
       asset: "USDC",
-      note: `Send exactly ${body.poolAmountUsdc} USDC to the hot wallet with memo: ${challengeId}`,
+      note: `Send exactly ${body.poolAmountUsdc} USDC to the hot wallet with memo: ${depositMemo}`,
     },
   });
 });

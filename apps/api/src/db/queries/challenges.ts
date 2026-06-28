@@ -15,6 +15,7 @@ export interface Challenge {
   id: string;
   brand_id: string;
   challenge_id: string;
+  deposit_memo: string | null;
   pool_amount_stroops: string;
   pool_amount_usdc: string;
   participant_count?: number;
@@ -52,18 +53,21 @@ export interface ChallengeQuestion {
 export async function createChallenge(data: {
   brandId: string;
   challengeId: string;
+  depositMemo?: string;
   poolAmountUsdc: string;
   maxPlayers?: number;
   endsAt?: string;
 }): Promise<Challenge> {
   const result = await query<Challenge>(
     `INSERT INTO challenges
-       (brand_id, challenge_id, pool_amount_stroops, max_players, ends_at)
-     VALUES ($1,$2,$3,$4,$5)
+       (brand_id, challenge_id, deposit_memo, pool_amount_stroops,
+        max_players, ends_at)
+     VALUES ($1,$2,$3,$4,$5,$6)
      RETURNING *, (pool_amount_stroops::numeric / 10000000)::numeric(20,7)::text AS pool_amount_usdc`,
     [
       data.brandId,
       data.challengeId,
+      data.depositMemo ?? data.challengeId,
       usdcToStroops(data.poolAmountUsdc),
       data.maxPlayers ?? null,
       data.endsAt ?? null,
@@ -101,7 +105,9 @@ export async function getArchivedChallengeById(id: string): Promise<Challenge | 
   return result.rows[0] ?? null;
 }
 
-export async function getChallengeByIdAny(id: string): Promise<Challenge & { archived: boolean } | null> {
+export async function getChallengeByIdAny(
+  id: string
+): Promise<(Challenge & { archived: boolean }) | null> {
   const result = await query<Challenge & { archived: boolean }>(
     `SELECT *, false AS archived FROM challenges WHERE id = $1 AND deleted_at IS NULL
      UNION ALL
@@ -137,7 +143,7 @@ export async function getActiveChallengesCursor(
 
 export async function getActiveChallenges(
   limit = 20,
-  cursor?: string,
+  cursor?: string
 ): Promise<{ challenges: Challenge[]; nextCursor: string | null }> {
   const cursorValues = decodeCursorSafe(cursor, ["pool_amount_stroops", "id"]);
 
@@ -150,7 +156,7 @@ export async function getActiveChallenges(
       "DESC",
       cursorValues.pool_amount_stroops,
       cursorValues.id as string,
-      3,
+      3
     );
     whereExtra = clause;
     params.push(cursorValues.pool_amount_stroops, cursorValues.id);
@@ -166,7 +172,7 @@ export async function getActiveChallenges(
      ${whereExtra}
      ORDER BY c.pool_amount_stroops DESC, c.id DESC
      LIMIT $${params.length}`,
-    params,
+    params
   );
 
   const challenges = result.rows;
@@ -242,7 +248,7 @@ export async function getFilteredChallenges(opts: {
 export async function getChallengesByBrandId(
   brandId: string,
   limit = 20,
-  cursor?: string,
+  cursor?: string
 ): Promise<{ challenges: Challenge[]; nextCursor: string | null }> {
   const cursorValues = decodeCursorSafe(cursor, ["created_at", "id"]);
 
@@ -255,7 +261,7 @@ export async function getChallengesByBrandId(
       "DESC",
       cursorValues.created_at,
       cursorValues.id as string,
-      3,
+      3
     );
     whereExtra = clause;
     params.push(cursorValues.created_at, cursorValues.id);
@@ -272,7 +278,7 @@ export async function getChallengesByBrandId(
      ${whereExtra}
      ORDER BY c.created_at DESC, c.id DESC
      LIMIT $${params.length}`,
-    params,
+    params
   );
 
   const challenges = result.rows;
@@ -290,9 +296,10 @@ export async function getChallengesByBrandId(
  * Soft-delete a challenge.
  */
 export async function softDeleteChallenge(id: string): Promise<void> {
-  await query("UPDATE challenges SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL", [
-    id,
-  ]);
+  await query(
+    "UPDATE challenges SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+    [id]
+  );
 }
 
 /**
@@ -308,15 +315,17 @@ export async function updateChallengeStatus(
   extras?: { depositTx?: string; payoutTxHashes?: string[] }
 ): Promise<void> {
   if (extras?.depositTx) {
-    await query(
-      "UPDATE challenges SET status = $1, deposit_tx_hash = $2 WHERE id = $3",
-      [status, extras.depositTx, id]
-    );
+    await query("UPDATE challenges SET status = $1, deposit_tx_hash = $2 WHERE id = $3", [
+      status,
+      extras.depositTx,
+      id,
+    ]);
   } else if (extras?.payoutTxHashes) {
-    await query(
-      "UPDATE challenges SET status = $1, payout_tx_hashes = $2 WHERE id = $3",
-      [status, extras.payoutTxHashes, id]
-    );
+    await query("UPDATE challenges SET status = $1, payout_tx_hashes = $2 WHERE id = $3", [
+      status,
+      extras.payoutTxHashes,
+      id,
+    ]);
   } else {
     await query("UPDATE challenges SET status = $1 WHERE id = $2", [status, id]);
   }
@@ -332,9 +341,17 @@ export async function insertChallengeQuestions(
           correct_answer, option_a, option_b, option_c, option_d, correct_option)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [
-        q.challenge_id, q.round, q.question_type, q.prompt_type,
-        q.question_text, q.correct_answer,
-        q.option_a, q.option_b, q.option_c, q.option_d, q.correct_option,
+        q.challenge_id,
+        q.round,
+        q.question_type,
+        q.prompt_type,
+        q.question_text,
+        q.correct_answer,
+        q.option_a,
+        q.option_b,
+        q.option_c,
+        q.option_d,
+        q.correct_option,
       ]
     );
   }
@@ -362,9 +379,17 @@ export async function insertChallengeQuestion(
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING *`,
     [
-      question.challenge_id, question.round, question.question_type, question.prompt_type,
-      question.question_text, question.correct_answer,
-      question.option_a, question.option_b, question.option_c, question.option_d, question.correct_option,
+      question.challenge_id,
+      question.round,
+      question.question_type,
+      question.prompt_type,
+      question.question_text,
+      question.correct_answer,
+      question.option_a,
+      question.option_b,
+      question.option_c,
+      question.option_d,
+      question.correct_option,
     ]
   );
   return result.rows[0];
