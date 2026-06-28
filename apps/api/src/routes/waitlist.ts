@@ -7,23 +7,29 @@ import { apiLimiter, waitlistLimiter } from "../middleware/rate-limit";
 const router = Router();
 
 const WaitlistSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email().max(254),
   referral_code: z.string().max(64).optional(),
 });
 
 router.post("/", waitlistLimiter, async (req, res) => {
-  const body = WaitlistSchema.parse(req.body);
+  const parsed = WaitlistSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(422).json({ error: "Validation Error", details: parsed.error.issues });
+    return;
+  }
+
+  const body = parsed.data;
   const email = body.email.toLowerCase().trim();
 
-  await query(
+  const result = await query<{ id: string }>(
     `INSERT INTO waitlist (email, referral_code)
      VALUES ($1, $2)
-     ON CONFLICT (email) DO NOTHING`,
+     ON CONFLICT (email) DO NOTHING
+     RETURNING id`,
     [email, body.referral_code ?? null]
   );
 
-  // Always return 200 to prevent email enumeration.
-  res.json({ success: true });
+  res.status(result.rows.length > 0 ? 201 : 200).json({ message: "You're on the list!" });
 });
 
 router.get("/position/:email", apiLimiter, async (req, res) => {
