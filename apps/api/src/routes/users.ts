@@ -224,6 +224,112 @@ router.get("/:username/activity", apiLimiter, async (req, res) => {
 });
 
 /**
+ * GET /users/:username/public
+ * Public read-only profile. Omits private account, wallet, phone, and KYC fields.
+ */
+router.get("/:username/public", apiLimiter, async (req, res) => {
+  const { username } = z.object({ username: z.string().trim().min(1) }).parse(req.params);
+
+  const result = await query<{
+    id: string;
+    username: string;
+    avatar_url: string | null;
+    joined_at: string;
+    win_count: number;
+    total_sessions_played: number;
+    accuracy_pct: number;
+    league_tier: string | null;
+    league_rank: number | null;
+    league_season: string | null;
+    badges: Array<{
+      badge_slug: string;
+      awarded_at: string;
+    }> | null;
+  }>(
+    `WITH public_user AS (
+       SELECT id, username, avatar_url, created_at AS joined_at
+       FROM users
+       WHERE username = $1
+         AND deleted_at IS NULL
+         AND status = 'active'
+       LIMIT 1
+     ),
+     stats AS (
+       SELECT
+         COUNT(*) FILTER (WHERE status = 'completed')::int AS total_sessions_played,
+         COUNT(*) FILTER (WHERE status = 'completed' AND rank = 1)::int AS win_count,
+         COALESCE(
+           ROUND(
+             (
+               SUM(total_score) FILTER (WHERE status = 'completed')::numeric
+               / NULLIF(COUNT(*) FILTER (WHERE status = 'completed') * 450, 0)
+             ) * 100,
+             2
+           ),
+           0
+         )::float AS accuracy_pct
+       FROM game_sessions
+       WHERE user_id = (SELECT id FROM public_user)
+     ),
+     current_league AS (
+       SELECT league, rank_in_group, week_start
+       FROM league_assignments
+       WHERE user_id = (SELECT id FROM public_user)
+       ORDER BY week_start DESC
+       LIMIT 1
+     ),
+     recent_badges AS (
+       SELECT COALESCE(json_agg(b ORDER BY b.awarded_at DESC), '[]'::json) AS badges
+       FROM (
+         SELECT badge_slug, awarded_at
+         FROM user_badges
+         WHERE user_id = (SELECT id FROM public_user)
+         ORDER BY awarded_at DESC
+         LIMIT 6
+       ) b
+     )
+     SELECT
+       pu.id,
+       pu.username,
+       pu.avatar_url,
+       pu.joined_at,
+       COALESCE(s.win_count, 0) AS win_count,
+       COALESCE(s.total_sessions_played, 0) AS total_sessions_played,
+       COALESCE(s.accuracy_pct, 0) AS accuracy_pct,
+       cl.league AS league_tier,
+       cl.rank_in_group AS league_rank,
+       cl.week_start::text AS league_season,
+       rb.badges
+     FROM public_user pu
+     CROSS JOIN stats s
+     LEFT JOIN current_league cl ON TRUE
+     CROSS JOIN recent_badges rb`,
+    [username]
+  );
+
+  const profile = result.rows[0];
+  if (!profile) throw createError("User not found", 404);
+
+  res.json({
+    username: profile.username,
+    avatar_url: profile.avatar_url,
+    joined_at: profile.joined_at,
+    win_count: Number(profile.win_count),
+    total_sessions_played: Number(profile.total_sessions_played),
+    accuracy_pct: Number(profile.accuracy_pct),
+    league: {
+      tier: profile.league_tier,
+      rank: profile.league_rank,
+      season: profile.league_season,
+    },
+    badges: (profile.badges ?? []).slice(0, 6).map((badge) => ({
+      badge_slug: badge.badge_slug,
+      awarded_at: badge.awarded_at,
+    })),
+  });
+});
+
+/**
  * PATCH /users/me/wallet
  */
 router.patch("/me/wallet", authenticate, async (req, res) => {
@@ -267,10 +373,7 @@ router.patch("/me/profile", authenticate, async (req, res) => {
   }
 
   // Trigger Next.js cache revalidation so profile pages reflect the new data
-  const revalidatePaths = [
-    `/profile/${oldUsername}`,
-    `/profile/${newUsername}`,
-  ];
+  const revalidatePaths = [`/profile/${oldUsername}`, `/profile/${newUsername}`];
 
   try {
     await fetch(`${config.WEB_URL}/api/revalidate`, {
@@ -387,10 +490,9 @@ router.patch("/me/notifications/:id/read", authenticate, async (req, res) => {
  * Marks all unread notifications as read.
  */
 router.patch("/me/notifications/read-all", authenticate, async (req, res) => {
-  await query(
-    `UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL`,
-    [req.user!.sub]
-  );
+  await query(`UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL`, [
+    req.user!.sub,
+  ]);
 
   res.json({ success: true });
 });
