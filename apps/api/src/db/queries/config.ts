@@ -7,12 +7,33 @@ export interface AppConfigRow {
   updated_by: string | null;
 }
 
+export const PUBLIC_CONFIG_KEYS = [
+  "game_round_duration_seconds",
+  "max_rounds_per_session",
+  "maintenance_mode",
+] as const;
+
+export type PublicConfigKey = (typeof PUBLIC_CONFIG_KEYS)[number];
+export type PublicConfig = Partial<Record<PublicConfigKey, unknown>>;
+
 export async function getConfig(key: string): Promise<Record<string, unknown> | null> {
   const result = await query<{ value: Record<string, unknown> }>(
     "SELECT value FROM app_config WHERE key = $1",
     [key]
   );
   return result.rows[0]?.value ?? null;
+}
+
+export async function getPublicConfig(): Promise<PublicConfig> {
+  const result = await query<{ key: PublicConfigKey; value: unknown }>(
+    "SELECT key, value FROM app_config WHERE key = ANY($1::text[])",
+    [PUBLIC_CONFIG_KEYS]
+  );
+
+  return result.rows.reduce<PublicConfig>((config, row) => {
+    config[row.key] = row.value;
+    return config;
+  }, {});
 }
 
 export async function getConfigRow(key: string): Promise<AppConfigRow | null> {
