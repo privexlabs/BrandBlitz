@@ -34,10 +34,7 @@ vi.mock("../middleware/authenticate", () => ({
   },
 }));
 
-import configRouter, {
-  PUBLIC_CONFIG_CACHE_KEY,
-  PUBLIC_CONFIG_CACHE_TTL_SECONDS,
-} from "./config";
+import configRouter, { PUBLIC_CONFIG_CACHE_KEY, PUBLIC_CONFIG_CACHE_TTL_SECONDS } from "./config";
 import adminCacheRouter from "./admin/cache";
 
 function createApp() {
@@ -57,11 +54,12 @@ describe("public config cache", () => {
   });
 
   it("queries Postgres once and serves the following request from Redis", async () => {
-    const payload = { anti_cheat: { minReactionTimeMs: 150 } };
+    const payload = {
+      game_round_duration_seconds: 30,
+      maintenance_mode: false,
+    };
     mocks.getPublicConfig.mockResolvedValue(payload);
-    mocks.redisGet
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(JSON.stringify({ config: payload }));
+    mocks.redisGet.mockResolvedValueOnce(null).mockResolvedValueOnce(JSON.stringify(payload));
 
     const app = createApp();
     const first = await request(app).get("/config").expect(200);
@@ -69,13 +67,32 @@ describe("public config cache", () => {
 
     expect(first.headers["x-cache"]).toBe("MISS");
     expect(second.headers["x-cache"]).toBe("HIT");
+    expect(first.headers["cache-control"]).toBe("public, max-age=60");
+    expect(first.body).toEqual(payload);
     expect(first.body).toEqual(second.body);
     expect(mocks.getPublicConfig).toHaveBeenCalledTimes(1);
     expect(mocks.redisSet).toHaveBeenCalledWith(
       PUBLIC_CONFIG_CACHE_KEY,
-      JSON.stringify({ config: payload }),
+      JSON.stringify(payload),
       "EX",
-      PUBLIC_CONFIG_CACHE_TTL_SECONDS,
+      PUBLIC_CONFIG_CACHE_TTL_SECONDS
+    );
+  });
+
+  it("returns an empty flat object when no public config keys exist", async () => {
+    mocks.getPublicConfig.mockResolvedValue({});
+    mocks.redisGet.mockResolvedValueOnce(null);
+
+    const app = createApp();
+    const response = await request(app).get("/config").expect(200);
+
+    expect(response.body).toEqual({});
+    expect(response.headers["cache-control"]).toBe("public, max-age=60");
+    expect(mocks.redisSet).toHaveBeenCalledWith(
+      PUBLIC_CONFIG_CACHE_KEY,
+      JSON.stringify({}),
+      "EX",
+      PUBLIC_CONFIG_CACHE_TTL_SECONDS
     );
   });
 
