@@ -150,6 +150,46 @@ router.get("/me/referrals", authenticate, async (req, res) => {
   });
 });
 
+/**
+ * GET /users/search
+ * Authenticated username prefix search for public profile fields.
+ */
+router.get("/search", authenticate, async (req, res) => {
+  const { q, page } = z
+    .object({
+      q: z.string().trim().min(2),
+      page: z.coerce.number().int().min(1).default(1),
+    })
+    .parse(req.query);
+
+  const pageSize = 20;
+  const offset = (page - 1) * pageSize;
+  const result = await query<{
+    id: string;
+    username: string;
+    avatar_url: string | null;
+    total_earnings: string;
+  }>(
+    `SELECT id, username, avatar_url, total_earned_usdc AS total_earnings
+     FROM users
+     WHERE username ILIKE $1
+       AND deleted_at IS NULL
+     ORDER BY username ASC
+     LIMIT $2
+     OFFSET $3`,
+    [`${q}%`, pageSize, offset]
+  );
+
+  res.json(
+    result.rows.map((user) => ({
+      id: user.id,
+      username: user.username,
+      avatar_url: user.avatar_url,
+      total_earnings: user.total_earnings,
+    }))
+  );
+});
+
 router.post("/streaks/repair", authenticate, async (req, res) => {
   const repaired = await repairStreak(req.user!.sub);
   if (!repaired) {
@@ -267,10 +307,7 @@ router.patch("/me/profile", authenticate, async (req, res) => {
   }
 
   // Trigger Next.js cache revalidation so profile pages reflect the new data
-  const revalidatePaths = [
-    `/profile/${oldUsername}`,
-    `/profile/${newUsername}`,
-  ];
+  const revalidatePaths = [`/profile/${oldUsername}`, `/profile/${newUsername}`];
 
   try {
     await fetch(`${config.WEB_URL}/api/revalidate`, {
@@ -387,10 +424,9 @@ router.patch("/me/notifications/:id/read", authenticate, async (req, res) => {
  * Marks all unread notifications as read.
  */
 router.patch("/me/notifications/read-all", authenticate, async (req, res) => {
-  await query(
-    `UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL`,
-    [req.user!.sub]
-  );
+  await query(`UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL`, [
+    req.user!.sub,
+  ]);
 
   res.json({ success: true });
 });
