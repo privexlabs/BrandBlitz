@@ -40,10 +40,7 @@ function parseIpv4Hextets(part: string): string[] | null {
   if (isIP(part) !== 4) return null;
 
   const octets = part.split(".").map((octet) => Number.parseInt(octet, 10));
-  return [
-    ((octets[0] << 8) | octets[1]).toString(16),
-    ((octets[2] << 8) | octets[3]).toString(16),
-  ];
+  return [((octets[0] << 8) | octets[1]).toString(16), ((octets[2] << 8) | octets[3]).toString(16)];
 }
 
 function expandIpv6(address: string): string[] | null {
@@ -109,9 +106,10 @@ function ipKey(req: Request): string {
 function makeRedisStore() {
   return new RedisStore({
     sendCommand: async (...args: string[]) => {
-      const command = typeof (redis as any).call === "function"
-        ? (redis as any).call
-        : (redis as any).sendCommand;
+      const command =
+        typeof (redis as any).call === "function"
+          ? (redis as any).call
+          : (redis as any).sendCommand;
       if (!command) throw new TypeError("Redis client does not support call/sendCommand");
       try {
         return await command.apply(redis, args);
@@ -125,7 +123,7 @@ function makeRedisStore() {
   });
 }
 
-const redisStore = config.NODE_ENV === "test" ? undefined : makeRedisStore();
+const rateLimitStore = () => (config.NODE_ENV === "test" ? undefined : makeRedisStore());
 
 // ── Limiters ──────────────────────────────────────────────────────────────────
 
@@ -142,7 +140,7 @@ export const apiLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: userAwareKey,
   passOnStoreError: true,
-  store: redisStore,
+  store: rateLimitStore(),
   handler: (req, res) => {
     record429("apiLimiter", userAwareKey(req));
     res.status(429).json({ error: "Too many requests, please try again later" });
@@ -160,7 +158,7 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: ipKey,
   passOnStoreError: true,
-  store: redisStore,
+  store: rateLimitStore(),
   handler: (req, res) => {
     record429("authLimiter", normalizeClientIp(req.ip));
     res.status(429).json({ error: "Too many login attempts, please try again later" });
@@ -178,7 +176,7 @@ export const challengeStartLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: userAwareKey,
   passOnStoreError: true,
-  store: redisStore,
+  store: rateLimitStore(),
   handler: (req, res) => {
     record429("challengeStartLimiter", userAwareKey(req));
     res.status(429).json({ error: "Too many challenge attempts" });
@@ -195,7 +193,7 @@ export const uploadLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: userAwareKey,
   passOnStoreError: true,
-  store: redisStore,
+  store: rateLimitStore(),
   handler: (req, res) => {
     record429("uploadLimiter", userAwareKey(req));
     res.status(429).json({ error: "Too many upload requests" });
@@ -212,7 +210,7 @@ export const webhookLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: false,
   keyGenerator: ipKey,
-  store: redisStore,
+  store: rateLimitStore(),
 });
 
 /**
@@ -224,7 +222,7 @@ export const phoneRateLimit = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: false,
   passOnStoreError: true,
-  store: redisStore,
+  store: rateLimitStore(),
   keyGenerator: (req) => {
     const raw = typeof req.body?.phone === "string" ? req.body.phone.replace(/\D/g, "") : "";
     return raw ? `phone:${raw}` : userAwareKey(req);
@@ -253,7 +251,7 @@ export const webhookRotationLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: userAwareKey,
   passOnStoreError: true,
-  store: redisStore,
+  store: rateLimitStore(),
   handler: (req, res) => {
     record429("webhookRotationLimiter", userAwareKey(req));
     res.status(429).json({ error: "Too many webhook rotation requests" });
@@ -271,7 +269,7 @@ export const waitlistLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: ipKey,
   passOnStoreError: true,
-  store: redisStore,
+  store: rateLimitStore(),
   handler: (req, res) => {
     record429("waitlistLimiter", normalizeClientIp(req.ip));
     res.status(429).json({ error: "Too many signup attempts, please try again later" });
@@ -287,9 +285,10 @@ export const reportLimiter = rateLimit({
   max: 5,
   standardHeaders: "draft-7",
   legacyHeaders: false,
-  keyGenerator: (req) => (req.user?.sub ? `user:${req.user.sub}` : `ip:${normalizeClientIp(req.ip)}`),
+  keyGenerator: (req) =>
+    req.user?.sub ? `user:${req.user.sub}` : `ip:${normalizeClientIp(req.ip)}`,
   passOnStoreError: true,
-  store: redisStore,
+  store: rateLimitStore(),
   handler: (req, res) => {
     const key = req.user?.sub ? `user:${req.user.sub}` : `ip:${normalizeClientIp(req.ip)}`;
     record429("reportLimiter", key);
