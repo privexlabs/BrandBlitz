@@ -7,10 +7,7 @@ import {
 import type { NetworkName } from "@brandblitz/stellar";
 import { EscrowClient, type EscrowRecipient } from "@brandblitz/stellar";
 import { getLeaderboard } from "../db/queries/sessions";
-import {
-  getChallengeById,
-  updateChallengeStatus,
-} from "../db/queries/challenges";
+import { getChallengeById, updateChallengeStatus } from "../db/queries/challenges";
 import { createPayout, updatePayoutStatus } from "../db/queries/payouts";
 import { incrementUserEarnings } from "../db/queries/users";
 import { rankWinners } from "./scoring";
@@ -32,7 +29,7 @@ async function insertPayoutNotification(
   userId: string,
   amountUsdc: string,
   txHash: string | null | undefined,
-  challengeId: string,
+  challengeId: string
 ): Promise<void> {
   try {
     await query(
@@ -40,8 +37,12 @@ async function insertPayoutNotification(
        VALUES ($1, 'payout_received', $2::jsonb)`,
       [
         userId,
-        JSON.stringify({ amount_usdc: amountUsdc, tx_hash: txHash ?? null, challenge_id: challengeId }),
-      ],
+        JSON.stringify({
+          amount_usdc: amountUsdc,
+          tx_hash: txHash ?? null,
+          challenge_id: challengeId,
+        }),
+      ]
     );
   } catch (err) {
     logger.warn("Failed to insert payout notification", { userId, err });
@@ -84,7 +85,7 @@ export async function processPayout(challengeId: string): Promise<void> {
         session.id,
         session.total_score,
         session.completed_at ?? "",
-        session.integrity_hmac,
+        session.integrity_hmac
       )
     ) {
       metrics.inc("antiCheat.integrity_hmac_tampered_total");
@@ -108,7 +109,7 @@ export async function processPayout(challengeId: string): Promise<void> {
       stellarAddress: (s.stellar_address ?? "").trim(),
       totalScore: s.total_score,
       endedAt: s.completed_at ?? s.created_at,
-    })),
+    }))
   );
 
   const eligibleWinners = ranked.filter((winner) => {
@@ -130,13 +131,27 @@ export async function processPayout(challengeId: string): Promise<void> {
     amountStroops: bigint;
   }[] = [];
 
-  for (const winner of eligibleWinners) {
-    const amountStroops = calculatePayoutShareStroops(
+  const payoutShares = eligibleWinners.map((winner) => ({
+    winner,
+    amountStroops: calculatePayoutShareStroops(
       winner.totalScore,
       totalPoints,
-      challenge.pool_amount_stroops,
-    );
+      challenge.pool_amount_stroops
+    ),
+  }));
 
+  let remainderStroops =
+    BigInt(challenge.pool_amount_stroops) -
+    payoutShares.reduce((sum, share) => sum + share.amountStroops, 0n);
+
+  for (const share of payoutShares) {
+    if (remainderStroops <= 0n) break;
+    if (share.winner.totalScore <= 0) continue;
+    share.amountStroops += 1n;
+    remainderStroops -= 1n;
+  }
+
+  for (const { winner, amountStroops } of payoutShares) {
     if (amountStroops < 1n) {
       continue;
     }
@@ -163,7 +178,7 @@ export async function processPayout(challengeId: string): Promise<void> {
             "payout",
             `${challengeId}:${winner.userId}`,
             JSON.stringify({ challengeId, userId: winner.userId }),
-          ],
+          ]
         );
         continue;
       }
@@ -252,7 +267,7 @@ export async function processPayout(challengeId: string): Promise<void> {
             reason,
           });
         },
-      },
+      }
     );
   } catch (error) {
     if (isInsufficientFeeError(error)) {
@@ -310,7 +325,7 @@ export async function processPayout(challengeId: string): Promise<void> {
   await updateChallengeStatus(
     challengeId,
     hasFailure ? "payout_failed" : "settled",
-    txHashes.length > 0 ? { payoutTxHashes: txHashes } : undefined,
+    txHashes.length > 0 ? { payoutTxHashes: txHashes } : undefined
   );
 
   if (hasFailure) {
