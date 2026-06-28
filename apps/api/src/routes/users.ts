@@ -20,6 +20,7 @@ import {
   verifyOtpWithBruteForceProtection,
 } from "../services/phone";
 import { authenticate } from "../middleware/authenticate";
+import { requireActiveUser } from "../middleware/require-active-user";
 import { createError } from "../middleware/error";
 import { redis } from "../lib/redis";
 import { apiLimiter, phoneRateLimit } from "../middleware/rate-limit";
@@ -27,6 +28,40 @@ import { getBadgesForUser } from "../services/badges";
 import { config } from "../lib/config";
 
 const router: Router = Router();
+
+const EarningsQuerySchema = z.object({
+  status: z.enum(["pending", "settled", "failed", "all"]).default("all"),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  cursor: z.string().optional(),
+});
+
+function encodeEarningsCursor(row: { created_at: string; id: string }): string {
+  return Buffer.from(JSON.stringify({ created_at: row.created_at, id: row.id })).toString(
+    "base64url"
+  );
+}
+
+function decodeEarningsCursor(
+  cursor: string | undefined
+): { created_at: string; id: string } | null {
+  if (!cursor) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      created_at?: unknown;
+      id?: unknown;
+    };
+    if (typeof parsed.created_at !== "string" || typeof parsed.id !== "string") return null;
+    return { created_at: parsed.created_at, id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
+function toLedgerStatus(status: string): "pending" | "settled" | "failed" {
+  if (status === "confirmed" || status === "sent") return "settled";
+  if (status === "failed") return "failed";
+  return "pending";
+}
 
 /**
  * GET /users/me
@@ -150,6 +185,92 @@ router.get("/me/referrals", authenticate, async (req, res) => {
   });
 });
 
+router.get("/me/earnings", authenticate, requireActiveUser, async (req, res) => {
+  const parsed = EarningsQuerySchema.safeParse(req.query);
+  if (!parsed.success) throw createError("Invalid query parameters", 400, "INVALID_QUERY");
+
+  const { status, limit } = parsed.data;
+  const cursor = decodeEarningsCursor(parsed.data.cursor);
+  if (parsed.data.cursor && !cursor) throw createError("Invalid cursor", 400, "INVALID_CURSOR");
+
+  const params: unknown[] = [req.user!.sub];
+  const where: string[] = ["user_id = $1"];
+
+  if (status !== "all") {
+    if (status === "settled") {
+      where.push(`status IN ('sent', 'confirmed')`);
+    } else {
+      params.push(status);
+      where.push(`status = $${params.length}`);
+    }
+  }
+
+  if (cursor) {
+    params.push(cursor.created_at, cursor.id);
+    where.push(
+      `(created_at < $${params.length - 1} OR (created_at = $${params.length - 1} AND id < $${params.length}))`
+    );
+  }
+
+  params.push(limit + 1);
+
+  const rows = await query<{
+    id: string;
+    challenge_id: string;
+    amount_usdc: string;
+    status: string;
+    created_at: string;
+    settled_at: string | null;
+    tx_hash: string | null;
+  }>(
+    `SELECT
+       id,
+       challenge_id,
+       (amount_stroops::numeric / 10000000)::numeric(20,7)::text AS amount_usdc,
+       status,
+       created_at,
+       CASE WHEN status IN ('sent', 'confirmed') THEN updated_at ELSE NULL END AS settled_at,
+       tx_hash
+     FROM payouts
+     WHERE ${where.join(" AND ")}
+     ORDER BY created_at DESC, id DESC
+     LIMIT $${params.length}`,
+    params
+  );
+
+  const totals = await query<{
+    lifetime_earned_usdc: string;
+    pending_usdc: string;
+  }>(
+    `SELECT
+       COALESCE(SUM(amount_stroops) FILTER (WHERE status IN ('sent', 'confirmed')), 0)::numeric / 10000000 AS lifetime_earned_usdc,
+       COALESCE(SUM(amount_stroops) FILTER (WHERE status = 'pending'), 0)::numeric / 10000000 AS pending_usdc
+     FROM payouts
+     WHERE user_id = $1`,
+    [req.user!.sub]
+  );
+
+  const pageRows = rows.rows.slice(0, limit);
+  const nextRow = rows.rows.length > limit ? rows.rows[limit] : null;
+
+  res.json({
+    items: pageRows.map((row) => ({
+      payout_id: row.id,
+      amount_usdc: row.amount_usdc,
+      status: toLedgerStatus(row.status),
+      created_at: row.created_at,
+      settled_at: row.settled_at,
+      stellar_tx_hash: row.tx_hash ?? null,
+      challenge_id: row.challenge_id,
+    })),
+    nextCursor: nextRow ? encodeEarningsCursor(nextRow) : null,
+    totals: {
+      lifetime_earned_usdc: totals.rows[0]?.lifetime_earned_usdc ?? "0",
+      pending_usdc: totals.rows[0]?.pending_usdc ?? "0",
+    },
+  });
+});
+
 router.post("/streaks/repair", authenticate, async (req, res) => {
   const repaired = await repairStreak(req.user!.sub);
   if (!repaired) {
@@ -267,10 +388,7 @@ router.patch("/me/profile", authenticate, async (req, res) => {
   }
 
   // Trigger Next.js cache revalidation so profile pages reflect the new data
-  const revalidatePaths = [
-    `/profile/${oldUsername}`,
-    `/profile/${newUsername}`,
-  ];
+  const revalidatePaths = [`/profile/${oldUsername}`, `/profile/${newUsername}`];
 
   try {
     await fetch(`${config.WEB_URL}/api/revalidate`, {
@@ -387,10 +505,9 @@ router.patch("/me/notifications/:id/read", authenticate, async (req, res) => {
  * Marks all unread notifications as read.
  */
 router.patch("/me/notifications/read-all", authenticate, async (req, res) => {
-  await query(
-    `UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL`,
-    [req.user!.sub]
-  );
+  await query(`UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL`, [
+    req.user!.sub,
+  ]);
 
   res.json({ success: true });
 });
