@@ -8,17 +8,23 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { s3, BUCKETS, getPublicUrl } from "@brandblitz/storage";
+import {
+  s3,
+  BUCKETS,
+  getPublicUrl,
+  PRESIGNED_URL_TTL_SECONDS,
+} from "@brandblitz/storage";
 import { redis } from "../lib/redis";
 import { authenticate } from "../middleware/authenticate";
 import { uploadLimiter } from "../middleware/rate-limit";
 import { createError } from "../middleware/error";
+import { logger } from "../lib/logger";
 
 /** Redis key that proves a user owns a pending upload. TTL must outlive the
- *  presign window (60 s) plus the verify-retry window (~1.7 s × 3). 300 s is
- *  a generous but bounded limit — orphans not aborted within 5 min are swept
- *  by the server-side reaper (see docs/13-file-storage.md). */
-const PENDING_UPLOAD_TTL_SECONDS = 300;
+ *  presign window plus the verify-retry window (~1.7 s × 3), so it is anchored
+ *  to PRESIGNED_URL_TTL_SECONDS with a 60 s margin. Orphans not aborted within
+ *  this window are swept by the server-side reaper (see docs/13-file-storage.md). */
+const PENDING_UPLOAD_TTL_SECONDS = PRESIGNED_URL_TTL_SECONDS + 60;
 
 function pendingUploadKey(userId: string, s3Key: string): string {
   return `upload:pending:${userId}:${s3Key}`;
@@ -36,20 +42,30 @@ const ALLOWED_CONTENT_TYPES = [
   "image/png",
   "image/jpeg",
   "image/webp",
-  "image/svg+xml",
 ] as const;
 
 type AllowedMime = typeof ALLOWED_CONTENT_TYPES[number];
 
+/**
+ * Maximum allowed size (in bytes) for an uploaded object, derived from the key
+ * prefix. Enforced on /verify before any file bytes are read so an oversized
+ * object is rejected up front (issue #505).
+ */
+function maxBytesForKey(key: string): number {
+  if (key.startsWith("products/")) return ALLOWED_UPLOAD_TYPES["product-image"].maxMb * 1024 * 1024;
+  if (key.startsWith("avatars/")) return ALLOWED_UPLOAD_TYPES["user-avatar"].maxMb * 1024 * 1024;
+  return ALLOWED_UPLOAD_TYPES["brand-logo"].maxMb * 1024 * 1024;
+}
+
 const PresignSchema = z.object({
   type: z.enum(["brand-logo", "product-image", "user-avatar"]),
-  contentType: z.enum(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]),
+  contentType: z.enum(["image/png", "image/jpeg", "image/webp"]),
   contentLength: z.number().int().positive(),
 });
 
 /**
  * Detect MIME type from the first bytes of a buffer using magic numbers.
- * Returns one of the four allowed MIME strings, or null if unrecognised.
+ * Returns one of the allowed MIME strings, or null if unrecognised.
  */
 function detectMime(buf: Buffer): AllowedMime | null {
   if (buf.length < 3) return null;
@@ -70,55 +86,7 @@ function detectMime(buf: Buffer): AllowedMime | null {
   ) {
     return "image/webp";
   }
-  // SVG: XML or SVG text (after optional BOM / whitespace)
-  const text = buf.toString("utf8", 0, Math.min(buf.length, 128)).trimStart();
-  if (text.startsWith("<svg") || text.startsWith("<?xml") || text.startsWith("<!DOCTYPE svg")) {
-    return "image/svg+xml";
-  }
-
   return null;
-}
-
-/**
- * Decode common XML/HTML character references so encoded payloads like
- * `&#106;avascript:` or `&#x6A;avascript:` are normalised before scanning.
- * Only decodes numeric references; named references (&amp; etc.) that
- * are safe in SVG attribute values are left intact.
- */
-function decodeXmlEntities(s: string): string {
-  return s
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex) =>
-      String.fromCodePoint(parseInt(hex, 16))
-    )
-    .replace(/&#([0-9]+);/g, (_, dec) =>
-      String.fromCodePoint(parseInt(dec, 10))
-    );
-}
-
-/**
- * SVG XSS patterns applied after entity decoding.
- *
- * Blocklist limitations are acknowledged: XML namespace tricks,
- * CSS-based attacks in <style>, and novel parser differentials are not
- * covered here. For full mitigation, serve user-uploaded SVGs from a
- * separate cookieless origin with `Content-Disposition: attachment` and
- * `Content-Security-Policy: default-src 'none'; sandbox`.
- */
-const SVG_DANGEROUS_PATTERNS: RegExp[] = [
-  /<script/i,
-  /\bon\w+\s*=/i,                               // event handlers (onload=, onerror=, …)
-  /javascript\s*:/i,                             // javascript: URIs
-  /vbscript\s*:/i,                               // vbscript: URIs (IE legacy)
-  /<foreignObject/i,                             // HTML namespace embedding
-  /\bhref\s*=\s*["']?\s*data\s*:/i,             // data: URIs in any href
-  /\bsrc\s*=\s*["']?\s*data\s*:/i,              // data: URIs in any src
-  /\baction\s*=\s*["']?\s*data\s*:/i,           // data: URIs in form action
-  /<use[^>]+(?:xlink:)?href\s*=\s*["']https?:/i, // external <use> references
-];
-
-function isSvgSafe(rawContent: string): boolean {
-  const content = decodeXmlEntities(rawContent);
-  return !SVG_DANGEROUS_PATTERNS.some((pattern) => pattern.test(content));
 }
 
 /**
@@ -146,7 +114,20 @@ router.post("/presign", authenticate, uploadLimiter, async (req, res) => {
     ContentLength: contentLength,
   });
 
-  const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 60 });
+  let uploadUrl: string;
+  try {
+    uploadUrl = await getSignedUrl(s3, command, {
+      expiresIn: PRESIGNED_URL_TTL_SECONDS,
+    });
+  } catch (err) {
+    // Never swallow an S3 signing failure — log it and return a structured error.
+    logger.error("Failed to generate presigned upload URL", {
+      userId: req.user!.sub,
+      type,
+      error: (err as Error).message,
+    });
+    throw createError("Failed to generate upload URL", 502, "S3_PRESIGN_FAILED");
+  }
 
   // Record ownership so /abort can verify the caller created this key
   await redis.set(
@@ -160,7 +141,7 @@ router.post("/presign", authenticate, uploadLimiter, async (req, res) => {
     uploadUrl,
     key,
     publicUrl: getPublicUrl(config.bucket, key),
-    expiresIn: 60,
+    expiresIn: PRESIGNED_URL_TTL_SECONDS,
   });
 });
 
@@ -168,14 +149,9 @@ router.post("/presign", authenticate, uploadLimiter, async (req, res) => {
  * POST /upload/verify
  * Verify a file was actually uploaded and its content matches the declared MIME type.
  *
- * For binary formats (PNG/JPEG/WebP): reads the first 16 bytes via a Range
- * request and validates magic bytes against the declared ContentType.
- *
- * For SVG: fetches the complete file content (bounded by the 2 MB presign limit)
- * and applies a comprehensive block-list of XSS execution vectors. A partial
- * read is not sufficient because payloads can appear anywhere in the document.
- *
- * Deletes the object and returns 400 on any validation failure.
+ * Reads the first 16 bytes via a Range request and validates magic bytes
+ * against the declared ContentType. Deletes the object and returns 400 on
+ * any validation failure.
  */
 router.post("/verify", authenticate, async (req, res) => {
   const { key } = z.object({ key: z.string() }).parse(req.body);
@@ -184,52 +160,74 @@ router.post("/verify", authenticate, async (req, res) => {
     ? BUCKETS.BRAND_ASSETS
     : BUCKETS.SHARE_CARDS;
 
-  // Step 1: confirm object exists and get its declared ContentType
+  // Step 1: confirm object exists and get its declared ContentType + size
   let declaredMime: string;
+  let contentLength: number | undefined;
   try {
     const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
     declaredMime = head.ContentType ?? "";
+    contentLength = head.ContentLength;
   } catch {
     throw createError("File not found in storage", 404);
   }
 
-  // Only validate MIME for the four explicitly allowed types
+  // Enforce the maximum file size before reading any bytes for magic-byte
+  // inspection, so an oversized object can never trigger byte reads (issue #505).
+  const maxBytes = maxBytesForKey(key);
+  if (typeof contentLength === "number" && contentLength > maxBytes) {
+    await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    throw createError(
+      `File exceeds maximum allowed size of ${Math.floor(maxBytes / (1024 * 1024))}MB`,
+      413,
+      "FILE_TOO_LARGE"
+    );
+  }
+
+  // Only validate MIME for the explicitly allowed types
   if (!(ALLOWED_CONTENT_TYPES as readonly string[]).includes(declaredMime)) {
     await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
     throw createError("Declared content type is not allowed", 400);
   }
 
-  async function deleteAndReject(message: string): Promise<never> {
-    await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
-    throw createError(message, 400);
-  }
-
-  // Step 2: fetch file content for inspection
-  //   - Binary formats: first 16 bytes is sufficient for magic number detection
-  //   - SVG: full file required for complete XSS scanning
-  const isSvg = declaredMime === "image/svg+xml";
-  const rangeHeader = isSvg ? undefined : "bytes=0-15";
-
+  // Step 2: fetch file header for magic-byte validation
   let buf: Buffer;
   try {
     const obj = await s3.send(
-      new GetObjectCommand({ Bucket: bucket, Key: key, Range: rangeHeader })
+      new GetObjectCommand({ Bucket: bucket, Key: key, Range: "bytes=0-15" })
     );
     const bytes = await (obj.Body as { transformToByteArray(): Promise<Uint8Array> }).transformToByteArray();
     buf = Buffer.from(bytes);
-  } catch {
-    throw createError("Failed to read file from storage", 500);
+  } catch (err) {
+    // Surface S3 read failures server-side rather than letting them vanish.
+    logger.error("Failed to read uploaded file from storage", {
+      userId: req.user!.sub,
+      key,
+      bucket,
+      error: (err as Error).message,
+    });
+    throw createError("Failed to read file from storage", 502, "S3_READ_FAILED");
   }
 
   // Step 3: validate detected MIME against declared MIME
   const detected = detectMime(buf);
   if (detected !== declaredMime) {
-    return deleteAndReject("File content does not match declared content type");
-  }
-
-  // Step 4: comprehensive SVG XSS scan across the full file content
-  if (isSvg && !isSvgSafe(buf.toString("utf8"))) {
-    return deleteAndReject("SVG contains disallowed content");
+    // Renamed/forged upload: log as a security event with the actor and request
+    // correlation id, then reject with 415 Unsupported Media Type (issue #505).
+    logger.warn("Upload rejected: file signature does not match declared type", {
+      event: "upload_mime_mismatch",
+      userId: req.user!.sub,
+      requestId: res.locals.requestId,
+      key,
+      bucket,
+      declaredMime,
+      detectedMime: detected,
+    });
+    await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    throw createError(
+      "File content does not match declared content type",
+      415,
+      "UNSUPPORTED_MEDIA_TYPE"
+    );
   }
 
   // Remove ownership record now that the upload is committed

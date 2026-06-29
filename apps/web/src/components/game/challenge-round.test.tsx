@@ -85,6 +85,56 @@ describe("ChallengeRound", () => {
     expect(onAnswer).toHaveBeenCalledWith("A", expect.any(Number));
   });
 
+  it("shows an optimistic pending state and disables every option", () => {
+    render(
+      <ChallengeRound
+        question={buildQuestion()}
+        round={1}
+        onAnswer={vi.fn()}
+        answerState={{ selectedOption: "B", status: "pending", correct: null }}
+      />
+    );
+
+    expect(screen.getByLabelText("Submitting answer")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "B: Adidas" })).toHaveAttribute("aria-pressed", "true");
+    for (const button of screen.getAllByRole("button", { name: /^[A-D]:/ })) {
+      expect(button).toBeDisabled();
+    }
+  });
+
+  it("rolls back optimistic state when answerState returns to null", () => {
+    const onAnswer = vi.fn();
+    const { rerender } = render(
+      <ChallengeRound
+        question={buildQuestion()}
+        round={1}
+        onAnswer={onAnswer}
+        answerState={{ selectedOption: "C", status: "pending", correct: null }}
+      />
+    );
+
+    rerender(<ChallengeRound question={buildQuestion()} round={1} onAnswer={onAnswer} answerState={null} />);
+    fireEvent.click(screen.getByText("Reebok"));
+
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    expect(onAnswer).toHaveBeenCalledWith("D", expect.any(Number));
+  });
+
+  it("reconciles successful answer state from the server response", () => {
+    render(
+      <ChallengeRound
+        question={buildQuestion()}
+        round={1}
+        onAnswer={vi.fn()}
+        answerState={{ selectedOption: "A", status: "settled", correct: true }}
+      />
+    );
+
+    const selected = screen.getByRole("button", { name: "A: Nike" });
+    expect(selected).toHaveAttribute("aria-pressed", "true");
+    expect(selected.className).toContain("green");
+  });
+
   it("timer reaching 0 calls onAnswer with null option and rtMs = ROUND_SECONDS * 1000", () => {
     const onAnswer = vi.fn();
     render(<ChallengeRound question={buildQuestion()} round={1} onAnswer={onAnswer} />);
@@ -123,7 +173,7 @@ describe("ChallengeRound", () => {
 
     const img = container.querySelector('img[alt="Brand prompt"]') as HTMLImageElement;
     expect(img).not.toBeNull();
-    expect(img.src).toBe("https://example.com/logo.png");
+    expect(img).toHaveAttribute("src", "https://example.com/logo.png");
   });
 
   it("renders product image when prompt_type is 'productImage1' and brandProductImageUrl is provided", () => {
@@ -141,7 +191,7 @@ describe("ChallengeRound", () => {
 
     const img = container.querySelector('img[alt="Product prompt"]') as HTMLImageElement;
     expect(img).not.toBeNull();
-    expect(img.src).toBe("https://example.com/product.png");
+    expect(img).toHaveAttribute("src", "https://example.com/product.png");
   });
 
   it("does not render images when prompt_type does not match or URLs are missing", () => {

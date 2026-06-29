@@ -6,18 +6,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getActiveChallenges: vi.fn(),
   getChallengeById: vi.fn(),
+  getChallengeByIdAny: vi.fn(),
   getChallengesByBrandId: vi.fn(),
   getChallengeQuestions: vi.fn(),
   getBrandById: vi.fn(),
   getLeaderboard: vi.fn(),
   authMockUser: null as any,
+  dbQuery: vi.fn().mockResolvedValue({ rows: [] }),
+  mockClient: {
+    query: vi.fn().mockResolvedValue({ rows: [] }),
+    release: vi.fn(),
+  },
 }));
 
 vi.mock("../db/queries/challenges", () => ({
   getActiveChallenges: mocks.getActiveChallenges,
   getChallengeById: mocks.getChallengeById,
+  getChallengeByIdAny: mocks.getChallengeByIdAny,
   getChallengesByBrandId: mocks.getChallengesByBrandId,
   getChallengeQuestions: mocks.getChallengeQuestions,
+}));
+
+vi.mock("../db/index", () => ({
+  query: mocks.dbQuery,
+  pool: { connect: () => Promise.resolve(mocks.mockClient) },
+}));
+
+vi.mock("../middleware/rate-limit", () => ({
+  apiLimiter: (_req: any, _res: any, next: any) => next(),
+  reportLimiter: (_req: any, _res: any, next: any) => next(),
 }));
 
 vi.mock("../db/queries/brands", () => ({
@@ -38,6 +55,18 @@ vi.mock("../middleware/authenticate", () => ({
     req.user = mocks.authMockUser;
     next();
   },
+}));
+
+vi.mock("../lib/redis", () => ({
+  redis: {
+    get: mocks.redisGet,
+    set: mocks.redisSet,
+    del: vi.fn(),
+  },
+}));
+
+vi.mock("../lib/config", () => ({
+  config: { HOT_WALLET_PUBLIC_KEY: "GHOTWALLETADDRESS" },
 }));
 
 import { errorHandler } from "../middleware/error";
@@ -67,6 +96,8 @@ describe("challenges routes", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mocks.authMockUser = null;
+    mocks.redisGet.mockResolvedValue(null);
+    mocks.redisSet.mockResolvedValue("OK");
     
     const s = await startServer();
     currentServer = s.server;
@@ -150,7 +181,7 @@ describe("challenges routes", () => {
 
   describe("GET /challenges/:id", () => {
     it("returns 404 for non-existent challenge ID", async () => {
-      mocks.getChallengeById.mockResolvedValue(null);
+      mocks.getChallengeByIdAny.mockResolvedValue(null);
       
       const response = await fetch(`${baseUrl}/challenges/not-found`);
       expect(response.status).toBe(404);
@@ -160,7 +191,7 @@ describe("challenges routes", () => {
 
     it("returns challenge detail and strictly strips 'correct_option' and 'correct_answer' from questions", async () => {
       const mockChallenge = { id: "chal-secret" };
-      mocks.getChallengeById.mockResolvedValue(mockChallenge);
+      mocks.getChallengeByIdAny.mockResolvedValue(mockChallenge);
 
       const mockQuestions = [
         {
@@ -195,17 +226,102 @@ describe("challenges routes", () => {
       expect(data.questions[1]).not.toHaveProperty("correct_option");
       expect(data.questions[1]).not.toHaveProperty("correct_answer");
     });
+
+    it("returns 304 from the cached representation without querying the database", async () => {
+      const cachedPayload = {
+        challenge: { id: "chal-cached", updated_at: "2026-01-01T00:00:00.000Z" },
+        questions: [{ id: "q1", option_a: "A" }],
+      };
+      mocks.redisGet.mockResolvedValue(JSON.stringify(cachedPayload));
+
+      const first = await fetch(`${baseUrl}/challenges/chal-cached`);
+      const etag = first.headers.get("etag");
+      expect(first.status).toBe(200);
+      expect(etag).toMatch(/^"[a-f0-9]{64}"$/);
+      expect(first.headers.get("cache-control")).toBe("no-cache");
+
+      const conditional = await fetch(`${baseUrl}/challenges/chal-cached`, {
+        headers: { "If-None-Match": etag! },
+      });
+      expect(conditional.status).toBe(304);
+      expect(await conditional.text()).toBe("");
+      expect(mocks.getChallengeByIdAny).not.toHaveBeenCalled();
+      expect(mocks.getChallengeQuestions).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("POST /challenges/:id/report", () => {
+    const challengeId = "00000000-0000-0000-0000-000000000001";
+    const userId = "00000000-0000-0000-0000-000000000002";
+
+    beforeEach(() => {
+      mocks.authMockUser = { sub: userId };
+      mocks.getChallengeByIdAny.mockResolvedValue({ id: challengeId, archived: false });
+      // First call: check for existing report (none found)
+      // Subsequent calls in the transaction handled by mockClient.query
+      mocks.mockClient.query.mockReset();
+      mocks.mockClient.query
+        .mockResolvedValueOnce(undefined) // BEGIN
+        .mockResolvedValueOnce({ rows: [] }) // SELECT from challenge_reports (not found)
+        .mockResolvedValueOnce(undefined) // INSERT challenge_reports
+        .mockResolvedValueOnce(undefined) // UPDATE challenges reported_count
+        .mockResolvedValueOnce(undefined); // COMMIT
+    });
+
+    it("returns 201 on successful report", async () => {
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "misleading_content" }),
+      });
+      expect(response.status).toBe(201);
+      const data: any = await response.json();
+      expect(data.success).toBe(true);
+    });
+
+    it("returns 409 when user has already reported this challenge", async () => {
+      mocks.mockClient.query.mockReset();
+      mocks.mockClient.query
+        .mockResolvedValueOnce(undefined) // BEGIN
+        .mockResolvedValueOnce({ rows: [{ id: "existing-report" }] }) // SELECT finds existing
+        .mockResolvedValueOnce(undefined); // ROLLBACK
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "other" }),
+      });
+      expect(response.status).toBe(409);
+    });
+
+    it("returns 401 when unauthenticated", async () => {
+      mocks.authMockUser = null;
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "other" }),
+      });
+      expect(response.status).toBe(401);
+    });
+
+    it("returns 429 when rate limiter blocks the request", async () => {
+      // Override the rate limiter mock to simulate rejection
+      vi.doMock("../middleware/rate-limit", () => ({
+        apiLimiter: (_req: any, _res: any, next: any) => next(),
+        reportLimiter: (_req: any, res: any) =>
+          res.status(429).json({ error: "Too many report requests, please try again later" }),
+      }));
+    });
   });
 
   describe("GET /challenges/:id/leaderboard", () => {
     it("returns 404 for non-existent challenge ID on leaderboard endpoint", async () => {
-      mocks.getChallengeById.mockResolvedValue(null);
+      mocks.getChallengeByIdAny.mockResolvedValue(null);
       const response = await fetch(`${baseUrl}/challenges/not-found/leaderboard`);
       expect(response.status).toBe(404);
     });
 
     it("paginates and maps leaderboard outputs cleanly mapping total_score DESC effectively", async () => {
-      mocks.getChallengeById.mockResolvedValue({ id: "chal-leader" });
+      mocks.getChallengeByIdAny.mockResolvedValue({ id: "chal-leader" });
       
       const mockSessions = [
         { username: "Alice", avatar_url: "alice.png", total_score: 500, completed_at: "time1" },

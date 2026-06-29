@@ -39,6 +39,10 @@ vi.mock("../middleware/authenticate", () => ({
   },
 }));
 
+vi.mock("../middleware/require-tos", () => ({
+  requireCurrentTosAccepted: (_req: any, _res: any, next: any) => next(),
+}));
+
 vi.mock("@brandblitz/storage", () => ({
   optimizeImage: vi.fn(),
   getPublicUrl: (_bucket: string, key: string) => `https://storage.example.com/${key}`,
@@ -239,5 +243,29 @@ describe("POST /brands/challenges distractor integration", () => {
     );
 
     expect(hasFallbackOption).toBe(true);
+  });
+
+  it("rejects challenge creation when endsAt is in the past", async () => {
+    const response = await postChallenge({
+      brandId,
+      poolAmountUsdc: "50.0000000",
+      endsAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.data.error).toBe("Challenge end time must be in the future");
+    expect(mocks.createChallenge).not.toHaveBeenCalled();
+  });
+
+  it("rejects challenge creation when duration is less than one hour", async () => {
+    const response = await postChallenge({
+      brandId,
+      poolAmountUsdc: "50.0000000",
+      endsAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.data.error).toBe("Challenge duration must be at least 1 hour");
+    expect(mocks.createChallenge).not.toHaveBeenCalled();
   });
 });

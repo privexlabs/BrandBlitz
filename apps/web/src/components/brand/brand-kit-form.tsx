@@ -17,6 +17,8 @@ interface BrandKitFormProps {
 }
 
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/;
+const MIN_CHALLENGE_DURATION_HOURS = 1;
+const MAX_CHALLENGE_DURATION_HOURS = 720;
 
 export function BrandKitForm({ apiToken }: BrandKitFormProps) {
   const router = useRouter();
@@ -44,8 +46,8 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
   const hasValidDuration =
     fields.durationHours.trim() !== "" &&
     Number.isInteger(Number(fields.durationHours)) &&
-    Number(fields.durationHours) >= 1 &&
-    Number(fields.durationHours) <= 720;
+    Number(fields.durationHours) >= MIN_CHALLENGE_DURATION_HOURS &&
+    Number(fields.durationHours) <= MAX_CHALLENGE_DURATION_HOURS;
   const canSubmit =
     !submitting &&
     hasRequiredFields &&
@@ -63,7 +65,11 @@ const FormSchema = z.object({
   poolAmountUsdc: z.string().refine((val) => Number(val) >= 10, "Minimum pool amount is 10 USDC"),
   durationHours: z.string().refine((val) => {
     const num = Number(val);
-    return Number.isInteger(num) && num >= 1 && num <= 720;
+    return (
+      Number.isInteger(num) &&
+      num >= MIN_CHALLENGE_DURATION_HOURS &&
+      num <= MAX_CHALLENGE_DURATION_HOURS
+    );
   }, "Duration must be between 1 and 720 hours"),
 });
 
@@ -109,7 +115,13 @@ const FormSchema = z.object({
         const durationHours = Number.isFinite(parsedDurationHours) && parsedDurationHours > 0
           ? parsedDurationHours
           : 72;
-        const endsAt = new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
+        const nowMs = Date.now();
+        const endsAtMs = nowMs + durationHours * 60 * 60 * 1000;
+        if (endsAtMs < nowMs + MIN_CHALLENGE_DURATION_HOURS * 60 * 60 * 1000) {
+          setError("Challenge duration must be at least 1 hour.");
+          return;
+        }
+        const endsAt = new Date(endsAtMs).toISOString();
 
         // Fix path if it should be /challenges instead of /brands/challenges or vice-versa
         // Assuming backend uses /brands/challenges based on the routes
@@ -312,8 +324,8 @@ const FormSchema = z.object({
             <Input
               id="durationHours"
               type="number"
-              min="1"
-              max="720"
+              min={MIN_CHALLENGE_DURATION_HOURS}
+              max={MAX_CHALLENGE_DURATION_HOURS}
               value={fields.durationHours}
               onChange={set("durationHours")}
             />

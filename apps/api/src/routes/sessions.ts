@@ -4,27 +4,32 @@ import { getChallengeById, getChallengeQuestions } from "../db/queries/challenge
 import {
   getSession,
   markWarmupStarted,
-  markWarmupCompleted,
   markChallengeStarted,
   recordRoundScore,
   finishSession,
   storeSessionHmac,
+  deleteOpenSession,
+  abandonSession,
 } from "../db/queries/sessions";
-import { calculateRoundScore, validateAnswer } from "../services/scoring";
+import { calculateRoundScore, completeWarmupWithLock, validateAnswer, validateRoundScore } from "../services/scoring";
 import { authenticate } from "../middleware/authenticate";
 import { requireActiveUser } from "../middleware/require-active-user";
 import {
   enforceOneSessionPerChallenge,
   validateReactionTime,
   validateDeviceFingerprint,
+  assertValidTotalScore,
+  requireSessionStartAllowed,
 } from "../middleware/anti-cheat";
 import { createError } from "../middleware/error";
 import { challengeStartLimiter } from "../middleware/rate-limit";
 import { redis } from "../lib/redis";
 import { computeSessionHmac } from "../lib/integrity";
 import { updateStreak } from "../services/streaks";
+import { checkAndAwardSessionBadges } from "../services/badges";
 import { WARMUP_MIN_SECONDS } from "@brandblitz/stellar";
 import { tokenRevocationKey, tokenTtlSeconds } from "../middleware/authenticate";
+import { revalidateLeaderboard } from "../lib/revalidate";
 
 const router = Router();
 
@@ -47,6 +52,87 @@ async function revokeSessionToken(sessionId: string, token: string, exp: number)
 const AnswerSchema = z.object({
   selectedOption: z.enum(["A", "B", "C", "D"]).nullable(),
   reactionTimeMs: z.number().int().min(0),
+});
+
+function lastAnsweredRound(session: {
+  round_1_answer?: string | null;
+  round_1_score?: number;
+  round_2_answer?: string | null;
+  round_2_score?: number;
+  round_3_answer?: string | null;
+  round_3_score?: number;
+}): 0 | 1 | 2 | 3 {
+  if (session.round_3_answer || (session.round_3_score ?? 0) > 0) return 3;
+  if (session.round_2_answer || (session.round_2_score ?? 0) > 0) return 2;
+  if (session.round_1_answer || (session.round_1_score ?? 0) > 0) return 1;
+  return 0;
+}
+
+function recoveryStatus(session: {
+  status?: string;
+  completed_at?: string | Date | null;
+  challenge_started_at?: string | Date | null;
+}): "warmup" | "in_progress" | "completed" | "expired" {
+  if (session.completed_at || session.status === "completed") return "completed";
+  if (session.status === "abandoned") return "expired";
+  if (session.challenge_started_at || session.status === "active") return "in_progress";
+  return "warmup";
+}
+
+function remainingTimeMs(session: { challenge_started_at?: string | Date | null }): number {
+  if (!session.challenge_started_at) return 45_000;
+  const startedAt = new Date(session.challenge_started_at).getTime();
+  if (!Number.isFinite(startedAt)) return 45_000;
+  return Math.max(0, 45_000 - (Date.now() - startedAt));
+}
+
+/**
+ * GET /sessions/:challengeId
+ * Return the authenticated user's current session progress for recovery UI.
+ */
+router.get("/:challengeId", authenticate, async (req, res) => {
+  const challengeId = String(req.params.challengeId);
+  const challenge = await getChallengeById(challengeId);
+  if (!challenge) throw createError("Challenge not found", 404);
+
+  const session = await getSession(req.user!.sub, challenge.id);
+  if (!session) throw createError("Session not found", 404);
+  if (session.user_id !== req.user!.sub) throw createError("Forbidden", 403);
+
+  const lastRound = lastAnsweredRound(session);
+  const totalScore =
+    session.total_score ||
+    (session.round_1_score ?? 0) + (session.round_2_score ?? 0) + (session.round_3_score ?? 0);
+
+  res.json({
+    session: {
+      id: session.id,
+      status: recoveryStatus(session),
+      last_answered_round: lastRound,
+      current_round: Math.min(lastRound + 1, 3),
+      remaining_time_ms: remainingTimeMs(session),
+      total_score: totalScore,
+      round_scores: [session.round_1_score, session.round_2_score, session.round_3_score],
+    },
+  });
+});
+
+/**
+ * DELETE /sessions/:challengeId
+ * Explicitly quit an active or warmup session, recording abandon_reason = 'explicit'.
+ * The row is soft-abandoned (not deleted) so the reason is preserved for analytics
+ * and fraud detection. A subsequent warmup-start call will detect the abandoned
+ * session and create a fresh one via enforceOneSessionPerChallenge.
+ */
+router.delete("/:challengeId", authenticate, async (req, res) => {
+  const challengeId = String(req.params.challengeId);
+  const challenge = await getChallengeById(challengeId);
+  if (!challenge) throw createError("Challenge not found", 404);
+
+  const abandoned = await abandonSession(req.user!.sub, challenge.id, "explicit");
+  if (!abandoned) throw createError("No open session to forfeit", 404);
+
+  res.status(204).send();
 });
 
 /**
@@ -136,6 +222,7 @@ router.post(
   authenticate,
   requireActiveUser,
   challengeStartLimiter,
+  requireSessionStartAllowed,
   async (req, res) => {
     const { challengeToken } = z.object({ challengeToken: z.string() }).parse(req.body);
     const challengeId = String(req.params.challengeId);
@@ -150,6 +237,7 @@ router.post(
     if (!session || session.id !== storedSessionId) throw createError("Session mismatch", 403);
 
     await markChallengeStarted(session.id);
+    await query("UPDATE users SET last_active_at = NOW() WHERE id = $1", [req.user!.sub]);
     await redis.del(`challenge-token:${challengeToken}`);
 
     // Store session start time for timing validation
@@ -187,95 +275,81 @@ router.post(
     if (session.user_id !== req.user!.sub) throw createError("Forbidden", 403);
     if (!session.challenge_started_at) throw createError("Challenge not started", 400);
 
-    // Edge Cases
-    if (session.completed_at) throw createError("Session already completed", 409);
+    if (session.completed_at && round !== 3) {
+      throw createError("Session already completed", 409);
+    }
     if ((session as any).is_flagged || session.flagged) {
       throw createError("Session flagged for review", 403);
     }
-    
+
     // Double answer check
-    const existingScores = (session as any).scores || []; // Assume scores are joined or we need to check DB
+    const existingScores = (session as any).scores || [];
     if (existingScores.some((s: any) => s.round === round)) {
       throw createError("Round already answered", 400);
     }
-router.post("/:challengeId/answer/:round", authenticate, validateReactionTime, async (req, res) => {
-  const round = parseInt(req.params.round) as 1 | 2 | 3;
-  if (![1, 2, 3].includes(round)) throw createError("Invalid round", 400);
 
-  const body = AnswerSchema.parse(req.body);
-  const challenge = await getChallengeById(req.params.challengeId);
-  if (!challenge) throw createError("Challenge not found", 404);
+    const questions = await getChallengeQuestions(challenge.id);
+    const question = questions.find((q) => q.round === round);
+    if (!question) throw createError("Question not found", 404);
 
-  const session = await getSession(req.user!.sub, challenge.id);
-  if (!session) throw createError("Session not found", 404);
-  if (session.user_id !== req.user!.sub) throw createError("Forbidden", 403);
-  if (!session.challenge_started_at) throw createError("Challenge not started", 400);
+    if (session.completed_at && round === 3) {
+      if (session.round_3_answer !== body.selectedOption) {
+        throw createError("Answer conflict detected", 409, "CONFLICT_REPLAY");
+      }
+      return res.json({
+        correct: validateAnswer(question, body.selectedOption),
+        score: session.round_3_score,
+        round: 3,
+        total_score: session.total_score,
+        rank: session.rank ?? null,
+      });
+    }
 
-  // For non-round-3, a completed session is always a hard stop
-  if (session.completed_at && round !== 3) {
-    throw createError("Session already completed", 409);
-  }
-  if (session.is_flagged) throw createError("Session flagged for review", 403);
+    const score = calculateRoundScore({
+      selectedOption: body.selectedOption,
+      correctOption: question.correct_option,
+      reactionTimeMs: body.reactionTimeMs,
+    });
 
-  // Double answer check
-  const existingScores = (session as any).scores || [];
-  if (existingScores.some((s: any) => s.round === round)) {
-    throw createError("Round already answered", 400);
-  }
+    const scoreCheck = validateRoundScore(score);
+    if (!scoreCheck.valid) {
+      throw createError(scoreCheck.message, 422, scoreCheck.code);
+    }
 
-  // Get the server-stored question for this round
-  const questions = await getChallengeQuestions(challenge.id);
-  const question = questions.find((q) => q.round === round);
-  if (!question) throw createError("Question not found", 404);
+    await recordRoundScore(session.id, round, score, body.selectedOption, body.reactionTimeMs);
 
-    // On last round — finalize the session
     if (round === 3) {
-      await finishSession(session.id);
+      const completed = await finishSession(session.id);
+      if (completed) {
+        assertValidTotalScore(completed.total_score);
+        const hmac = computeSessionHmac(completed.id, completed.total_score, completed.completed_at!);
+        if (hmac) {
+          await storeSessionHmac(session.id, hmac);
+        }
+        if (!completed.is_practice) {
+          await updateStreak(completed.user_id);
+          await checkAndAwardSessionBadges(completed.user_id, {
+            total_score: completed.total_score,
+            is_practice: completed.is_practice,
+          });
+        }
+        const token = bearerToken(req);
+        if (token) {
+          await revokeSessionToken(session.id, token, req.user!.exp);
+        }
+      }
       const token = bearerToken(req);
       if (token) {
         await revokeSessionToken(session.id, token, req.user!.exp);
       }
-  // Idempotent round-3 replay: return cached result if answer matches; reject if it differs
-  if (session.completed_at && round === 3) {
-    if (session.round_3_answer !== body.selectedOption) {
-      throw createError("Answer conflict detected", 409, "CONFLICT_REPLAY");
     }
-    return res.json({
+
+    res.json({
       correct: validateAnswer(question, body.selectedOption),
-      score: session.round_3_score,
-      round: 3,
-      total_score: session.total_score,
-      rank: session.rank ?? null,
+      score,
+      round,
     });
   }
-
-  const score = calculateRoundScore({
-    selectedOption: body.selectedOption,
-    correctOption: question.correct_option,
-    reactionTimeMs: body.reactionTimeMs,
-  });
-
-  await recordRoundScore(session.id, round, score, body.selectedOption, body.reactionTimeMs);
-
-  // On last round — finalize the session and stamp an integrity HMAC
-  if (round === 3) {
-    const completed = await finishSession(session.id);
-    if (completed) {
-      const hmac = computeSessionHmac(completed.id, completed.total_score, completed.completed_at!);
-      if (hmac) {
-        await storeSessionHmac(session.id, hmac);
-      }
-      if (!completed.is_practice) {
-        await updateStreak(completed.user_id);
-      }
-    }
-  }
-
-  res.json({
-    correct: validateAnswer(question, body.selectedOption),
-    score,
-    round,
-  });
-});
+);
 
 export default router;

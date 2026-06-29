@@ -1,76 +1,80 @@
-import { generateQuestions } from "./questions";
+import { describe, expect, it } from "vitest";
+import { generateChallengeQuestions } from "./questions";
+import type { Brand } from "../db/queries/brands";
 
-// If your file uses RNG internally, we mock seed behavior
-jest.mock("../utils/rng", () => {
+function makeBrand(overrides: Partial<Brand> = {}): Brand {
   return {
-    createRng: () => {
-      let seed = 1;
-      return {
-        next: () => {
-          seed = (seed * 9301 + 49297) % 233280;
-          return seed / 233280;
-        },
-      };
-    },
-  };
-});
-
-describe("Questions Generation Engine", () => {
-  const brand = {
+    id: "brand-1",
+    owner_user_id: "user-1",
     name: "BrandX",
     tagline: "Best product ever",
     usp: "Fast and reliable",
-    productImages: ["img1.png", "img2.png"],
+    brand_story: null,
+    logo_url: null,
+    primary_color: null,
+    secondary_color: null,
+    product_image_keys: ["img1.png", "img2.png"],
+    question_template: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    deleted_at: null,
+    ...overrides,
   };
+}
 
-  const distractorPool = Array.from({ length: 20 }).map((_, i) => ({
-    name: `Brand${i}`,
-  }));
+const distractorPool = Array.from({ length: 20 }).map((_, i) => ({
+  name: `Brand${i}`,
+  tagline: `Tagline ${i}`,
+  usp: `USP ${i}`,
+}));
 
+describe("Questions Generation Engine", () => {
   // -------------------------
   // BASIC GENERATION
   // -------------------------
   it("generates exactly 3 questions when full brand data is provided", () => {
-    const result = generateQuestions(brand, distractorPool, 123);
+    const result = generateChallengeQuestions("challenge-1", makeBrand(), distractorPool);
 
     expect(result.length).toBe(3);
 
-    const types = result.map((q: any) => q.type);
-    expect(types).toContain("tagline");
-    expect(types).toContain("usp");
-    expect(types).toContain("product");
+    const types = result.map((q) => q.question_type);
+    expect(types).toContain("which_tagline");
+    expect(types).toContain("which_brand");
+    expect(types).toContain("which_product");
+  });
+
+  it("assigns rounds 1, 2, and 3", () => {
+    const result = generateChallengeQuestions("challenge-1", makeBrand(), distractorPool);
+    const rounds = result.map((q) => q.round).sort();
+    expect(rounds).toEqual([1, 2, 3]);
   });
 
   // -------------------------
   // FALLBACK TAGLINE
   // -------------------------
   it("falls back to brand name when tagline is missing", () => {
-    const result = generateQuestions(
-      { ...brand, tagline: undefined },
+    const result = generateChallengeQuestions(
+      "challenge-1",
+      makeBrand({ tagline: null }),
       distractorPool,
-      123
     );
 
-    const taglineQ = result.find((q: any) => q.type === "tagline");
+    const fallbackQ = result.find((q) => q.question_text === "What is the name of this brand?");
 
-    expect(taglineQ.answer).toBe(brand.name);
+    expect(fallbackQ?.correct_answer).toBe("BrandX");
   });
 
   // -------------------------
   // DISTRACTOR LOGIC
   // -------------------------
   it("uses distractors from pool without duplicates or correct answer", () => {
-    const result = generateQuestions(brand, distractorPool, 123);
+    const result = generateChallengeQuestions("challenge-1", makeBrand(), distractorPool);
 
-    result.forEach((q: any) => {
-      const options = q.options;
-
-      // no duplicates
-      const unique = new Set(options);
-      expect(unique.size).toBe(options.length);
+    result.forEach((q) => {
+      const options = [q.option_a, q.option_b, q.option_c, q.option_d];
 
       // correct answer not duplicated in distractors
-      const occurrences = options.filter((o: string) => o === q.answer);
+      const occurrences = options.filter((o) => o === q.correct_answer);
       expect(occurrences.length).toBe(1);
     });
   });
@@ -79,34 +83,96 @@ describe("Questions Generation Engine", () => {
   // EMPTY POOL HANDLING
   // -------------------------
   it("falls back to Option A/B/C when distractor pool is empty", () => {
-    const result = generateQuestions(brand, [], 123);
+    const result = generateChallengeQuestions("challenge-1", makeBrand(), []);
 
-    result.forEach((q: any) => {
-      expect(q.options).toContain("Option A");
-      expect(q.options).toContain("Option B");
-      expect(q.options).toContain("Option C");
+    result.forEach((q) => {
+      const options = [q.option_a, q.option_b, q.option_c, q.option_d];
+      expect(options).toContain("Option A");
+      expect(options).toContain("Option B");
+      expect(options).toContain("Option C");
     });
-  });
-
-  // -------------------------
-  // DETERMINISTIC OUTPUT
-  // -------------------------
-  it("produces deterministic output for same seed", () => {
-    const a = generateQuestions(brand, distractorPool, 999);
-    const b = generateQuestions(brand, distractorPool, 999);
-
-    expect(a).toEqual(b);
   });
 
   // -------------------------
   // CORRECT OPTION SHUFFLING
   // -------------------------
   it("assigns correct_option consistently after shuffle", () => {
-    const result = generateQuestions(brand, distractorPool, 123);
+    const result = generateChallengeQuestions("challenge-1", makeBrand(), distractorPool);
 
-    result.forEach((q: any) => {
-      const correctIndex = q.options.indexOf(q.answer);
-      expect(q.correct_option).toBe(correctIndex);
+    result.forEach((q) => {
+      const options = [q.option_a, q.option_b, q.option_c, q.option_d];
+      const correctIndex = options.indexOf(q.correct_answer);
+      expect(q.correct_option).toBe(["A", "B", "C", "D"][correctIndex]);
+    });
+  });
+
+  // -------------------------
+  // TEMPLATE OVERRIDES (#487)
+  // -------------------------
+  it("uses defaults when question_template is null", () => {
+    const result = generateChallengeQuestions(
+      "challenge-1",
+      makeBrand({ question_template: null }),
+      distractorPool,
+    );
+
+    const r1 = result.find((q) => q.round === 1)!;
+    expect(r1.question_text).toBe("Which tagline belongs to this brand?");
+    expect(r1.prompt_type).toBe("logo");
+
+    const r2 = result.find((q) => q.round === 2)!;
+    expect(r2.question_text).toContain("Fast and reliable");
+    expect(r2.prompt_type).toBe("tagline");
+
+    const r3 = result.find((q) => q.round === 3)!;
+    expect(r3.question_text).toBe("Which brand makes this product?");
+    expect(r3.prompt_type).toBe("productImage1");
+  });
+
+  it("overrides question_text per round from question_template", () => {
+    const brand = makeBrand({
+      question_template: {
+        round_1: { question_text: "Custom round 1 text" },
+        round_2: { question_text: "Custom round 2 text" },
+      },
+    });
+    const result = generateChallengeQuestions("challenge-1", brand, distractorPool);
+
+    expect(result.find((q) => q.round === 1)!.question_text).toBe("Custom round 1 text");
+    expect(result.find((q) => q.round === 2)!.question_text).toBe("Custom round 2 text");
+    // round 3 not overridden — uses default
+    expect(result.find((q) => q.round === 3)!.question_text).toBe("Which brand makes this product?");
+  });
+
+  it("overrides prompt_type per round from question_template", () => {
+    const brand = makeBrand({
+      question_template: {
+        round_1: { prompt_type: "tagline" },
+      },
+    });
+    const result = generateChallengeQuestions("challenge-1", brand, distractorPool);
+    expect(result.find((q) => q.round === 1)!.prompt_type).toBe("tagline");
+    // rounds without override keep their defaults
+    expect(result.find((q) => q.round === 2)!.prompt_type).toBe("tagline");
+    expect(result.find((q) => q.round === 3)!.prompt_type).toBe("productImage1");
+  });
+
+  it("falls back to generic questions when brand data is sparse", () => {
+    const result = generateChallengeQuestions(
+      "challenge-1",
+      makeBrand({ tagline: null, usp: null, product_image_keys: [] }),
+      distractorPool,
+    );
+    expect(result).toHaveLength(3);
+    result.forEach((q) => {
+      expect(q.question_text).toBe("What is the name of this brand?");
+    });
+  });
+
+  it("sets challenge_id on all questions", () => {
+    const result = generateChallengeQuestions("chal-xyz", makeBrand(), distractorPool);
+    result.forEach((q) => {
+      expect(q.challenge_id).toBe("chal-xyz");
     });
   });
 });

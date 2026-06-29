@@ -1,4 +1,6 @@
 import { metrics } from "../lib/metrics";
+import { query } from "../db";
+import { logger } from "../lib/logger";
 import {
   getUserStreak,
   repairUserStreak,
@@ -7,6 +9,7 @@ import {
 } from "../db/queries/users";
 
 const STREAK_MILESTONES = [3, 7, 14, 30] as const;
+const NOTIFICATION_MILESTONES = new Set([7, 30, 100]);
 
 export interface StreakResponse {
   streak: number;
@@ -41,6 +44,10 @@ export async function updateStreak(userId: string, now = new Date()): Promise<St
     metrics.inc("streaks.milestones_reached_total", { milestone: String(newStreak) });
   }
 
+  if (NOTIFICATION_MILESTONES.has(newStreak)) {
+    await insertStreakMilestoneNotification(userId, newStreak);
+  }
+
   return updated;
 }
 
@@ -59,18 +66,19 @@ export async function repairStreak(
 }
 
 function formatStreak(streak: StreakState, now: Date): StreakResponse {
+  const normalizedStreak = typeof streak.streak === "number" ? streak.streak : 0;
   const lastPlayDay = normalizeDay(streak.last_play_day);
   const nextMilestone =
-    STREAK_MILESTONES.find((m) => m > streak.streak) ??
+    STREAK_MILESTONES.find((m) => m > normalizedStreak) ??
     STREAK_MILESTONES[STREAK_MILESTONES.length - 1];
   return {
-    streak: streak.streak,
+    streak: normalizedStreak,
     lastPlayDay,
     repairAvailable: streak.streak_repair_available,
     nextMilestone,
-    progress: Math.min(1, streak.streak / Math.max(1, nextMilestone)),
+    progress: Math.min(1, normalizedStreak / Math.max(1, nextMilestone)),
     milestoneJustHit:
-      STREAK_MILESTONES.includes(streak.streak as any) && lastPlayDay === toUtcDay(now),
+      STREAK_MILESTONES.includes(normalizedStreak as any) && lastPlayDay === toUtcDay(now),
   };
 }
 
@@ -87,4 +95,63 @@ function dayDiff(from: string, to: string): number {
   const fromMs = Date.parse(`${from}T00:00:00.000Z`);
   const toMs = Date.parse(`${to}T00:00:00.000Z`);
   return Math.round((toMs - fromMs) / 86_400_000);
+}
+
+async function insertStreakMilestoneNotification(userId: string, milestone: number): Promise<void> {
+  try {
+    await query(
+      `INSERT INTO notifications (user_id, type, payload)
+       VALUES ($1, 'streak_milestone', $2::jsonb)`,
+      [userId, JSON.stringify({ milestone })],
+    );
+  } catch (err) {
+    logger.warn("Failed to insert streak milestone notification", { userId, milestone, err });
+  }
+}
+
+export interface ActivityRecord {
+  date: string;
+  session_count: number;
+}
+
+export async function getUserActivity(userId: string, now = new Date()): Promise<ActivityRecord[]> {
+  const endDate = toUtcDay(now);
+  const startDate = new Date(now);
+  startDate.setDate(startDate.getDate() - 364);
+  const startDateStr = toUtcDay(startDate);
+
+  const result = await query<ActivityRecord>(
+    `SELECT
+       DATE(gs.completed_at) AS date,
+       COUNT(*)::int AS session_count
+     FROM game_sessions gs
+     WHERE gs.user_id = $1
+       AND gs.status = 'completed'
+       AND DATE(gs.completed_at) >= $2::date
+       AND DATE(gs.completed_at) <= $3::date
+     GROUP BY DATE(gs.completed_at)
+     ORDER BY date`,
+    [userId, startDateStr, endDate]
+  );
+
+  const activityMap = new Map<string, number>();
+  result.rows.forEach((row: ActivityRecord) => {
+    activityMap.set(row.date, row.session_count);
+  });
+
+  const activity: ActivityRecord[] = [];
+  const current = new Date(startDateStr);
+  const end = new Date(endDate);
+  end.setDate(end.getDate() + 1);
+
+  while (current < end) {
+    const dateStr = toUtcDay(current);
+    activity.push({
+      date: dateStr,
+      session_count: activityMap.get(dateStr) ?? 0,
+    });
+    current.setDate(current.getDate() + 1);
+  }
+
+  return activity;
 }

@@ -1,9 +1,9 @@
-import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatScore, formatUsdc } from "@/lib/format";
+import { formatScore, formatUsdc, safeDivide } from "@/lib/format";
 import { StreakBadge } from "@/components/gamification/streak-badge";
-import { notFound } from "next/navigation";
+import { StreakHeatmap } from "@/components/gamification/StreakHeatmap";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -13,6 +13,7 @@ import {
   BadgeGrid,
   type Badge as UserBadge,
 } from "@/components/gamification/badge-grid";
+import { OfflineBanner } from "@/components/layout/offline-banner";
 import type { Metadata } from "next";
 
 interface ProfilePageProps {
@@ -21,7 +22,11 @@ interface ProfilePageProps {
 
 export async function generateMetadata({ params }: ProfilePageProps): Promise<Metadata> {
   const { username } = await params;
-  const { user } = await getUserProfile(username);
+  const { user, redirect: redirectTarget } = await getUserProfile(username);
+
+  if (redirectTarget) {
+    return { title: "Redirecting…" };
+  }
 
   if (!user) {
     return {
@@ -52,12 +57,21 @@ export async function generateMetadata({ params }: ProfilePageProps): Promise<Me
   };
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+
 async function getUserProfile(
   username: string,
-): Promise<{ user: UserProfile | null; failed: boolean }> {
+): Promise<{ user: UserProfile | null; failed: boolean; redirect?: string }> {
   try {
-    const res = await api.get(`/users/profile/${username}`);
-    return { user: res.data.user, failed: false };
+    const res = await fetch(`${API_URL}/users/profile/${username}`, {
+      next: { tags: [`profile-${username}`] },
+    });
+    if (!res.ok) throw new Error("Failed to fetch");
+    const data = await res.json();
+    if (data.redirect) {
+      return { user: null, failed: false, redirect: data.redirect };
+    }
+    return { user: data.user, failed: false };
   } catch {
     return { user: null, failed: true };
   }
@@ -65,17 +79,44 @@ async function getUserProfile(
 
 async function getUserBadges(userId: string): Promise<UserBadge[]> {
   try {
-    const res = await api.get(`/users/${userId}/badges`);
-    return res.data.badges ?? [];
+    const res = await fetch(`${API_URL}/users/${userId}/badges`);
+    if (!res.ok) throw new Error("Failed to fetch");
+    const data = await res.json();
+    return data.badges ?? [];
   } catch {
     return [];
   }
 }
 
+async function getUserActivity(username: string) {
+  try {
+    const res = await fetch(`${API_URL}/users/${username}/activity`);
+    if (!res.ok) throw new Error("Failed to fetch");
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
+function formatDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+const LEAGUE_CONFIG = {
+  bronze: { label: "Bronze League", color: "bg-amber-600", textColor: "text-white" },
+  silver: { label: "Silver League", color: "bg-slate-300", textColor: "text-slate-800" },
+  gold: { label: "Gold League", color: "bg-yellow-400", textColor: "text-yellow-900" },
+} as const;
+
 export default async function ProfilePage({ params }: ProfilePageProps) {
   const { username } = await params;
   if (!username?.trim()) notFound();
-  const { user, failed } = await getUserProfile(username);
+  const { user, failed, redirect: redirectTarget } = await getUserProfile(username);
+
+  if (redirectTarget) {
+    redirect(`/profile/${redirectTarget}`);
+  }
 
   if (!user && failed) {
     return (
@@ -97,16 +138,19 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
 
   const badges = user.userId ? await getUserBadges(user.userId) : [];
   const earnedIds = badges.filter((b) => b.earned).map((b) => b.id);
+  const activity = await getUserActivity(username);
 
   const streak = user.streak ?? 0;
   const recentSessions = user.recentSessions ?? [];
   const milestones = [3, 7, 14, 30];
   const nextMilestone =
     milestones.find((m) => m > streak) ?? milestones[milestones.length - 1];
-  const progress = Math.min(1, streak / Math.max(1, nextMilestone));
+  const progress = Math.min(1, safeDivide(streak, nextMilestone, 0));
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-12">
+    <>
+      <OfflineBanner />
+      <main className="mx-auto max-w-2xl px-6 py-12">
       {/* Profile header */}
       <div className="mb-10 flex items-center gap-6">
         {user.avatarUrl ? (
@@ -123,16 +167,49 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
             {user.displayName.charAt(0).toUpperCase()}
           </div>
         )}
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold">{user.displayName}</h1>
           <p className="text-[var(--muted-foreground)]">@{user.username}</p>
-          {user.league && (
-            <Badge variant={user.league} className="mt-2">
-              {user.league} League
-            </Badge>
+          {user.createdAt && (
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+              Member since {formatDate(user.createdAt)}
+            </p>
           )}
         </div>
+        {user.isOwner && (
+          <div className="flex gap-2">
+            <Link href={`/profile/${user.username}/earnings`}>
+              <Button variant="outline" size="sm">
+                Earnings
+              </Button>
+            </Link>
+            <Link href="/settings/profile">
+              <Button variant="outline" size="sm">
+                Edit Profile
+              </Button>
+            </Link>
+          </div>
+        )}
       </div>
+
+      {/* League banner */}
+      {user.league && (
+        <Card className={`mb-8 border-0 ${LEAGUE_CONFIG[user.league].color}`}>
+          <CardContent className="flex items-center gap-4 py-4">
+            <div className={`flex h-14 w-14 items-center justify-center rounded-full ${LEAGUE_CONFIG[user.league].color} border-2 border-white/30 text-2xl`}>
+              {user.league === "gold" ? "🏆" : user.league === "silver" ? "🥈" : "🥉"}
+            </div>
+            <div>
+              <p className={`text-lg font-bold ${LEAGUE_CONFIG[user.league].textColor}`}>
+                {LEAGUE_CONFIG[user.league].label}
+              </p>
+              <p className={`text-sm ${LEAGUE_CONFIG[user.league].textColor}/80`}>
+                Current league placement
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {streak > 0 && (
         <Card className="mb-8">
@@ -200,16 +277,41 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
         </Card>
       )}
 
-      {/* Recent activity */}
-      {recentSessions.length > 0 ? (
-        <Card>
+      {/* Activity heatmap */}
+      {activity.length > 0 && (
+        <Card className="mb-8">
           <CardHeader>
-            <CardTitle>Recent Challenges</CardTitle>
+            <CardTitle>Activity</CardTitle>
           </CardHeader>
+          <CardContent>
+            <StreakHeatmap activity={activity} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Win history */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Win History</CardTitle>
+        </CardHeader>
+        {recentSessions.length > 0 ? (
           <CardContent className="p-0">
             <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)]">
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+                    Brand
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+                    Score
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+                    Date
+                  </th>
+                </tr>
+              </thead>
               <tbody>
-                {recentSessions.map((session) => (
+                {recentSessions.slice(0, 10).map((session) => (
                   <tr
                     key={session.id}
                     className="border-b border-[var(--border)] last:border-0"
@@ -221,25 +323,33 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
                       {formatScore(session.totalScore)}
                     </td>
                     <td className="px-6 py-3 text-right text-[var(--muted-foreground)]">
-                      {session.rank ? `#${session.rank}` : "—"}
+                      {session.completedAt
+                        ? new Date(session.completedAt).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                          })
+                        : "—"}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </CardContent>
-        </Card>
-      ) : (
-        <EmptyState
-          title="No history yet"
-          description="Play a challenge to start building your stats."
-          action={
-            <Link href="/challenge">
-              <Button>Browse Challenges</Button>
-            </Link>
-          }
-        />
-      )}
-    </main>
+        ) : (
+          <CardContent>
+            <EmptyState
+              title="No history yet"
+              description="Play a challenge to start building your stats."
+              action={
+                <Link href="/challenge">
+                  <Button>Browse Challenges</Button>
+                </Link>
+              }
+            />
+          </CardContent>
+        )}
+      </Card>
+      </main>
+    </>
   );
 }

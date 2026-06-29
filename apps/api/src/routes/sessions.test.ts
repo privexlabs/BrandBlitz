@@ -53,6 +53,11 @@ vi.mock("../middleware/anti-cheat", () => ({
   enforceOneSessionPerChallenge: (req: any, res: any, next: any) => next(),
   validateReactionTime: (req: any, res: any, next: any) => next(),
   validateDeviceFingerprint: (req: any, res: any, next: any) => next(),
+  requireSessionStartAllowed: (req: any, res: any, next: any) => next(),
+  assertValidTotalScore: vi.fn(),
+}));
+vi.mock("../middleware/require-active-user", () => ({
+  requireActiveUser: (req: any, res: any, next: any) => next(),
 }));
 
 vi.mock("../middleware/error", () => ({
@@ -75,6 +80,9 @@ vi.mock("../services/scoring", () => ({
 
 vi.mock("../services/streaks", () => ({
   updateStreak: vi.fn(),
+}));
+vi.mock("../services/badges", () => ({
+  checkAndAwardSessionBadges: vi.fn(),
 }));
 
 vi.mock("../lib/integrity", () => ({

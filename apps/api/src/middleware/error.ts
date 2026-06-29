@@ -4,6 +4,7 @@ import { logger } from "../lib/logger";
 import { captureExceptionSync } from "../lib/sentry";
 import { BadRequestError } from "@stellar/stellar-sdk";
 import { config } from "../lib/config";
+import { query } from "../db/index";
 
 export interface ApiError extends Error {
   statusCode?: number;
@@ -21,6 +22,22 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ): void {
+  // Best-effort: if an active/warmup session is attached to this request,
+  // mark it abandoned with reason 'error' so analytics can distinguish
+  // server-error closures from timeouts and explicit quits.
+  const sessionId = (req as any).session?.id as string | undefined;
+  if (sessionId) {
+    void query(
+      `UPDATE game_sessions
+       SET status = 'abandoned',
+           abandon_reason = 'error',
+           completed_at = COALESCE(completed_at, NOW()),
+           updated_at = NOW()
+       WHERE id = $1 AND status IN ('warmup', 'active')`,
+      [sessionId]
+    ).catch(() => {});
+  }
+
   let statusCode = err.statusCode;
   let message = err.message;
 
@@ -33,6 +50,8 @@ export function errorHandler(
 
   statusCode = statusCode ?? 500;
   const isServerError = statusCode >= 500;
+  const nodeEnv = process.env.NODE_ENV ?? config.NODE_ENV;
+  const isProduction = nodeEnv === "production";
 
   if (isServerError) {
     message = "Internal Server Error";
@@ -49,23 +68,33 @@ export function errorHandler(
     captureExceptionSync(err, { method: req.method, url: req.url });
   }
 
-  const payload: Record<string, unknown> = {
-    error: message,
-  };
+  const payload: Record<string, unknown> =
+    isProduction && isServerError
+      ? {
+          error: "Internal Server Error",
+          requestId: res.locals.requestId,
+        }
+      : {
+          error: message,
+        };
 
-  if (err.code) {
+  if (!(isProduction && isServerError) && err.code) {
     payload.code = err.code;
   }
 
-  if (err instanceof ZodError) {
+  if (!(isProduction && isServerError) && err instanceof ZodError) {
     payload.details = err.issues.map((issue) => ({
       path: issue.path,
       message: issue.message,
       code: issue.code,
+      // Surface the rejected field names when strict() rejects unknown keys.
+      ...(issue.code === "unrecognized_keys"
+        ? { keys: (issue as import("zod").ZodUnrecognizedKeysIssue).keys }
+        : {}),
     }));
   }
 
-  if (config.NODE_ENV === "development" && err.stack) {
+  if (nodeEnv === "development" && err.stack) {
     payload.stack = err.stack;
   }
 

@@ -20,3 +20,9 @@ export function formatUsdc(
 export function formatScore(score: number): string {
   return score.toLocaleString();
 }
+
+export function safeDivide(numerator: number, denominator: number, fallback = 0): number {
+  if (!denominator || !isFinite(denominator)) return fallback;
+  const result = numerator / denominator;
+  return isFinite(result) ? result : fallback;
+}

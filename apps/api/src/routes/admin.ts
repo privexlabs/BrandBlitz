@@ -6,8 +6,24 @@ import { findUserById } from "../db/queries/users";
 import { setConfig } from "../db/queries/config";
 import { ensureLeagueRepeatableJobs } from "../queues/league.queue";
 import { createError } from "../middleware/error";
+import { logger } from "../lib/logger";
+import {
+  DLQ_QUEUES,
+  DLQ_SOURCE_QUEUES,
+  type DeadLetterPayload,
+} from "../queues/dlq";
+import { feeBumpTransaction } from "@brandblitz/stellar";
+import { updatePayoutFeeBumpStatus } from "../db/queries/payouts";
+import { config } from "../lib/config";
+import { query } from "../db/index";
+import { webhookRotationLimiter } from "../middleware/rate-limit";
 
 const router = Router();
+
+// Admin leaderboard-style queries must follow the same rule as
+// routes/leaderboard.ts: validate sort params against an allowlist before
+// choosing an ORDER BY expression. This file currently has no user-controlled
+// leaderboard ORDER BY clauses.
 
 router.use(authenticate);
 

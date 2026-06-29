@@ -12,12 +12,16 @@ import { errorHandler } from "./middleware/error";
 import { referralAttributionMiddleware } from "./middleware/referral-attribution";
 import { apiLimiter } from "./middleware/rate-limit";
 import { requireHttps } from "./middleware/require-https";
+import { requireJsonContentType } from "./middleware/require-json-content-type";
+import { requestId } from "./middleware/request-id";
 import { connectDb, closeDb, query } from "./db";
 import { connectRedis, redis } from "./lib/redis";
 import { payoutQueue } from "./queues/payout.queue";
 import { leagueQueue } from "./queues/league.queue";
+import { leaderboardRefreshQueue } from "./queues/leaderboard-refresh.queue";
 import { logger } from "./lib/logger";
 import { config } from "./lib/config";
+import { PERMISSIONS_POLICY_HEADER } from "@brandblitz/config";
 
 const app = express();
 const PORT = config.PORT;
@@ -56,7 +60,7 @@ app.use(
           }
         : false,
     referrerPolicy: {
-      policy: "strict-origin-when-cross-origin",
+      policy: config.REFERRER_POLICY,
     },
     xFrameOptions: {
       action: "deny",
@@ -71,15 +75,65 @@ app.use(
     },
   }),
 );
+// Helmet 8 does not set Permissions-Policy; add it explicitly after Helmet.
+app.use((_req, res, next) => {
+  res.setHeader("Permissions-Policy", PERMISSIONS_POLICY_HEADER);
+  next();
+});
+// ── CORS — explicit, non-wildcard allow-list enforced at startup ────────────
+// `config.ALLOWED_ORIGINS` is validated by Zod (required, no wildcard) so the
+// process never starts with a permissive origin list. This defensive guard
+// re-asserts that invariant at the middleware layer.
+const allowedOrigins = config.ALLOWED_ORIGINS;
+if (allowedOrigins.length === 0 || allowedOrigins.includes("*")) {
+  throw new Error(
+    "ALLOWED_ORIGINS must be an explicit, non-wildcard list of origins",
+  );
+}
+
+// ALLOWED_ORIGINS entries may be full URLs ("http://localhost:3000") or
+// host[:port] ("localhost:3000") — the latter form is shared with the web
+// app's Next.js Server Actions config. Browser Origin headers always carry a
+// scheme, so we compare on a scheme-stripped host to accept either form.
+const stripScheme = (value: string): string =>
+  value.replace(/^https?:\/\//, "");
+const allowedOriginHosts = new Set(allowedOrigins.map(stripScheme));
+const isOriginAllowed = (origin: string): boolean =>
+  allowedOrigins.includes(origin) || allowedOriginHosts.has(stripScheme(origin));
+
+// Reject cross-origin requests from unlisted origins with HTTP 403 BEFORE the
+// CORS reflection runs. Requests without an Origin header (same-origin
+// navigations, server-to-server, health checks) are allowed through.
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && !isOriginAllowed(origin)) {
+    res.status(403).json({
+      error: "Origin not allowed by CORS",
+      code: "CORS_ORIGIN_FORBIDDEN",
+    });
+    return;
+  }
+  next();
+});
 app.use(
   cors({
-    origin: config.WEB_URL,
+    origin(origin, callback) {
+      // No Origin header → non-browser / same-origin request; allow.
+      if (!origin || isOriginAllowed(origin)) {
+        callback(null, true);
+        return;
+      }
+      // Unlisted origin — already 403'd above; do not emit CORS headers.
+      callback(null, false);
+    },
     credentials: true,
   }),
 );
 app.use(cookieParser());
 app.use(requireHttps);
+app.use(requestId);
 app.use(referralAttributionMiddleware);
+app.use(requireJsonContentType);
 app.use(
   compression({
     threshold: 1024,
@@ -155,6 +209,7 @@ async function start(): Promise<void> {
       try {
         await payoutQueue.close();
         await leagueQueue.close();
+        await leaderboardRefreshQueue.close();
         await closeDb();
         await redis.disconnect();
         logger.info("Shutdown complete");

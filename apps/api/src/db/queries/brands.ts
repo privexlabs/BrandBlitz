@@ -12,6 +12,7 @@ export interface Brand {
   brand_story: string | null;
   usp: string | null;
   product_image_keys: string[];
+  question_template: Record<string, unknown> | null;
   deleted_at?: string | null;
   created_at: string;
 }
@@ -20,11 +21,35 @@ export type BrandApi = Brand & {
   product_image_urls: string[];
 };
 
+/** Public-safe brand data. Owner identity and internal deletion metadata stay private. */
+export type PublicBrand = Pick<
+  Brand,
+  | "id"
+  | "name"
+  | "logo_url"
+  | "primary_color"
+  | "secondary_color"
+  | "tagline"
+  | "brand_story"
+  | "usp"
+  | "product_image_keys"
+  | "created_at"
+>;
+
 export function getProductImageUrls(brand: Pick<Brand, "product_image_keys">): string[] {
   return (brand.product_image_keys ?? []).map((key) => getPublicUrl(BUCKETS.BRAND_ASSETS, key));
 }
 
 export function toBrandApi(brand: Brand): BrandApi {
+  return {
+    ...brand,
+    product_image_urls: getProductImageUrls(brand),
+  };
+}
+
+export function toPublicBrandApi(brand: PublicBrand): PublicBrand & {
+  product_image_urls: string[];
+} {
   return {
     ...brand,
     product_image_urls: getProductImageUrls(brand),
@@ -64,6 +89,35 @@ export async function getBrandsByOwner(ownerUserId: string): Promise<Brand[]> {
 export async function getBrandById(id: string): Promise<Brand | null> {
   const result = await query<Brand>("SELECT * FROM brands WHERE id = $1 AND deleted_at IS NULL", [id]);
   return result.rows[0] ?? null;
+}
+
+export async function getPublicBrandById(id: string): Promise<PublicBrand | null> {
+  const result = await query<PublicBrand>(
+    `SELECT id, name, logo_url, primary_color, secondary_color, tagline,
+            brand_story, usp, product_image_keys, created_at
+     FROM brands WHERE id = $1 AND deleted_at IS NULL`,
+    [id],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getPublicBrands(limit = 50): Promise<PublicBrand[]> {
+  const result = await query<PublicBrand>(
+    `SELECT id, name, logo_url, primary_color, secondary_color, tagline,
+            brand_story, usp, product_image_keys, created_at
+     FROM brands b
+     WHERE b.deleted_at IS NULL
+       AND EXISTS (
+         SELECT 1 FROM challenges c
+         WHERE c.brand_id = b.id
+           AND c.status = 'active'
+           AND c.deleted_at IS NULL
+       )
+     ORDER BY created_at DESC
+     LIMIT $1`,
+    [limit],
+  );
+  return result.rows;
 }
 
 export async function getBrandMetaById(
@@ -111,6 +165,7 @@ const UPDATABLE_BRAND_COLUMNS = [
   "usp",
   "product_image_1_url",
   "product_image_2_url",
+  "question_template",
 ] as const;
 
 type UpdatableBrandColumn = (typeof UPDATABLE_BRAND_COLUMNS)[number];
@@ -149,4 +204,22 @@ export async function deleteBrand(id: string, ownerUserId: string): Promise<bool
     [id, ownerUserId]
   );
   return (result.rowCount ?? 0) > 0;
+}
+
+export interface BrandChallengeStats {
+  brand_id: string;
+  challenge_id: string;
+  total_sessions: number;
+  completed_sessions: number;
+  avg_total_score: number | null;
+  unique_players: number;
+  payout_total_stroops: number;
+}
+
+export async function getBrandChallengeStats(brandId: string): Promise<BrandChallengeStats[]> {
+  const result = await query<BrandChallengeStats>(
+    `SELECT * FROM brand_challenge_stats WHERE brand_id = $1`,
+    [brandId]
+  );
+  return result.rows;
 }

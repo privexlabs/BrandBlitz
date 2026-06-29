@@ -28,8 +28,7 @@ export function createLeagueWorker(WorkerCtor: typeof Worker = Worker, opts?: Wo
       if (job.name === "finalize-week") {
         const weekStart = getUtcWeekStart(new Date());
         logger.info("Finalizing league week", { weekStart, weekEndExclusive: addUtcDays(weekStart, 7) });
-        await recalculateWeeklyPoints(weekStart);
-        await rankAndFlagWeek(weekStart);
+        await query("SELECT recalculate_league($1)", [weekStart]);
         return;
       }
 

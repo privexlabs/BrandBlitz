@@ -36,9 +36,9 @@ export const UPLOAD_TYPE_CONFIGS: Record<
   UploadTypeConfig
 > = {
   "brand-logo": {
-    allowedMimes: ["image/png", "image/svg+xml", "image/jpeg", "image/webp"],
+    allowedMimes: ["image/png", "image/jpeg", "image/webp"],
     maxSizeBytes: 2 * 1024 * 1024, // 2 MB
-    label: "Logo must be under 2 MB (PNG, SVG, JPG, or WebP)",
+    label: "Logo must be under 2 MB (PNG, JPG, or WebP)",
   },
   "product-image": {
     allowedMimes: ["image/png", "image/jpeg", "image/webp", "image/gif"],
@@ -72,8 +72,6 @@ const MAGIC_BYTES: Record<string, MagicSignature[]> = {
     { offset: 0, bytes: [0x47, 0x49, 0x46, 0x38, 0x37, 0x61] }, // GIF87a
     { offset: 0, bytes: [0x47, 0x49, 0x46, 0x38, 0x39, 0x61] }, // GIF89a
   ],
-  // SVG is XML text — no reliable magic bytes; skip binary check.
-  "image/svg+xml": [],
 };
 
 /**
@@ -86,7 +84,7 @@ const MAGIC_BYTES: Record<string, MagicSignature[]> = {
  */
 export async function validateMagicBytes(file: File): Promise<boolean> {
   const signatures = MAGIC_BYTES[file.type];
-  // Unknown MIME or SVG — skip binary check, rely on MIME allow-list only.
+  // Unknown MIME — skip binary check, rely on MIME allow-list only.
   if (!signatures || signatures.length === 0) return true;
 
   const headerSize = 12;
@@ -222,8 +220,13 @@ export function UploadField({
         headers: { "Content-Type": file.type },
       });
 
+      // Explicitly surface any non-2xx S3 response. A 403 here almost always
+      // means the presigned URL has expired (its TTL elapsed before the PUT) —
+      // give the user an actionable message instead of failing silently.
       if (!putRes.ok) {
-        throw new Error(`PUT failed with status ${putRes.status}`);
+        throw new Error(
+          putRes.status === 403 ? "upload-expired" : "upload-rejected",
+        );
       }
 
       presignedKey = key;
@@ -244,13 +247,24 @@ export function UploadField({
       setUploadedUrl(publicUrl);
       onUploaded(key, publicUrl);
     } catch (err: unknown) {
-      const isVerifyFail =
-        err instanceof Error && err.message === "verify-failed";
-      setError(
-        isVerifyFail
-          ? "Upload could not be confirmed. The file has been removed. Please try again."
-          : "Upload failed. Please try again."
-      );
+      const code = err instanceof Error ? err.message : "";
+      let message: string;
+      switch (code) {
+        case "verify-failed":
+          message =
+            "Upload could not be confirmed. The file has been removed. Please try again.";
+          break;
+        case "upload-expired":
+          message =
+            "Upload link expired before the file finished uploading. Please try again.";
+          break;
+        case "upload-rejected":
+          message = "Storage rejected the upload. Please try again.";
+          break;
+        default:
+          message = "Upload failed. Please try again.";
+      }
+      setError(message);
       void presignedKey;
     } finally {
       setUploading(false);

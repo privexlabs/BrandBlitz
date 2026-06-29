@@ -33,14 +33,12 @@ export async function createPayout(data: {
      VALUES ($1,$2,$3,$4)
      ON CONFLICT (challenge_id, user_id) DO UPDATE
        SET stellar_address = EXCLUDED.stellar_address,
-           amount_usdc = EXCLUDED.amount_usdc,
+           amount_stroops = EXCLUDED.amount_stroops,
            status = CASE
              WHEN payouts.status = 'failed' THEN 'pending'
              ELSE payouts.status
            END,
            error_message = NULL
-     RETURNING *`,
-    [data.challengeId, data.userId, data.stellarAddress, data.amountUsdc]
      RETURNING *, (amount_stroops::numeric / 10000000)::numeric(20,7)::text AS amount_usdc`,
     [data.challengeId, data.userId, data.stellarAddress, amountStroops]
   );
@@ -71,10 +69,6 @@ export async function updatePayoutStatus(
   } else {
     await query("UPDATE payouts SET status = $1 WHERE id = $2", [status, id]);
   }
-  await query(
-    "UPDATE payouts SET status = $1, tx_hash = $2, error_message = $3 WHERE id = $4",
-    [status, txHash ?? null, errorMessage ?? "", id]
-  );
 }
 
 export async function failPayoutsForChallenge(
@@ -102,10 +96,70 @@ export async function getPendingPayouts(
   return result.rows;
 }
 
+/**
+ * Batch fetch payouts by IDs with user data via JOIN.
+ * Replaces N+1 SELECT pattern with single batch query.
+ */
+export async function getPayoutsByIds(payoutIds: string[]): Promise<Payout[]> {
+  if (payoutIds.length === 0) return [];
+  
+  const result = await query<Payout>(
+    `SELECT p.*,
+            (p.amount_stroops::numeric / 10000000)::numeric(20,7)::text AS amount_usdc,
+            u.stellar_address,
+            u.id AS user_id
+     FROM payouts p
+     JOIN users u ON p.user_id = u.id
+     WHERE p.id = ANY($1::uuid[])
+     ORDER BY array_position($1::uuid[], p.id)`,
+    [payoutIds]
+  );
+  return result.rows;
+}
+
 export async function findPayoutByTxHash(txHash: string): Promise<Payout | null> {
   const result = await query<Payout>(
     "SELECT *, (amount_stroops::numeric / 10000000)::numeric(20,7)::text AS amount_usdc FROM payouts WHERE tx_hash = $1 LIMIT 1",
     [txHash]
   );
   return result.rows[0] ?? null;
+}
+
+/**
+ * Update payout status and fee bump tracking.
+ */
+export async function updatePayoutFeeBumpStatus(
+  payoutId: string,
+  status: "fee_bump_pending" | "fee_bump_failed" | "completed",
+  feeBumpMaxFee: number,
+  originalTxHash?: string
+): Promise<void> {
+  await query(
+    `UPDATE payouts
+     SET status = $2,
+         fee_bump_attempts = fee_bump_attempts + 1,
+         fee_bump_max_fee_stroops = $3,
+         original_tx_hash = COALESCE(original_tx_hash, $4),
+         updated_at = NOW()
+     WHERE id = $1`,
+    [payoutId, status, feeBumpMaxFee, originalTxHash]
+  );
+}
+
+/**
+ * Get payouts eligible for fee bump recovery.
+ */
+export async function getStuckPayouts(limit = 50): Promise<(Payout & { fee_bump_attempts: number })[]> {
+  const result = await query<Payout & { fee_bump_attempts: number }>(
+    `SELECT *,
+            (amount_stroops::numeric / 10000000)::numeric(20,7)::text AS amount_usdc,
+            fee_bump_attempts
+     FROM payouts
+     WHERE status IN ('failed', 'fee_bump_failed')
+       AND fee_bump_attempts < 3
+     ORDER BY created_at ASC
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows;
 }

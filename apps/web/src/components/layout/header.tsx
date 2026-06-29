@@ -8,19 +8,44 @@ import { usePathname } from "next/navigation";
 import { createApiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "./theme-toggle";
+import { NotificationBell } from "./notification-bell";
 
 export function Header() {
   const { data: session, status } = useSession();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [streak, setStreak] = useState<number | null>(null);
-  const [toastMessage, setToastMessage] = useState<string>("");
 
   const apiToken = useMemo(() => (session as any)?.apiToken as string | undefined, [session]);
 
   useEffect(() => {
     setMenuOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenuOpen(false);
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      if (target.closest("[aria-label='Open menu']")) return;
+      if (target.closest("#mobile-menu-panel")) return;
+      setMenuOpen(false);
+    }
+
+    document.addEventListener("click", handleClickOutside, true);
+    return () => document.removeEventListener("click", handleClickOutside, true);
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!apiToken) {
@@ -31,10 +56,6 @@ export function Header() {
     void api.get("/users/me/streak").then((response) => {
       const data = response.data;
       setStreak(data.streak ?? null);
-      if (data.milestoneJustHit) {
-        setToastMessage(`🔥 Streak milestone reached: ${data.streak} days!`);
-        window.setTimeout(() => setToastMessage(""), 5000);
-      }
     });
   }, [apiToken]);
 
@@ -78,6 +99,7 @@ export function Header() {
 
         <div className="flex items-center gap-3">
           <ThemeToggle />
+          {apiToken && <NotificationBell apiToken={apiToken} />}
 
           {/* Hamburger — mobile only */}
           <button
@@ -119,15 +141,9 @@ export function Header() {
         </div>
       </div>
 
-      {toastMessage ? (
-        <div className="fixed right-4 top-20 z-50 rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm shadow-lg">
-          {toastMessage}
-        </div>
-      ) : null}
-
       {/* Mobile menu */}
       {menuOpen && (
-        <div className="md:hidden border-t border-[var(--border)] bg-[var(--background)] px-6 pb-4">
+        <div id="mobile-menu-panel" className="md:hidden border-t border-[var(--border)] bg-[var(--background)] px-6 pb-4">
           <nav className="flex flex-col text-sm pt-3">{navLinks}</nav>
           <div className="mt-4 pt-4 border-t border-[var(--border)]">
             {session ? (
