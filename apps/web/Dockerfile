@@ -1,4 +1,4 @@
-FROM node:22.14.0-alpine AS base
+FROM node:26.4.0-alpine AS base
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # ── deps ──────────────────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
 # ── runner ────────────────────────────────────────────────────────────────────
-FROM node:22.14.0-alpine AS runner
+FROM node:26.4.0-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
