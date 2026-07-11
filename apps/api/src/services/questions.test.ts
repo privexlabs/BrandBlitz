@@ -56,7 +56,7 @@ describe("Questions Generation Engine", () => {
     const result = generateChallengeQuestions(
       "challenge-1",
       makeBrand({ tagline: null }),
-      distractorPool,
+      distractorPool
     );
 
     const fallbackQ = result.find((q) => q.question_text === "What is the name of this brand?");
@@ -76,6 +76,22 @@ describe("Questions Generation Engine", () => {
       // correct answer not duplicated in distractors
       const occurrences = options.filter((o) => o === q.correct_answer);
       expect(occurrences.length).toBe(1);
+    });
+  });
+
+  it("deduplicates and ignores blank distractors before padding options", () => {
+    const result = generateChallengeQuestions("challenge-1", makeBrand(), [
+      { name: "BrandX", tagline: "Best product ever", usp: "Fast and reliable" },
+      { name: "BrandY", tagline: "Tagline Y", usp: "USP Y" },
+      { name: "BrandY", tagline: "Tagline Y", usp: "USP Y" },
+      { name: "   ", tagline: "   ", usp: "   " },
+    ]);
+
+    result.forEach((q) => {
+      const options = [q.option_a, q.option_b, q.option_c, q.option_d];
+      expect(options.every((option) => option.trim().length > 0)).toBe(true);
+      expect(new Set(options).size).toBe(4);
+      expect(options.filter((option) => option === q.correct_answer)).toHaveLength(1);
     });
   });
 
@@ -113,7 +129,7 @@ describe("Questions Generation Engine", () => {
     const result = generateChallengeQuestions(
       "challenge-1",
       makeBrand({ question_template: null }),
-      distractorPool,
+      distractorPool
     );
 
     const r1 = result.find((q) => q.round === 1)!;
@@ -141,7 +157,9 @@ describe("Questions Generation Engine", () => {
     expect(result.find((q) => q.round === 1)!.question_text).toBe("Custom round 1 text");
     expect(result.find((q) => q.round === 2)!.question_text).toBe("Custom round 2 text");
     // round 3 not overridden — uses default
-    expect(result.find((q) => q.round === 3)!.question_text).toBe("Which brand makes this product?");
+    expect(result.find((q) => q.round === 3)!.question_text).toBe(
+      "Which brand makes this product?"
+    );
   });
 
   it("overrides prompt_type per round from question_template", () => {
@@ -161,12 +179,51 @@ describe("Questions Generation Engine", () => {
     const result = generateChallengeQuestions(
       "challenge-1",
       makeBrand({ tagline: null, usp: null, product_image_keys: [] }),
-      distractorPool,
+      distractorPool
     );
     expect(result).toHaveLength(3);
     result.forEach((q) => {
       expect(q.question_text).toBe("What is the name of this brand?");
     });
+  });
+
+  it("applies template overrides to fallback rounds when brand data is sparse", () => {
+    const result = generateChallengeQuestions(
+      "challenge-1",
+      makeBrand({
+        tagline: null,
+        usp: null,
+        product_image_keys: [],
+        question_template: {
+          round_1: { question_text: "Fallback round 1", prompt_type: "tagline" },
+          round_2: { question_text: "Fallback round 2", prompt_type: "productImage1" },
+          round_3: { question_text: "Fallback round 3", prompt_type: "logo" },
+        },
+      }),
+      distractorPool
+    );
+
+    expect(result.map((q) => q.question_text)).toEqual([
+      "Fallback round 1",
+      "Fallback round 2",
+      "Fallback round 3",
+    ]);
+    expect(result.map((q) => q.prompt_type)).toEqual(["tagline", "productImage1", "logo"]);
+  });
+
+  it("falls back to brand recognition for missing product imagery", () => {
+    const result = generateChallengeQuestions(
+      "challenge-1",
+      makeBrand({ product_image_keys: [] }),
+      distractorPool
+    );
+
+    expect(result).toHaveLength(3);
+    const round3 = result.find((q) => q.round === 3)!;
+    expect(round3.question_type).toBe("which_brand");
+    expect(round3.prompt_type).toBe("logo");
+    expect(round3.question_text).toBe("What is the name of this brand?");
+    expect(round3.correct_answer).toBe("BrandX");
   });
 
   it("sets challenge_id on all questions", () => {
