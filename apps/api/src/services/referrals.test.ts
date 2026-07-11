@@ -133,4 +133,151 @@ describe("queueReferralBonusForPayout", () => {
     expect(mocks.markReferralRewarded).toHaveBeenCalledWith("referral-1");
     expect(mocks.enqueueReferralBonus).toHaveBeenCalledWith("payout-1");
   });
+
+  it("does nothing when the referred user has no referral", async () => {
+    mocks.findReferralByReferredId.mockResolvedValue(null);
+
+    await queueReferralBonusForPayout({
+      referredUserId: "referred-1",
+      challengeId: "challenge-1",
+      referralWinAmountStroops: 100_000_000n,
+    });
+
+    expect(mocks.getSession).not.toHaveBeenCalled();
+    expect(mocks.findUserById).not.toHaveBeenCalled();
+    expect(mocks.createReferralPayout).not.toHaveBeenCalled();
+    expect(mocks.markReferralRewarded).not.toHaveBeenCalled();
+    expect(mocks.enqueueReferralBonus).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the referral was already rewarded", async () => {
+    mocks.findReferralByReferredId.mockResolvedValue({
+      id: "referral-1",
+      referrer_id: "referrer-1",
+      referred_id: "referred-1",
+      rewarded: true,
+    });
+
+    await queueReferralBonusForPayout({
+      referredUserId: "referred-1",
+      challengeId: "challenge-1",
+      referralWinAmountStroops: 100_000_000n,
+    });
+
+    expect(mocks.getSession).not.toHaveBeenCalled();
+    expect(mocks.findUserById).not.toHaveBeenCalled();
+    expect(mocks.createReferralPayout).not.toHaveBeenCalled();
+    expect(mocks.markReferralRewarded).not.toHaveBeenCalled();
+    expect(mocks.enqueueReferralBonus).not.toHaveBeenCalled();
+  });
+
+  it("uses embedded wallet addresses before Stellar addresses", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ exists: false }] });
+    mocks.findUserById.mockImplementation((userId: string) =>
+      Promise.resolve({
+        id: userId,
+        stellar_address: `${userId}-stellar`,
+        embedded_wallet_address: `${userId}-embedded`,
+      })
+    );
+
+    await queueReferralBonusForPayout({
+      referredUserId: "referred-1",
+      challengeId: "challenge-1",
+      referralWinAmountStroops: 100_000_000n,
+    });
+
+    expect(mocks.createReferralPayout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referrerStellarAddress: "referrer-1-embedded",
+        referredStellarAddress: "referred-1-embedded",
+      })
+    );
+  });
+
+  it("does not create a payout when either user lacks a payout address", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ exists: false }] });
+    mocks.findUserById.mockImplementation((userId: string) =>
+      Promise.resolve({
+        id: userId,
+        stellar_address: userId === "referrer-1" ? "" : `${userId}-stellar`,
+        embedded_wallet_address: null,
+      })
+    );
+
+    await queueReferralBonusForPayout({
+      referredUserId: "referred-1",
+      challengeId: "challenge-1",
+      referralWinAmountStroops: 100_000_000n,
+    });
+
+    expect(mocks.createReferralPayout).not.toHaveBeenCalled();
+    expect(mocks.markReferralRewarded).not.toHaveBeenCalled();
+    expect(mocks.enqueueReferralBonus).not.toHaveBeenCalled();
+  });
+
+  it("caps the referrer bonus at five USDC", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ exists: false }] });
+
+    await queueReferralBonusForPayout({
+      referredUserId: "referred-1",
+      challengeId: "challenge-1",
+      referralWinAmountStroops: 1_000_000_000n,
+    });
+
+    expect(mocks.createReferralPayout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referrerAmountStroops: 50_000_000n,
+        referredAmountStroops: 10_000_000n,
+      })
+    );
+  });
+
+  it("skips payout creation when the referrer bonus rounds down to zero", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ exists: false }] });
+
+    await queueReferralBonusForPayout({
+      referredUserId: "referred-1",
+      challengeId: "challenge-1",
+      referralWinAmountStroops: 9n,
+    });
+
+    expect(mocks.createReferralPayout).not.toHaveBeenCalled();
+    expect(mocks.markReferralRewarded).not.toHaveBeenCalled();
+    expect(mocks.enqueueReferralBonus).not.toHaveBeenCalled();
+  });
+
+  it("does not check fraud flags when no challenge id is provided", async () => {
+    await queueReferralBonusForPayout({
+      referredUserId: "referred-1",
+      challengeId: null,
+      referralWinAmountStroops: 100_000_000n,
+    });
+
+    expect(mocks.getSession).not.toHaveBeenCalled();
+    expect(mocks.query).not.toHaveBeenCalled();
+    expect(mocks.createReferralPayout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        challengeId: null,
+      })
+    );
+    expect(mocks.enqueueReferralBonus).toHaveBeenCalledWith("payout-1");
+  });
+
+  it("does not enqueue when payout creation returns a non-pending payout", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ exists: false }] });
+    mocks.createReferralPayout.mockResolvedValue({
+      id: "payout-1",
+      status: "sent",
+    });
+
+    await queueReferralBonusForPayout({
+      referredUserId: "referred-1",
+      challengeId: "challenge-1",
+      referralWinAmountStroops: 100_000_000n,
+    });
+
+    expect(mocks.markReferralRewarded).not.toHaveBeenCalled();
+    expect(mocks.enqueueReferralBonus).not.toHaveBeenCalled();
+  });
 });
