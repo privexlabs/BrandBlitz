@@ -261,11 +261,11 @@ export const webhookRotationLimiter = rateLimit({
 });
 
 /**
- * Waitlist signup: 5 req / 15 min per IP.
+ * Waitlist signup: 5 req / hour per IP.
  * Public endpoint — keyed by IP to prevent bulk scraping.
  */
 export const waitlistLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 60 * 60 * 1000,
   max: 5,
   standardHeaders: "draft-7",
   legacyHeaders: false,
