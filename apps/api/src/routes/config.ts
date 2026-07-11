@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getPublicConfig, type PublicConfig } from "../db/queries/config";
+import { getPublicConfig } from "../db/queries/config";
 import { redis } from "../lib/redis";
 
 export const PUBLIC_CONFIG_CACHE_KEY = "config:public";
@@ -10,11 +10,13 @@ const router = Router();
 /**
  * GET /config
  *
- * Public, read-through runtime configuration. The exact JSON envelope is
+ * Public, read-through runtime configuration. The exact JSON payload is
  * constructed before it reaches Redis so cached and uncached responses are
  * byte-for-byte the same shape.
  */
 router.get("/", async (_req, res) => {
+  res.set("Cache-Control", "public, max-age=60");
+
   const cached = await redis.get(PUBLIC_CONFIG_CACHE_KEY);
   if (cached !== null) {
     res.set("X-Cache", "HIT");
@@ -23,16 +25,15 @@ router.get("/", async (_req, res) => {
   }
 
   const config = await getPublicConfig();
-  const payload: { config: PublicConfig } = { config };
   await redis.set(
     PUBLIC_CONFIG_CACHE_KEY,
-    JSON.stringify(payload),
+    JSON.stringify(config),
     "EX",
-    PUBLIC_CONFIG_CACHE_TTL_SECONDS,
+    PUBLIC_CONFIG_CACHE_TTL_SECONDS
   );
 
   res.set("X-Cache", "MISS");
-  res.json(payload);
+  res.json(config);
 });
 
 export default router;
