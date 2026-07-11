@@ -74,6 +74,7 @@ vi.mock("@stellar/stellar-sdk", () => {
 });
 
 import { refundChallenge } from "./refund";
+import { Memo, Operation } from "@stellar/stellar-sdk";
 
 describe("refundChallenge", () => {
   beforeEach(() => {
@@ -118,7 +119,60 @@ describe("refundChallenge", () => {
       "00000000-0000-0000-0000-000000000001",
       "refunded"
     );
-    expect(mocks.query).toHaveBeenCalled();
+    expect(Memo.text).toHaveBeenCalledWith("REFUND:00000000-0000-0000-00");
+    expect(Operation.payment).toHaveBeenCalledWith({
+      destination: "GBRAND",
+      asset: { code: "USDC", issuer: "GISSUER" },
+      amount: "0.2500000",
+    });
+    expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining("challenge_refund"), [
+      "admin-1",
+      "00000000-0000-0000-0000-000000000001",
+      JSON.stringify({
+        refundId: "refund-1",
+        txHash: "refund-tx",
+        amount: "0.2500000",
+        destination: "GBRAND",
+        reason: "brand requested cancellation",
+      }),
+    ]);
+  });
+
+  it("returns an existing refund without submitting a duplicate payment", async () => {
+    const existingRefund = {
+      id: "refund-existing",
+      challenge_id: "00000000-0000-0000-0000-000000000001",
+      tx_hash: "existing-refund-tx",
+    };
+    mocks.findRefundByChallengeId.mockResolvedValue(existingRefund);
+
+    const refund = await refundChallenge({
+      challengeId: "00000000-0000-0000-0000-000000000001",
+      adminId: "admin-1",
+      reason: "duplicate request",
+    });
+
+    expect(refund).toBe(existingRefund);
+    expect(mocks.getChallengeById).not.toHaveBeenCalled();
+    expect(mocks.submitTransaction).not.toHaveBeenCalled();
+    expect(mocks.createRefund).not.toHaveBeenCalled();
+    expect(mocks.updateChallengeStatus).not.toHaveBeenCalled();
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the challenge does not exist", async () => {
+    mocks.getChallengeById.mockResolvedValue(null);
+
+    await expect(
+      refundChallenge({
+        challengeId: "00000000-0000-0000-0000-000000000001",
+        adminId: "admin-1",
+        reason: "test",
+      })
+    ).rejects.toThrow("Challenge not found");
+
+    expect(mocks.submitTransaction).not.toHaveBeenCalled();
+    expect(mocks.createRefund).not.toHaveBeenCalled();
   });
 
   it("rejects an already-settled challenge", async () => {
@@ -136,6 +190,9 @@ describe("refundChallenge", () => {
         reason: "test",
       })
     ).rejects.toThrow("Challenge already settled");
+
+    expect(mocks.submitTransaction).not.toHaveBeenCalled();
+    expect(mocks.createRefund).not.toHaveBeenCalled();
   });
 
   it("rejects when no deposit is found", async () => {
@@ -153,5 +210,83 @@ describe("refundChallenge", () => {
         reason: "test",
       })
     ).rejects.toThrow("No deposit found");
+
+    expect(mocks.forTransaction).not.toHaveBeenCalled();
+    expect(mocks.submitTransaction).not.toHaveBeenCalled();
+    expect(mocks.createRefund).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the deposit transaction has no payment sender", async () => {
+    mocks.getChallengeById.mockResolvedValue({
+      id: "00000000-0000-0000-0000-000000000001",
+      status: "active",
+      deposit_tx_hash: "deposit-tx",
+      pool_amount_stroops: "2500000",
+    });
+    mocks.forTransaction.mockReturnValue({
+      call: vi.fn().mockResolvedValue({
+        records: [{ type: "change_trust", source_account: "GBRAND" }],
+      }),
+    });
+
+    await expect(
+      refundChallenge({
+        challengeId: "00000000-0000-0000-0000-000000000001",
+        adminId: "admin-1",
+        reason: "test",
+      })
+    ).rejects.toThrow("No deposit found");
+
+    expect(mocks.submitTransaction).not.toHaveBeenCalled();
+    expect(mocks.createRefund).not.toHaveBeenCalled();
+  });
+
+  it("falls back to source_account when the payment operation has no from field", async () => {
+    mocks.getChallengeById.mockResolvedValue({
+      id: "00000000-0000-0000-0000-000000000001",
+      status: "active",
+      deposit_tx_hash: "deposit-tx",
+      pool_amount_stroops: "2500000",
+    });
+    mocks.forTransaction.mockReturnValue({
+      call: vi.fn().mockResolvedValue({
+        records: [{ type: "payment", source_account: "GSOURCE" }],
+      }),
+    });
+
+    await refundChallenge({
+      challengeId: "00000000-0000-0000-0000-000000000001",
+      adminId: "admin-1",
+      reason: "brand requested cancellation",
+    });
+
+    expect(mocks.createRefund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destination: "GSOURCE",
+        txHash: "refund-tx",
+      })
+    );
+  });
+
+  it("does not persist refund state when the Stellar refund submission fails", async () => {
+    mocks.getChallengeById.mockResolvedValue({
+      id: "00000000-0000-0000-0000-000000000001",
+      status: "active",
+      deposit_tx_hash: "deposit-tx",
+      pool_amount_stroops: "2500000",
+    });
+    mocks.submitTransaction.mockRejectedValue(new Error("horizon timeout"));
+
+    await expect(
+      refundChallenge({
+        challengeId: "00000000-0000-0000-0000-000000000001",
+        adminId: "admin-1",
+        reason: "test",
+      })
+    ).rejects.toThrow("horizon timeout");
+
+    expect(mocks.createRefund).not.toHaveBeenCalled();
+    expect(mocks.updateChallengeStatus).not.toHaveBeenCalled();
+    expect(mocks.query).not.toHaveBeenCalled();
   });
 });
