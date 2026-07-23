@@ -62,21 +62,11 @@ function parseLeaderboardSort(query: Record<string, unknown>): LeaderboardSort {
     throw createError(
       `Invalid leaderboard sort. Allowed values: ${LEADERBOARD_SORTS.join(", ")}`,
       400,
-      "INVALID_SORT",
+      "INVALID_SORT"
     );
   }
   return parsed.data;
 }
-/**
- * Get required deposit confirmations from app_config.
- */
-async function getRequiredConfirmations(): Promise<number> {
-  const result = await query<{ value: { confirmations: number } }>(
-    "SELECT value FROM app_config WHERE key = 'deposit_required_confirmations'"
-  );
-  return result.rows[0]?.value?.confirmations ?? 5;
-}
-
 const ChallengeFilterSchema = CursorQuerySchema.extend({
   brandId: z.string().uuid().optional(),
   status: z.enum(["active", "upcoming", "ended"]).optional(),
@@ -109,10 +99,8 @@ router.get("/", optionalAuth, async (req, res) => {
   if (!hasFilters) {
     const cacheKey = `challenges:active:global:${cursor ?? "start"}:${limit}`;
     const cacheHit = await redis.get(cacheKey);
-    const result = await withCoalescing(
-      cacheKey,
-      CHALLENGES_CACHE_TTL_SEC,
-      () => getActiveChallengesCursor(cursor, limit)
+    const result = await withCoalescing(cacheKey, CHALLENGES_CACHE_TTL_SEC, () =>
+      getActiveChallengesCursor(cursor, limit)
     );
     res.setHeader("X-Cache", cacheHit !== null ? "HIT" : "MISS");
     res.json({ data: result.challenges, nextCursor: result.nextCursor });
@@ -160,23 +148,71 @@ router.get("/:id", optionalAuth, async (req, res) => {
   }
 
   res.json(payload);
-  // For pending_deposit challenges, include confirmation info
-  let confirmationInfo = null;
-  if (challenge.status === "pending_deposit") {
-    const requiredConfirmations = await getRequiredConfirmations();
-    confirmationInfo = {
-      depositConfirmations: challenge.deposit_confirmations,
-      requiredConfirmations,
-    };
+});
+
+type ChallengeStatsRow = {
+  total_sessions: number;
+  completed_sessions: number;
+  completion_rate_pct: number;
+  disqualification_rate_pct: number;
+  avg_score: number;
+  avg_accuracy_pct: number;
+  avg_time_per_round_ms: number;
+  total_paid_out_usdc: number;
+  cost_per_completed_session_usdc: number;
+  unique_participants: number;
+};
+
+/** GET /challenges/:id/stats — aggregate performance metrics for brand owners and admins. */
+router.get("/:id/stats", authenticate, async (req, res) => {
+  const challenge = await getChallengeByIdAny(req.params.id);
+  if (!challenge) throw createError("Challenge not found", 404);
+
+  if (req.user?.role !== "admin") {
+    const brand = await getBrandById(challenge.brand_id);
+    if (!brand || brand.owner_user_id !== req.user?.sub) {
+      throw createError("Forbidden", 403, "FORBIDDEN");
+    }
   }
 
-  res.json({
-    challenge: {
-      ...challenge,
-      ...(confirmationInfo && confirmationInfo),
-    },
-    questions: safeQuestions,
-  });
+  const result = await query<ChallengeStatsRow>(
+    `WITH session_stats AS (
+       SELECT COUNT(*)::int AS total_sessions,
+              COUNT(*) FILTER (WHERE status = 'completed')::int AS completed_sessions,
+              COUNT(DISTINCT user_id)::int AS unique_participants,
+              COUNT(*) FILTER (WHERE flagged OR status = 'flagged')::int AS disqualified_sessions
+       FROM game_sessions
+       WHERE challenge_id = $1
+     ),
+     round_stats AS (
+       SELECT COALESCE(ROUND(AVG(srs.score)::numeric, 2), 0)::float8 AS avg_score,
+              COALESCE(ROUND(AVG(CASE WHEN srs.answer = cq.correct_option THEN 100.0 ELSE 0 END)::numeric, 2), 0)::float8 AS avg_accuracy_pct,
+              COALESCE(ROUND(AVG(srs.reaction_time_ms)::numeric, 2), 0)::float8 AS avg_time_per_round_ms
+       FROM session_round_scores srs
+       JOIN game_sessions gs ON gs.id = srs.session_id
+       JOIN challenge_questions cq ON cq.challenge_id = gs.challenge_id AND cq.round = srs.round
+       WHERE gs.challenge_id = $1
+     ),
+     payout_stats AS (
+       SELECT COALESCE(SUM(amount_stroops), 0)::numeric / 10000000 AS total_paid_out_usdc
+       FROM payouts
+       WHERE challenge_id = $1 AND status IN ('completed', 'sent', 'confirmed')
+     )
+     SELECT ss.total_sessions,
+            ss.completed_sessions,
+            CASE WHEN ss.total_sessions = 0 THEN 0 ELSE ROUND(ss.completed_sessions * 100.0 / ss.total_sessions, 2)::float8 END AS completion_rate_pct,
+            CASE WHEN ss.total_sessions = 0 THEN 0 ELSE ROUND(ss.disqualified_sessions * 100.0 / ss.total_sessions, 2)::float8 END AS disqualification_rate_pct,
+            rs.avg_score,
+            rs.avg_accuracy_pct,
+            rs.avg_time_per_round_ms,
+            ps.total_paid_out_usdc::float8 AS total_paid_out_usdc,
+            CASE WHEN ss.completed_sessions = 0 THEN 0 ELSE ROUND(ps.total_paid_out_usdc / ss.completed_sessions, 7)::float8 END AS cost_per_completed_session_usdc,
+            ss.unique_participants
+     FROM session_stats ss CROSS JOIN round_stats rs CROSS JOIN payout_stats ps`,
+    [challenge.id]
+  );
+
+  res.json({ stats: result.rows[0] });
 });
 
 /**
@@ -282,10 +318,9 @@ router.post("/:id/report", authenticate, reportLimiter, async (req, res) => {
       [challenge.id, userId, body.reason, body.note ?? null]
     );
 
-    await client.query(
-      `UPDATE challenges SET reported_count = reported_count + 1 WHERE id = $1`,
-      [challenge.id]
-    );
+    await client.query(`UPDATE challenges SET reported_count = reported_count + 1 WHERE id = $1`, [
+      challenge.id,
+    ]);
 
     await client.query("COMMIT");
   } catch (err) {
