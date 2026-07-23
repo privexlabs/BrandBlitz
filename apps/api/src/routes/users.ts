@@ -244,6 +244,134 @@ router.get("/profile/:username", apiLimiter, async (req, res) => {
 });
 
 /**
+ * GET /users/:username/public
+ * Public profile — username, avatar, join date, win count, total sessions,
+ * accuracy, league, and the 6 most recently awarded badges.
+ * No authentication required. Returns 404 for unknown, deleted, or suspended users.
+ */
+router.get("/:username/public", apiLimiter, async (req, res) => {
+  const { username } = z.object({ username: z.string() }).parse(req.params);
+
+  // Fetch the user row — only active, non-deleted accounts are visible.
+  const userResult = await query<{
+    id: string;
+    username: string;
+    display_name: string;
+    avatar_url: string | null;
+    created_at: string;
+    league: "bronze" | "silver" | "gold" | null;
+    status: string;
+    deleted_at: string | null;
+  }>(
+    `SELECT id, username, display_name, avatar_url, created_at, league, status, deleted_at
+     FROM users
+     WHERE username = $1
+     LIMIT 1`,
+    [username]
+  );
+
+  const user = userResult.rows[0];
+
+  // 404 for unknown, GDPR-erased (deleted_at set), or suspended accounts.
+  // We return 404 in all cases — never 403 — to avoid user enumeration.
+  if (!user || user.deleted_at !== null || user.status !== "active") {
+    throw createError("User not found", 404);
+  }
+
+  // Session stats: win_count (completed, non-practice), total_sessions_played,
+  // and accuracy_pct (rounds with score > 0 / total rounds across completed sessions).
+  const statsResult = await query<{
+    win_count: string;
+    total_sessions_played: string;
+    correct_rounds: string;
+    total_rounds: string;
+  }>(
+    `SELECT
+       COUNT(*) FILTER (WHERE status = 'completed' AND is_practice = FALSE)  AS win_count,
+       COUNT(*) FILTER (WHERE status = 'completed')                          AS total_sessions_played,
+       (
+         COUNT(*) FILTER (WHERE status = 'completed' AND round_1_score > 0)
+         + COUNT(*) FILTER (WHERE status = 'completed' AND round_2_score > 0)
+         + COUNT(*) FILTER (WHERE status = 'completed' AND round_3_score > 0)
+       )                                                                      AS correct_rounds,
+       (COUNT(*) FILTER (WHERE status = 'completed') * 3)                    AS total_rounds
+     FROM game_sessions
+     WHERE user_id = $1`,
+    [user.id]
+  );
+
+  const stats = statsResult.rows[0];
+  const winCount = parseInt(stats.win_count, 10);
+  const totalSessionsPlayed = parseInt(stats.total_sessions_played, 10);
+  const correctRounds = parseInt(stats.correct_rounds, 10);
+  const totalRounds = parseInt(stats.total_rounds, 10);
+  const accuracyPct = totalRounds > 0 ? Math.round((correctRounds / totalRounds) * 100) : 0;
+
+  // League: most recent assignment for the current (or last) week.
+  const leagueResult = await query<{
+    league: string;
+    rank_in_group: number | null;
+    week_start: string;
+    weekly_points: string;
+  }>(
+    `SELECT league, rank_in_group, week_start, weekly_points
+     FROM league_assignments
+     WHERE user_id = $1
+     ORDER BY week_start DESC
+     LIMIT 1`,
+    [user.id]
+  );
+
+  const leagueRow = leagueResult.rows[0] ?? null;
+  const league = leagueRow
+    ? {
+        tier: leagueRow.league,
+        rank: leagueRow.rank_in_group,
+        season: leagueRow.week_start,
+      }
+    : null;
+
+  // Badges: 6 most recently awarded, enriched with definition metadata.
+  const badgesResult = await query<{
+    badge_slug: string;
+    awarded_at: string;
+  }>(
+    `SELECT badge_slug, awarded_at
+     FROM user_badges
+     WHERE user_id = $1
+     ORDER BY awarded_at DESC
+     LIMIT 6`,
+    [user.id]
+  );
+
+  const { BADGE_DEFINITIONS } = await import("../services/badges");
+  const defMap = new Map(BADGE_DEFINITIONS.map((d) => [d.slug, d]));
+
+  const badges = badgesResult.rows.map((row) => {
+    const def = defMap.get(row.badge_slug);
+    return {
+      slug: row.badge_slug,
+      name: def?.name ?? row.badge_slug,
+      description: def?.description ?? "",
+      iconUrl: def?.iconUrl ?? null,
+      awardedAt: row.awarded_at,
+    };
+  });
+
+  res.json({
+    username: user.username,
+    displayName: user.display_name,
+    avatarUrl: user.avatar_url,
+    joinedAt: user.created_at,
+    winCount,
+    totalSessionsPlayed,
+    accuracyPct,
+    league,
+    badges,
+  });
+});
+
+/**
  * GET /users/:id/badges
  * Returns all 8 badge definitions merged with the user's earned status.
  * Earned badges include awarded_at; locked badges are included with earned=false.
