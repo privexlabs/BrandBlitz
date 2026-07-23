@@ -1,36 +1,128 @@
 import { Router } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/authenticate";
+import { requireAdmin } from "../middleware/require-admin";
 import { getArchivedChallengeById } from "../db/queries/challenges";
-import { findUserById } from "../db/queries/users";
 import { setConfig } from "../db/queries/config";
 import { ensureLeagueRepeatableJobs } from "../queues/league.queue";
-import { createError } from "../middleware/error";
-import { logger } from "../lib/logger";
-import {
-  DLQ_QUEUES,
-  DLQ_SOURCE_QUEUES,
-  type DeadLetterPayload,
-} from "../queues/dlq";
-import { feeBumpTransaction } from "@brandblitz/stellar";
-import { updatePayoutFeeBumpStatus } from "../db/queries/payouts";
-import { config } from "../lib/config";
 import { query } from "../db/index";
-import { webhookRotationLimiter } from "../middleware/rate-limit";
+import { decodeCursorSafe, encodeCursor } from "../db/pagination";
+import { createError } from "../middleware/error";
 
 const router = Router();
 
-// Admin leaderboard-style queries must follow the same rule as
-// routes/leaderboard.ts: validate sort params against an allowlist before
-// choosing an ORDER BY expression. This file currently has no user-controlled
-// leaderboard ORDER BY clauses.
-
 router.use(authenticate);
+router.use(requireAdmin);
 
-router.use(async (req, _res, next) => {
-  const user = await findUserById(req.user!.sub);
-  if (!user || user.role !== "admin") throw createError("Forbidden", 403, "FORBIDDEN");
-  next();
+const ListUsersQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  cursor: z.string().optional(),
+  minFraudScore: z.coerce.number().int().min(0).default(0),
+  orderBy: z.enum(["createdAt", "fraudScore"]).default("createdAt"),
+});
+
+type AdminUserRow = {
+  id: string;
+  username: string | null;
+  email: string;
+  created_at: string;
+  suspended_at: string | null;
+  fraud_score: number;
+  total_payouts: number;
+};
+
+router.get("/users", async (req, res) => {
+  const { limit, cursor, minFraudScore, orderBy } = ListUsersQuerySchema.parse(req.query);
+  const expectedCursorKeys =
+    orderBy === "fraudScore" ? ["fraudScore", "createdAt", "id"] : ["createdAt", "id"];
+  const cursorValues = decodeCursorSafe(cursor, expectedCursorKeys);
+
+  const params: unknown[] = [minFraudScore];
+  let cursorClause = "";
+
+  if (cursorValues) {
+    if (orderBy === "fraudScore") {
+      params.push(cursorValues.fraudScore, cursorValues.createdAt, cursorValues.id);
+      cursorClause = `
+        AND (
+          fraud_score < $2
+          OR (fraud_score = $2 AND created_at < $3)
+          OR (fraud_score = $2 AND created_at = $3 AND id < $4)
+        )`;
+    } else {
+      params.push(cursorValues.createdAt, cursorValues.id);
+      cursorClause = `
+        AND (
+          created_at < $2
+          OR (created_at = $2 AND id < $3)
+        )`;
+    }
+  }
+
+  params.push(limit + 1);
+  const limitParam = params.length;
+  const orderClause =
+    orderBy === "fraudScore"
+      ? "fraud_score DESC, created_at DESC, id DESC"
+      : "created_at DESC, id DESC";
+
+  const result = await query<AdminUserRow>(
+    `WITH fraud_totals AS (
+       SELECT user_id, COUNT(*)::int AS fraud_score
+       FROM fraud_flags
+       GROUP BY user_id
+     ),
+     payout_totals AS (
+       SELECT user_id, COUNT(*)::int AS total_payouts
+       FROM payouts
+       GROUP BY user_id
+     ),
+     user_metrics AS (
+       SELECT u.id,
+              u.username,
+              u.email,
+              u.created_at,
+              u.suspended_at,
+              COALESCE(ft.fraud_score, 0)::int AS fraud_score,
+              COALESCE(pt.total_payouts, 0)::int AS total_payouts
+       FROM users u
+       LEFT JOIN fraud_totals ft ON ft.user_id = u.id
+       LEFT JOIN payout_totals pt ON pt.user_id = u.id
+       WHERE u.deleted_at IS NULL
+     )
+     SELECT *
+     FROM user_metrics
+     WHERE fraud_score >= $1
+     ${cursorClause}
+     ORDER BY ${orderClause}
+     LIMIT $${limitParam}`,
+    params
+  );
+
+  const hasMore = result.rows.length > limit;
+  const rows = result.rows.slice(0, limit);
+  const last = rows.at(-1);
+  const nextCursor =
+    hasMore && last
+      ? encodeCursor({
+          ...(orderBy === "fraudScore" ? { fraudScore: last.fraud_score } : {}),
+          createdAt: last.created_at,
+          id: last.id,
+        })
+      : null;
+
+  res.json({
+    users: rows.map((user) => ({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      createdAt: user.created_at,
+      suspendedAt: user.suspended_at,
+      fraudScore: user.fraud_score,
+      totalPayouts: user.total_payouts,
+    })),
+    nextCursor,
+  });
 });
 
 router.get("/archive/challenges/:id", async (req, res) => {
@@ -40,25 +132,30 @@ router.get("/archive/challenges/:id", async (req, res) => {
 });
 
 const LeagueScheduleSchema = z.object({
-  finalizeCron: z.string().regex(/^[\d\s\*\/\-\,]+$/).optional(),
-  startCron: z.string().regex(/^[\d\s\*\/\-\,]+$/).optional(),
+  finalizeCron: z
+    .string()
+    .regex(/^[\d\s\*\/\-\,]+$/)
+    .optional(),
+  startCron: z
+    .string()
+    .regex(/^[\d\s\*\/\-\,]+$/)
+    .optional(),
 });
 
 router.patch("/config/league-schedule", async (req, res) => {
   const body = LeagueScheduleSchema.parse(req.body);
-  
+
   if (body.finalizeCron) {
     await setConfig("league_cron_finalize", { cron: body.finalizeCron }, req.user!.sub);
   }
-  
+
   if (body.startCron) {
     await setConfig("league_cron_start", { cron: body.startCron }, req.user!.sub);
   }
 
-  // Reload repeatable jobs with new schedule
   await ensureLeagueRepeatableJobs();
 
-  res.json({ 
+  res.json({
     status: "updated",
     finalizeCron: body.finalizeCron,
     startCron: body.startCron,
