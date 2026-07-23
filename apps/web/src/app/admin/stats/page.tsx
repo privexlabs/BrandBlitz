@@ -7,6 +7,7 @@ import { createApiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueueStatsCard, type QueueStats } from "./queue-stats-card";
 
 interface DauEntry {
   date: string;
@@ -38,7 +39,8 @@ function formatShortDate(iso: string): string {
 }
 
 function LineChart({ data, label }: { data: { x: string; y: number }[]; label: string }) {
-  if (data.length === 0) return <div className="py-8 text-center text-sm text-gray-400">No data</div>;
+  if (data.length === 0)
+    return <div className="py-8 text-center text-sm text-gray-400">No data</div>;
   const maxVal = Math.max(...data.map((d) => d.y), 1);
   const width = 600;
   const height = 200;
@@ -58,10 +60,20 @@ function LineChart({ data, label }: { data: { x: string; y: number }[]; label: s
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label={label}>
-      <text x={padding.left - 5} y={padding.top + 4} className="fill-current text-xs" textAnchor="end">
+      <text
+        x={padding.left - 5}
+        y={padding.top + 4}
+        className="fill-current text-xs"
+        textAnchor="end"
+      >
         {maxVal}
       </text>
-      <text x={padding.left - 5} y={padding.top + chartH + 4} className="fill-current text-xs" textAnchor="end">
+      <text
+        x={padding.left - 5}
+        y={padding.top + chartH + 4}
+        className="fill-current text-xs"
+        textAnchor="end"
+      >
         0
       </text>
       <polyline
@@ -75,7 +87,13 @@ function LineChart({ data, label }: { data: { x: string; y: number }[]; label: s
         const idx = data.indexOf(d);
         const x = padding.left + (idx / Math.max(data.length - 1, 1)) * chartW;
         return (
-          <text key={i} x={x} y={height - 5} className="fill-current text-[10px]" textAnchor="middle">
+          <text
+            key={i}
+            x={x}
+            y={height - 5}
+            className="fill-current text-[10px]"
+            textAnchor="middle"
+          >
             {formatShortDate(d.x)}
           </text>
         );
@@ -85,7 +103,8 @@ function LineChart({ data, label }: { data: { x: string; y: number }[]; label: s
 }
 
 function BarChart({ data, label }: { data: { x: string; y: number }[]; label: string }) {
-  if (data.length === 0) return <div className="py-8 text-center text-sm text-gray-400">No data</div>;
+  if (data.length === 0)
+    return <div className="py-8 text-center text-sm text-gray-400">No data</div>;
   const maxVal = Math.max(...data.map((d) => d.y), 1);
   const width = 600;
   const height = 200;
@@ -100,10 +119,20 @@ function BarChart({ data, label }: { data: { x: string; y: number }[]; label: st
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label={label}>
-      <text x={padding.left - 5} y={padding.top + 4} className="fill-current text-xs" textAnchor="end">
+      <text
+        x={padding.left - 5}
+        y={padding.top + 4}
+        className="fill-current text-xs"
+        textAnchor="end"
+      >
         {maxVal.toFixed(1)}
       </text>
-      <text x={padding.left - 5} y={padding.top + chartH + 4} className="fill-current text-xs" textAnchor="end">
+      <text
+        x={padding.left - 5}
+        y={padding.top + chartH + 4}
+        className="fill-current text-xs"
+        textAnchor="end"
+      >
         0
       </text>
       {data.map((d, i) => {
@@ -111,22 +140,20 @@ function BarChart({ data, label }: { data: { x: string; y: number }[]; label: st
         const barH = (d.y / maxVal) * chartH;
         const y = padding.top + chartH - barH;
         return (
-          <rect
-            key={i}
-            x={x}
-            y={y}
-            width={barWidth}
-            height={barH}
-            fill="var(--primary)"
-            rx="2"
-          />
+          <rect key={i} x={x} y={y} width={barWidth} height={barH} fill="var(--primary)" rx="2" />
         );
       })}
       {ticks.map((d, i) => {
         const idx = data.indexOf(d);
         const x = padding.left + (idx / data.length) * chartW + barWidth / 2 + 1;
         return (
-          <text key={i} x={x} y={height - 5} className="fill-current text-[10px]" textAnchor="middle">
+          <text
+            key={i}
+            x={x}
+            y={height - 5}
+            className="fill-current text-[10px]"
+            textAnchor="middle"
+          >
             {formatShortDate(d.x)}
           </text>
         );
@@ -145,6 +172,7 @@ export default function AdminStatsPage() {
   const [usdcVolume, setUsdcVolume] = useState<UsdcEntry[]>([]);
   const [topBrands, setTopBrands] = useState<TopBrand[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [queueStats, setQueueStats] = useState<QueueStats>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange>("30");
@@ -164,11 +192,15 @@ export default function AdminStatsPage() {
       setError(false);
       try {
         const api = createApiClient(apiToken);
-        const res = await api.get("/admin/stats", { params: { days: Number(days) } });
-        setDau(res.data.dau);
-        setUsdcVolume(res.data.usdcVolume);
-        setTopBrands(res.data.topBrands);
-        setSummary(res.data.summary);
+        const [statsResponse, queueResponse] = await Promise.all([
+          api.get("/admin/stats", { params: { days: Number(days) } }),
+          api.get("/admin/queue-stats"),
+        ]);
+        setDau(statsResponse.data.dau);
+        setUsdcVolume(statsResponse.data.usdcVolume);
+        setTopBrands(statsResponse.data.topBrands);
+        setSummary(statsResponse.data.summary);
+        setQueueStats(queueResponse.data.queues);
       } catch {
         setError(true);
       } finally {
@@ -266,10 +298,7 @@ export default function AdminStatsPage() {
                 <CardTitle className="text-base">Daily Active Users</CardTitle>
               </CardHeader>
               <CardContent>
-                <LineChart
-                  data={dau.map((d) => ({ x: d.date, y: d.dau }))}
-                  label="DAU"
-                />
+                <LineChart data={dau.map((d) => ({ x: d.date, y: d.dau }))} label="DAU" />
               </CardContent>
             </Card>
 
@@ -317,6 +346,8 @@ export default function AdminStatsPage() {
               )}
             </CardContent>
           </Card>
+
+          <QueueStatsCard queues={queueStats} />
         </>
       )}
     </div>
