@@ -286,6 +286,142 @@ export async function getChallengesByBrandId(
 
   return { challenges, nextCursor };
 }
+export type ActiveChallengesSort = "pool_desc" | "pool_asc" | "newest" | "ending_soon";
+
+export interface ActiveChallengeSortedRow {
+  id: string;
+  brand_id: string;
+  title: string | null;
+  pool_amount_usdc: string;
+  ends_at: string | null;
+  participant_count: number;
+  brand_name: string | null;
+  logo_url: string | null;
+  primary_color: string | null;
+  secondary_color: string | null;
+  // cursor fields kept for internal use
+  pool_amount_stroops: string;
+  created_at: string;
+}
+
+const SORT_CONFIG: Record<
+  ActiveChallengesSort,
+  { orderBy: string; cursorKeys: [string, string]; cursorDir: "ASC" | "DESC" }
+> = {
+  pool_desc: {
+    orderBy: "c.pool_amount_stroops DESC, c.id DESC",
+    cursorKeys: ["pool_amount_stroops", "id"],
+    cursorDir: "DESC",
+  },
+  pool_asc: {
+    orderBy: "c.pool_amount_stroops ASC, c.id ASC",
+    cursorKeys: ["pool_amount_stroops", "id"],
+    cursorDir: "ASC",
+  },
+  newest: {
+    orderBy: "c.created_at DESC, c.id DESC",
+    cursorKeys: ["created_at", "id"],
+    cursorDir: "DESC",
+  },
+  ending_soon: {
+    orderBy: "c.ends_at ASC NULLS LAST, c.id ASC",
+    cursorKeys: ["ends_at", "id"],
+    cursorDir: "ASC",
+  },
+};
+
+/**
+ * Get active challenges sorted by one of four modes with cursor pagination.
+ *
+ * Sort modes:
+ *   pool_desc    — highest reward pool first (default)
+ *   pool_asc     — lowest reward pool first
+ *   newest       — most recently created first
+ *   ending_soon  — soonest end time first (NULLs last)
+ */
+export async function getActiveChallengesSorted(opts: {
+  sort?: ActiveChallengesSort;
+  cursor?: string;
+  limit?: number;
+}): Promise<{ items: ActiveChallengeSortedRow[]; nextCursor: string | null }> {
+  const { sort = "pool_desc", cursor, limit = 20 } = opts;
+  const cfg = SORT_CONFIG[sort];
+  const [primaryKey, secondaryKey] = cfg.cursorKeys;
+  const dir = cfg.cursorDir === "DESC" ? "<" : ">";
+  const oppDir = cfg.cursorDir === "DESC" ? "DESC" : "ASC";
+
+  const params: unknown[] = [];
+  let cursorClause = "";
+
+  if (cursor) {
+    const decoded = decodeCursorSafe(cursor, [primaryKey, secondaryKey]);
+    if (decoded !== null) {
+      const primaryVal = decoded[primaryKey];
+      const secondaryVal = decoded[secondaryKey];
+      params.push(primaryVal, secondaryVal);
+
+      if (sort === "ending_soon") {
+        // ends_at can be NULL (sorted NULLS LAST); rows with NULL ends_at always come after non-null ones
+        cursorClause = `AND (
+          c.ends_at IS NOT NULL AND (
+            c.ends_at ${dir} $1
+            OR (c.ends_at = $1 AND c.id ${dir} $2::uuid)
+          )
+          OR (c.ends_at IS NULL AND $1::timestamptz IS NULL AND c.id ${dir} $2::uuid)
+        )`;
+      } else {
+        cursorClause = `AND (
+          c.${primaryKey} ${dir} $1
+          OR (c.${primaryKey} = $1 AND c.id ${dir} $2::uuid)
+        )`;
+      }
+    }
+  }
+
+  params.push(limit + 1);
+  const limitParam = `$${params.length}`;
+
+  const sql = `
+    SELECT
+      c.id,
+      c.brand_id,
+      c.challenge_id AS title,
+      (c.pool_amount_stroops::numeric / 10000000)::numeric(20,7)::text AS pool_amount_usdc,
+      c.ends_at,
+      c.participant_count,
+      c.pool_amount_stroops::text AS pool_amount_stroops,
+      c.created_at,
+      b.name  AS brand_name,
+      b.logo_url,
+      b.primary_color,
+      b.secondary_color
+    FROM challenges c
+    JOIN brands b ON c.brand_id = b.id
+    WHERE c.status = 'active'
+      AND c.deleted_at IS NULL
+      AND b.deleted_at IS NULL
+      ${cursorClause}
+    ORDER BY ${cfg.orderBy}
+    LIMIT ${limitParam}
+  `;
+
+  const result = await query<ActiveChallengeSortedRow>(sql, params);
+
+  const hasMore = result.rows.length > limit;
+  const items = result.rows.slice(0, limit);
+
+  let nextCursor: string | null = null;
+  if (hasMore && items.length > 0) {
+    const last = items[items.length - 1];
+    nextCursor = encodeCursor({
+      [primaryKey]: last[primaryKey as keyof ActiveChallengeSortedRow],
+      id: last.id,
+    });
+  }
+
+  return { items, nextCursor };
+}
+
 /**
  * Soft-delete a challenge.
  */
