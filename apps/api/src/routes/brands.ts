@@ -3,7 +3,6 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import {
   createBrand,
-  getBrandsByOwner,
   getBrandById,
   getPublicBrandById,
   getPublicBrands,
@@ -33,6 +32,8 @@ import { logger } from "../lib/logger";
 import { config } from "../lib/config";
 import { MIN_POOL_STROOPS } from "@brandblitz/stellar";
 import { query } from "../db/index";
+import { apiLimiter } from "../middleware/rate-limit";
+import { decodeCursorSafe, encodeCursor } from "../db/pagination";
 import { sanitizeSvgText } from "../lib/svg-sanitize";
 
 const router = Router();
@@ -40,6 +41,20 @@ const PublicBrandsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+const BrandCatalogQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().optional(),
+  search: z.string().trim().max(100).optional(),
+  status: z.enum(["active", "inactive", "pending"]).optional(),
+});
+
+type BrandCatalogRow = {
+  id: string;
+  name: string;
+  logo_url: string | null;
+  status: "active" | "inactive" | "pending";
+  created_at: string;
+};
 const BrandKitSchema = z.object({
   name: z
     .string()
@@ -47,8 +62,14 @@ const BrandKitSchema = z.object({
     .max(100)
     .refine((v) => !/<[^>]*>/.test(v), { message: "Brand name must not contain HTML tags" }),
   logoKey: z.string().optional(),
-  primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-  secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  primaryColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
+  secondaryColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
   tagline: z.string().max(100).optional(),
   brandStory: z.string().max(500).optional(),
   usp: z.string().max(200).optional(),
@@ -78,10 +99,12 @@ const ChallengeSchema = z.object({
 const MIN_CHALLENGE_DURATION_MS = 60 * 60 * 1000;
 const CHALLENGE_DURATION_GRACE_MS = 5_000;
 
-const QuestionRoundTemplateSchema = z.object({
-  question_text: z.string().max(500).optional(),
-  prompt_type: z.enum(["logo", "tagline", "productImage1"]).optional(),
-}).strict();
+const QuestionRoundTemplateSchema = z
+  .object({
+    question_text: z.string().max(500).optional(),
+    prompt_type: z.enum(["logo", "tagline", "productImage1"]).optional(),
+  })
+  .strict();
 
 const QuestionTemplateSchema = z
   .object({
@@ -106,11 +129,7 @@ function validateChallengeEndsAt(endsAt: string): void {
   }
 
   if (endsAtMs < minEndsAtMs - CHALLENGE_DURATION_GRACE_MS) {
-    throw createError(
-      "Challenge duration must be at least 1 hour",
-      400,
-      "ENDS_AT_TOO_SOON"
-    );
+    throw createError("Challenge duration must be at least 1 hour", 400, "ENDS_AT_TOO_SOON");
   }
 }
 
@@ -148,13 +167,87 @@ router.get("/public", async (req, res) => {
 
 /**
  * GET /brands
- * List brands owned by the authenticated user.
+ * Authenticated, rate-limited brand catalog with forward-only cursor pagination.
  */
-router.get("/", authenticate, async (req, res) => {
-  const brands = await getBrandsByOwner(req.user!.sub);
-  res.json({ brands: brands.map(toBrandApi) });
-});
+router.get("/", authenticate, apiLimiter, async (req, res) => {
+  const { limit, cursor, search, status } = BrandCatalogQuerySchema.parse(req.query);
+  const filters: string[] = [];
+  const filterParams: unknown[] = [];
 
+  if (search) {
+    filterParams.push(`%${search}%`);
+    filters.push(`name ILIKE $${filterParams.length}`);
+  }
+
+  if (status) {
+    filterParams.push(status);
+    filters.push(`status = $${filterParams.length}`);
+  }
+
+  const filterClause = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
+  const catalogCte = `WITH brand_catalog AS (
+    SELECT b.id,
+           b.name,
+           b.logo_url,
+           b.created_at,
+           CASE
+             WHEN EXISTS (
+               SELECT 1 FROM challenges c
+               WHERE c.brand_id = b.id AND c.status = 'active' AND c.deleted_at IS NULL
+             ) THEN 'active'
+             WHEN EXISTS (
+               SELECT 1 FROM challenges c
+               WHERE c.brand_id = b.id AND c.status = 'pending_deposit' AND c.deleted_at IS NULL
+             ) THEN 'pending'
+             ELSE 'inactive'
+           END AS status
+    FROM brands b
+    WHERE b.deleted_at IS NULL
+  )`;
+
+  const totalResult = await query<{ total: number }>(
+    `${catalogCte}
+     SELECT COUNT(*)::int AS total
+     FROM brand_catalog
+     ${filterClause}`,
+    filterParams
+  );
+
+  const pageParams = [...filterParams];
+  let cursorClause = "";
+  const cursorValues = decodeCursorSafe(cursor, ["createdAt", "id"]);
+  if (cursorValues) {
+    pageParams.push(cursorValues.createdAt, cursorValues.id);
+    cursorClause = `AND (
+      created_at < $${pageParams.length - 1}
+      OR (created_at = $${pageParams.length - 1} AND id < $${pageParams.length})
+    )`;
+  }
+
+  pageParams.push(limit + 1);
+  const pageResult = await query<BrandCatalogRow>(
+    `${catalogCte}
+     SELECT id, name, logo_url, status, created_at
+     FROM brand_catalog
+     ${filterClause}
+     ${filters.length > 0 ? cursorClause : cursorClause.replace(/^AND/, "WHERE")}
+     ORDER BY created_at DESC, id DESC
+     LIMIT $${pageParams.length}`,
+    pageParams
+  );
+
+  const hasMore = pageResult.rows.length > limit;
+  const items = pageResult.rows.slice(0, limit);
+  const last = items.at(-1);
+  const nextCursor =
+    hasMore && last ? encodeCursor({ createdAt: last.created_at, id: last.id }) : null;
+
+  res.json({
+    items,
+    nextCursor,
+    total: totalResult.rows[0]?.total ?? 0,
+  });
+});
 /**
  * GET /brands/:id
  */
@@ -299,7 +392,10 @@ router.post("/:id/questions/:questionId/regenerate", authenticate, async (req, r
   const newDraft = regenerated.find((q) => q.round === existing.round) ?? regenerated[0];
 
   await deleteChallengeQuestion(questionId);
-  const inserted = await insertChallengeQuestion({ ...newDraft, challenge_id: existing.challenge_id });
+  const inserted = await insertChallengeQuestion({
+    ...newDraft,
+    challenge_id: existing.challenge_id,
+  });
 
   res.json({ question: inserted });
 });
@@ -360,8 +456,13 @@ router.post("/", authenticate, async (req, res) => {
     }
   } catch (error) {
     if (error instanceof StorageError || (error as any).name === "StorageError") {
-      console.error(`[api] Image optimization failed for body key. Reason: ${(error as Error).message}`);
-      throw createError("Image upload could not be processed. Please try again with a valid image.", 400);
+      console.error(
+        `[api] Image optimization failed for body key. Reason: ${(error as Error).message}`
+      );
+      throw createError(
+        "Image upload could not be processed. Please try again with a valid image.",
+        400
+      );
     }
     throw error;
   }
