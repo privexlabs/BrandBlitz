@@ -4,10 +4,12 @@ import { z } from "zod";
 import {
   getActiveChallenges,
   getActiveChallengesCursor,
+  getActiveChallengesSorted,
   getFilteredChallenges,
   getChallengeByIdAny,
   getChallengesByBrandId,
   getChallengeQuestions,
+  type ActiveChallengesSort,
 } from "../db/queries/challenges";
 import { getBrandById } from "../db/queries/brands";
 import {
@@ -17,6 +19,7 @@ import {
   type LeaderboardSort,
 } from "../db/queries/sessions";
 import { optionalAuth, authenticate } from "../middleware/authenticate";
+import { requireActiveUser } from "../middleware/require-active-user";
 import { createError } from "../middleware/error";
 import { reportLimiter } from "../middleware/rate-limit";
 import { withCoalescing } from "../lib/cache";
@@ -128,6 +131,67 @@ router.get("/", optionalAuth, async (req, res) => {
   });
   res.json({ data: challenges, nextCursor });
 });
+
+const ActiveSortSchema = z.enum(["pool_desc", "pool_asc", "newest", "ending_soon"]).default("pool_desc");
+
+const ActiveQuerySchema = CursorQuerySchema.extend({
+  sort: ActiveSortSchema.optional(),
+});
+
+/**
+ * GET /challenges/active
+ * Lobby listing: active challenges sorted and cursor-paginated.
+ *
+ * Query params:
+ *   sort   — pool_desc (default) | pool_asc | newest | ending_soon
+ *   limit  — 1–50, default 20
+ *   cursor — opaque continuation token from a previous response
+ *
+ * Each item exposes: id, brand_id, title, reward_pool_xlm (pool_amount_usdc),
+ * entry_fee_xlm (null — not a schema column), ends_at, participant_count,
+ * plus brand enrichment fields (brand_name, logo_url, primary_color, secondary_color).
+ *
+ * Returns 200 with empty items array when no active challenges exist.
+ * Requires authentication + active account (suspended users receive 403).
+ */
+router.get(
+  "/active",
+  authenticate,
+  requireActiveUser,
+  async (req, res) => {
+    const parsed = ActiveQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw createError("Invalid query parameters", 400, "INVALID_QUERY");
+    }
+
+    const { sort, cursor, limit: rawLimit } = parsed.data;
+    // Cap at 50 per the acceptance criteria
+    const limit = Math.min(rawLimit, 50);
+
+    const { items, nextCursor } = await getActiveChallengesSorted({
+      sort: sort as ActiveChallengesSort | undefined,
+      cursor,
+      limit,
+    });
+
+    res.json({
+      items: items.map((c) => ({
+        id: c.id,
+        brand_id: c.brand_id,
+        title: c.title,
+        reward_pool_xlm: c.pool_amount_usdc,
+        entry_fee_xlm: null,
+        ends_at: c.ends_at,
+        participant_count: c.participant_count,
+        brand_name: c.brand_name,
+        logo_url: c.logo_url,
+        primary_color: c.primary_color,
+        secondary_color: c.secondary_color,
+      })),
+      nextCursor,
+    });
+  },
+);
 
 /**
  * GET /challenges/:id

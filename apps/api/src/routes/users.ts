@@ -25,6 +25,8 @@ import { redis } from "../lib/redis";
 import { apiLimiter, phoneRateLimit } from "../middleware/rate-limit";
 import { getBadgesForUser } from "../services/badges";
 import { config } from "../lib/config";
+import { getSessionHistory, type HistoryStatusFilter } from "../db/queries/sessions";
+import { CursorQuerySchema } from "../db/pagination";
 
 const router: Router = Router();
 
@@ -64,6 +66,52 @@ router.get("/me/streak", authenticate, async (req, res) => {
   if (!streak) throw createError("User not found", 404);
 
   res.json(streak);
+});
+
+const HistoryQuerySchema = CursorQuerySchema.extend({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  status: z.enum(["completed", "disqualified", "all"]).default("completed"),
+  include_rounds: z
+    .string()
+    .transform((v) => v === "true" || v === "1")
+    .optional()
+    .default("false")
+    .transform((v) => (typeof v === "string" ? v === "true" || v === "1" : v)),
+});
+
+/**
+ * GET /users/me/history
+ * Paginated session history for the authenticated user.
+ *
+ * Query params:
+ *   status         — completed (default) | disqualified | all
+ *   include_rounds — true | false (default) — appends per-round breakdown
+ *   limit          — 1–100 (default 20)
+ *   cursor         — opaque continuation token
+ *
+ * Sessions still in-progress (warmup/active/abandoned) are excluded unless
+ * status=all is explicitly requested.
+ *
+ * Each item includes: session_id, challenge_id, challenge_title, started_at,
+ * completed_at, total_score, outcome (won|lost|disqualified|in_progress),
+ * payout_amount_usdc.
+ */
+router.get("/me/history", authenticate, async (req, res) => {
+  const parsed = HistoryQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw createError("Invalid query parameters", 400, "INVALID_QUERY");
+  }
+
+  const { status, cursor, limit, include_rounds } = parsed.data;
+
+  const { items, nextCursor } = await getSessionHistory(req.user!.sub, {
+    status: status as HistoryStatusFilter,
+    cursor,
+    limit,
+    includeRounds: include_rounds,
+  });
+
+  res.json({ items, nextCursor });
 });
 
 router.get("/:id/streak", authenticate, async (req, res) => {
