@@ -446,6 +446,132 @@ export async function listUsers(opts: {
   return { users, total, nextCursor };
 }
 
+export interface UserWithFraudScore {
+  id: string;
+  username: string | null;
+  email: string;
+  created_at: string;
+  suspended_at: string | null;
+  fraud_score: number;
+  total_payouts: string;
+}
+
+/**
+ * List users with computed fraud flag count, supporting cursor-based pagination.
+ * Used by the fraud review admin UI.
+ */
+export async function listUsersWithFraudScores(opts: {
+  cursor?: string;
+  pageSize?: number;
+  minFraudScore?: number;
+  orderBy?: "createdAt" | "fraudScore";
+}): Promise<{ users: UserWithFraudScore[]; total: number; nextCursor: string | null }> {
+  const { cursor, pageSize = 25, minFraudScore, orderBy = "createdAt" } = opts;
+
+  const havingParams: unknown[] = [];
+  let havingParamIdx = 1;
+  let havingClause = "";
+
+  if (minFraudScore !== undefined && minFraudScore > 0) {
+    havingClause = `HAVING COUNT(ff.id) >= $${havingParamIdx}`;
+    havingParams.push(minFraudScore);
+    havingParamIdx++;
+  }
+
+  const countResult = await query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM (
+      SELECT u.id
+      FROM users u
+      LEFT JOIN fraud_flags ff ON ff.user_id = u.id
+      WHERE u.deleted_at IS NULL
+      GROUP BY u.id
+      ${havingClause}
+    ) sub`,
+    havingParams,
+  );
+  const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+
+  const cursorKeys =
+    orderBy === "fraudScore"
+      ? ["fraud_score", "created_at", "id"]
+      : ["created_at", "id"];
+  const cursorValues = decodeCursorSafe(cursor, cursorKeys);
+
+  const outerWhere: string[] = [];
+  const outerParams: unknown[] = [];
+  let outerParamIdx = havingParamIdx;
+
+  if (cursorValues) {
+    if (orderBy === "fraudScore") {
+      outerWhere.push(
+        `(ufs.fraud_score < $${outerParamIdx} OR (ufs.fraud_score = $${outerParamIdx} AND ufs.created_at < $${outerParamIdx + 1}) OR (ufs.fraud_score = $${outerParamIdx} AND ufs.created_at = $${outerParamIdx + 1} AND ufs.id < $${outerParamIdx + 2}))`,
+      );
+      outerParams.push(
+        cursorValues.fraud_score,
+        cursorValues.created_at,
+        cursorValues.id,
+      );
+      outerParamIdx += 3;
+    } else {
+      outerWhere.push(
+        `(ufs.created_at < $${outerParamIdx} OR (ufs.created_at = $${outerParamIdx} AND ufs.id < $${outerParamIdx + 1}))`,
+      );
+      outerParams.push(cursorValues.created_at, cursorValues.id);
+      outerParamIdx += 2;
+    }
+  }
+
+  const outerWhereClause = outerWhere.length > 0 ? `WHERE ${outerWhere.join(" AND ")}` : "";
+  const orderClause =
+    orderBy === "fraudScore"
+      ? "ORDER BY ufs.fraud_score DESC, ufs.created_at DESC, ufs.id DESC"
+      : "ORDER BY ufs.created_at DESC, ufs.id DESC";
+
+  outerParams.push(pageSize);
+
+  const result = await query<UserWithFraudScore>(
+    `WITH user_fraud_scores AS (
+       SELECT
+         u.id,
+         u.username,
+         u.email,
+         u.created_at,
+         u.suspended_at,
+         u.total_earned_usdc AS total_payouts,
+         COUNT(ff.id)::int   AS fraud_score
+       FROM users u
+       LEFT JOIN fraud_flags ff ON ff.user_id = u.id
+       WHERE u.deleted_at IS NULL
+       GROUP BY u.id
+       ${havingClause}
+     )
+     SELECT * FROM user_fraud_scores ufs
+     ${outerWhereClause}
+     ${orderClause}
+     LIMIT $${outerParamIdx}`,
+    [...havingParams, ...outerParams],
+  );
+
+  const users = result.rows;
+  const nextCursor: string | null =
+    users.length === pageSize
+      ? encodeCursor(
+          orderBy === "fraudScore"
+            ? {
+                fraud_score: users[users.length - 1].fraud_score,
+                created_at: users[users.length - 1].created_at,
+                id: users[users.length - 1].id,
+              }
+            : {
+                created_at: users[users.length - 1].created_at,
+                id: users[users.length - 1].id,
+              },
+        )
+      : null;
+
+  return { users, total, nextCursor };
+}
+
 export async function updateLastLogin(userId: string): Promise<void> {
   await query(
     "UPDATE users SET last_login = NOW(), updated_at = NOW() WHERE id = $1",
