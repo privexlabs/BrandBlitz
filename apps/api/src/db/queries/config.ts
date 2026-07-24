@@ -1,5 +1,32 @@
 import { query } from "../index";
 
+/**
+ * Keys that are safe to expose to unauthenticated clients via GET /config.
+ * Anything not listed here (e.g. admin-only anti_cheat/payout/escrow config)
+ * is never returned by getPublicConfig, regardless of what's in app_config.
+ */
+export const PUBLIC_CONFIG_KEYS = [
+  "game_round_duration_seconds",
+  "max_rounds_per_session",
+  "maintenance_mode",
+] as const;
+
+export type PublicConfigKey = (typeof PUBLIC_CONFIG_KEYS)[number];
+export type PublicConfig = Partial<Record<PublicConfigKey, unknown>>;
+
+export async function getPublicConfig(): Promise<PublicConfig> {
+  const result = await query<{ key: string; value: unknown }>(
+    "SELECT key, value FROM app_config WHERE key = ANY($1::text[])",
+    [PUBLIC_CONFIG_KEYS]
+  );
+
+  const config: PublicConfig = {};
+  for (const row of result.rows) {
+    config[row.key as PublicConfigKey] = row.value;
+  }
+  return config;
+}
+
 export interface AppConfigRow {
   key: string;
   value: Record<string, unknown>;
