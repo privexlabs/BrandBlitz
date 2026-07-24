@@ -45,6 +45,10 @@ export function registerRoutes(app: Express): void {
   app.use("/leaderboard", leaderboardRoutes);
   app.use("/webhooks", webhooksRoutes);
   app.use("/leagues", leaguesRoutes);
+  // General admin endpoints — mounted before specific /admin/* sub-routers
+  // so that routes like GET /admin/users (with fraud-score enrichment) are
+  // matched first. Specific sub-routers handle the remaining paths.
+  app.use("/admin", adminRoutes);
   app.use("/admin/config", adminConfigRoutes);
   app.use("/admin/users", adminUsersRoutes);
   app.use("/admin/fraud-flags", adminFraudRoutes);
@@ -55,10 +59,6 @@ export function registerRoutes(app: Express): void {
   app.use("/admin/payouts", adminPayoutsRoutes);
   app.use("/admin/stats", adminStatsRoutes);
   app.use("/admin/waitlist", adminWaitlistRoutes);
-  // General admin endpoints (archive inspection, dead-letter queue triage).
-  // Mounted after the more specific /admin/* routers; its own routes
-  // (/admin/dlq, /admin/archive/...) do not overlap with them.
-  app.use("/admin", adminRoutes);
   app.use("/me/delete-account", deleteAccountRoutes);
   app.use("/waitlist", waitlistRoutes);
 }

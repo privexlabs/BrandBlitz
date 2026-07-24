@@ -22,33 +22,22 @@ import { Input } from "@/components/ui/input";
 interface AdminUser {
   id: string;
   email: string;
-  displayName: string;
   username: string | null;
-  avatarUrl: string | null;
-  role: string;
-  status: "active" | "suspended";
-  suspensionReason: string | null;
-  suspendedAt: string | null;
   createdAt: string;
+  suspendedAt: string | null;
+  fraudScore: number;
+  totalPayouts: string;
 }
 
 interface Pagination {
-  page: number;
   pageSize: number;
   total: number;
-  totalPages: number;
+  nextCursor: string | null;
 }
 
-type StatusFilter = "all" | "active" | "suspended";
+type OrderBy = "createdAt" | "fraudScore";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function statusVariant(
-  status: string,
-): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "suspended") return "destructive";
-  return "default";
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -60,15 +49,15 @@ export default function AdminUsersPage() {
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [pagination, setPagination] = useState<Pagination>({
-    page: 1,
-    pageSize: 20,
+    pageSize: 25,
     total: 0,
-    totalPages: 1,
+    nextCursor: null,
   });
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("suspended");
-  const [search, setSearch] = useState("");
-  const [searchInput, setSearchInput] = useState("");
+  const [minFraudScore, setMinFraudScore] = useState<string>("");
+  const [minFraudScoreInput, setMinFraudScoreInput] = useState("");
+  const [orderBy, setOrderBy] = useState<OrderBy>("createdAt");
 
   // Suspend dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -91,14 +80,15 @@ export default function AdminUsersPage() {
   // ─── Data loading ────────────────────────────────────────────────────────
 
   const loadUsers = useCallback(
-    async (page = 1) => {
+    async (cursor?: string) => {
       if (!apiToken) return;
       setLoading(true);
       try {
         const api = createApiClient(apiToken);
-        const params: Record<string, string | number> = { page, pageSize: 20 };
-        if (statusFilter !== "all") params.status = statusFilter;
-        if (search.trim()) params.search = search.trim();
+        const params: Record<string, string | number> = { limit: 25 };
+        if (cursor) params.cursor = cursor;
+        if (minFraudScore.trim()) params.minFraudScore = minFraudScore.trim();
+        if (orderBy) params.orderBy = orderBy;
 
         const res = await api.get("/admin/users", { params });
         setUsers(res.data.users);
@@ -109,20 +99,40 @@ export default function AdminUsersPage() {
         setLoading(false);
       }
     },
-    [apiToken, statusFilter, search],
+    [apiToken, minFraudScore, orderBy],
   );
 
   useEffect(() => {
     if (authStatus === "authenticated" && userRole === "admin") {
-      void loadUsers(1);
+      setCursorStack([]);
+      void loadUsers();
     }
   }, [loadUsers, authStatus, userRole]);
 
-  // ─── Search handler ──────────────────────────────────────────────────────
+  // ─── Filter handler ──────────────────────────────────────────────────────
 
-  function handleSearch(e: React.FormEvent) {
+  function handleFilter(e: React.FormEvent) {
     e.preventDefault();
-    setSearch(searchInput);
+    setMinFraudScore(minFraudScoreInput);
+  }
+
+  // ─── Pagination handlers ──────────────────────────────────────────────────
+
+  function handleNext() {
+    if (pagination.nextCursor) {
+      setCursorStack((prev) => [...prev, pagination.nextCursor!]);
+      void loadUsers(pagination.nextCursor);
+    }
+  }
+
+  function handlePrevious() {
+    setCursorStack((prev) => {
+      const next = [...prev];
+      next.pop();
+      const prevCursor = next[next.length - 1] ?? null;
+      void loadUsers(prevCursor ?? undefined);
+      return next;
+    });
   }
 
   // ─── Dialog helpers ──────────────────────────────────────────────────────
@@ -130,7 +140,7 @@ export default function AdminUsersPage() {
   function openSuspendDialog(user: AdminUser) {
     setDialogMode("suspend");
     setDialogUserId(user.id);
-    setDialogUserName(user.displayName || user.email);
+    setDialogUserName(user.username || user.email);
     setDialogReason("");
     setDialogOpen(true);
   }
@@ -138,7 +148,7 @@ export default function AdminUsersPage() {
   function openUnsuspendDialog(user: AdminUser) {
     setDialogMode("unsuspend");
     setDialogUserId(user.id);
-    setDialogUserName(user.displayName || user.email);
+    setDialogUserName(user.username || user.email);
     setDialogReason("");
     setDialogOpen(true);
   }
@@ -159,7 +169,8 @@ export default function AdminUsersPage() {
         await api.patch(`/admin/users/${dialogUserId}/unsuspend`);
       }
       setDialogOpen(false);
-      await loadUsers(pagination.page);
+      const currentCursor = cursorStack[cursorStack.length - 1];
+      await loadUsers(currentCursor);
     } catch {
       // Toast is handled by the API interceptor
     } finally {
@@ -180,33 +191,36 @@ export default function AdminUsersPage() {
         <span className="text-sm text-gray-500">{pagination.total} users</span>
       </div>
 
-      {/* Filter & search bar */}
+      {/* Filter bar */}
       <Card className="mb-6">
         <CardContent className="pt-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Label className="text-sm font-medium">Status:</Label>
-            {(["all", "active", "suspended"] as StatusFilter[]).map((s) => (
+            <Label className="text-sm font-medium">Order by:</Label>
+            {(["createdAt", "fraudScore"] as OrderBy[]).map((o) => (
               <Button
-                key={s}
-                variant={statusFilter === s ? "default" : "outline"}
+                key={o}
+                variant={orderBy === o ? "default" : "outline"}
                 size="sm"
-                onClick={() => setStatusFilter(s)}
+                onClick={() => setOrderBy(o)}
               >
-                {s.charAt(0).toUpperCase() + s.slice(1)}
+                {o === "createdAt" ? "Joined" : "Fraud Score"}
               </Button>
             ))}
 
-            <div className="ml-auto" />
+            <div className="ml-4" />
 
-            <form onSubmit={handleSearch} className="flex gap-2">
+            <form onSubmit={handleFilter} className="flex items-center gap-2">
+              <Label className="text-sm font-medium whitespace-nowrap">Min Fraud Score:</Label>
               <Input
-                placeholder="Search name, email, or username…"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className="w-64"
+                type="number"
+                min={0}
+                placeholder="0"
+                value={minFraudScoreInput}
+                onChange={(e) => setMinFraudScoreInput(e.target.value)}
+                className="w-24"
               />
               <Button type="submit" size="sm" variant="outline">
-                Search
+                Filter
               </Button>
             </form>
           </div>
@@ -232,9 +246,8 @@ export default function AdminUsersPage() {
                   <tr className="border-b bg-gray-50 text-left text-xs font-medium text-gray-500">
                     <th className="px-4 py-3">User</th>
                     <th className="px-4 py-3">Username</th>
-                    <th className="px-4 py-3">Role</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Reason</th>
+                    <th className="px-4 py-3">Fraud Score</th>
+                    <th className="px-4 py-3">Total Payouts</th>
                     <th className="px-4 py-3">Suspended at</th>
                     <th className="px-4 py-3">Joined</th>
                     <th className="px-4 py-3">Actions</th>
@@ -247,27 +260,18 @@ export default function AdminUsersPage() {
                       className="border-b hover:bg-gray-50"
                     >
                       <td className="px-4 py-3">
-                        <div className="font-medium">{user.displayName}</div>
-                        <div className="text-xs text-gray-500">{user.email}</div>
+                        <div className="font-medium">{user.email}</div>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">
                         {user.username ?? "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant="outline">{user.role}</Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant={statusVariant(user.status)}>
-                          {user.status}
+                        <Badge variant={user.fraudScore > 0 ? "destructive" : "default"}>
+                          {user.fraudScore}
                         </Badge>
                       </td>
-                      <td className="max-w-[200px] px-4 py-3">
-                        <span
-                          className="truncate text-xs text-gray-600 block"
-                          title={user.suspensionReason ?? undefined}
-                        >
-                          {user.suspensionReason ?? "—"}
-                        </span>
+                      <td className="px-4 py-3 text-xs text-gray-500">
+                        {user.totalPayouts}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">
                         {user.suspendedAt
@@ -278,22 +282,21 @@ export default function AdminUsersPage() {
                         {new Date(user.createdAt).toLocaleDateString()}
                       </td>
                       <td className="px-4 py-3">
-                        {user.status === "active" && user.role !== "admin" && (
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => openSuspendDialog(user)}
-                          >
-                            Suspend
-                          </Button>
-                        )}
-                        {user.status === "suspended" && (
+                        {user.suspendedAt ? (
                           <Button
                             size="sm"
                             variant="default"
                             onClick={() => openUnsuspendDialog(user)}
                           >
                             Unsuspend
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => openSuspendDialog(user)}
+                          >
+                            Suspend
                           </Button>
                         )}
                       </td>
@@ -307,31 +310,30 @@ export default function AdminUsersPage() {
       </Card>
 
       {/* Pagination */}
-      {pagination.totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-between text-sm">
-          <span className="text-gray-500">
-            Page {pagination.page} of {pagination.totalPages}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={pagination.page <= 1}
-              onClick={() => void loadUsers(pagination.page - 1)}
-            >
-              Previous
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={pagination.page >= pagination.totalPages}
-              onClick={() => void loadUsers(pagination.page + 1)}
-            >
-              Next
-            </Button>
-          </div>
+      <div className="mt-4 flex items-center justify-between text-sm">
+        <span className="text-gray-500">
+          {pagination.total} users total
+          {cursorStack.length > 0 && ` (page ${cursorStack.length + 1})`}
+        </span>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={cursorStack.length === 0}
+            onClick={handlePrevious}
+          >
+            Previous
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!pagination.nextCursor}
+            onClick={handleNext}
+          >
+            Next
+          </Button>
         </div>
-      )}
+      </div>
 
       {/* Suspend / Unsuspend dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

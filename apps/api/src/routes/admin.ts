@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/authenticate";
+import { requireAdmin } from "../middleware/require-admin";
 import { getArchivedChallengeById } from "../db/queries/challenges";
-import { findUserById } from "../db/queries/users";
+import { findUserById, listUsersWithFraudScores } from "../db/queries/users";
 import { setConfig } from "../db/queries/config";
 import { ensureLeagueRepeatableJobs } from "../queues/league.queue";
 import { createError } from "../middleware/error";
@@ -17,6 +18,7 @@ import { updatePayoutFeeBumpStatus } from "../db/queries/payouts";
 import { config } from "../lib/config";
 import { query } from "../db/index";
 import { webhookRotationLimiter } from "../middleware/rate-limit";
+import { CursorQuerySchema } from "../db/pagination";
 
 const router = Router();
 
@@ -31,6 +33,44 @@ router.use(async (req, _res, next) => {
   const user = await findUserById(req.user!.sub);
   if (!user || user.role !== "admin") throw createError("Forbidden", 403, "FORBIDDEN");
   next();
+});
+
+// ── Fraud-score enriched user listing ────────────────────────────────────────
+
+const ListUsersSchema = CursorQuerySchema.extend({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  minFraudScore: z.coerce.number().int().min(0).optional(),
+  orderBy: z.enum(["createdAt", "fraudScore"]).default("createdAt"),
+}).refine((data) => !("page" in data), {
+  message: "Use ?cursor for pagination. Legacy ?page parameter is no longer supported.",
+});
+
+router.get("/users", requireAdmin, async (req, res) => {
+  const { cursor, limit: pageSize, minFraudScore, orderBy } = ListUsersSchema.parse(req.query);
+
+  const { users, total, nextCursor } = await listUsersWithFraudScores({
+    cursor,
+    pageSize,
+    minFraudScore,
+    orderBy,
+  });
+
+  res.json({
+    users: users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      createdAt: u.created_at,
+      suspendedAt: u.suspended_at,
+      fraudScore: u.fraud_score,
+      totalPayouts: u.total_payouts,
+    })),
+    pagination: {
+      pageSize,
+      total,
+      nextCursor,
+    },
+  });
 });
 
 router.get("/archive/challenges/:id", async (req, res) => {
