@@ -15,6 +15,7 @@ import { getBrandById } from "../db/queries/brands";
 import {
   getLeaderboard,
   getArchivedLeaderboard,
+  getSession,
   LEADERBOARD_SORTS,
   type LeaderboardSort,
 } from "../db/queries/sessions";
@@ -277,6 +278,37 @@ router.get("/:id/stats", authenticate, async (req, res) => {
   );
 
   res.json({ stats: result.rows[0] });
+});
+
+const ChallengeIdParamSchema = z.object({
+  id: z.union([z.string().uuid(), z.string().regex(/^\d+$/)]),
+});
+
+/**
+ * GET /challenges/:id/session
+ * Return the authenticated user's most recent session for this challenge.
+ */
+router.get("/:id/session", authenticate, async (req, res) => {
+  const paramsResult = ChallengeIdParamSchema.safeParse(req.params);
+  if (!paramsResult.success) {
+    throw createError("Invalid challenge id", 400, "INVALID_CHALLENGE_ID");
+  }
+
+  const challenge = await getChallengeByIdAny(paramsResult.data.id);
+  if (!challenge) throw createError("Challenge not found", 404);
+
+  const session = await getSession(req.user!.sub, challenge.id);
+  if (!session) throw createError("Session not found", 404, "SESSION_NOT_FOUND");
+
+  res.json({
+    session: {
+      id: session.id,
+      status: session.status,
+      total_score: session.total_score,
+      started_at: session.challenge_started_at ?? session.warmup_started_at,
+      completed_at: session.completed_at,
+    },
+  });
 });
 
 /**

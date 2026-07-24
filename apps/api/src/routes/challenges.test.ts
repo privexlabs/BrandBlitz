@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
   getChallengeQuestions: vi.fn(),
   getBrandById: vi.fn(),
   getLeaderboard: vi.fn(),
+  getSession: vi.fn(),
   authMockUser: null as any,
+  redisGet: vi.fn(),
+  redisSet: vi.fn(),
   dbQuery: vi.fn().mockResolvedValue({ rows: [] }),
   mockClient: {
     query: vi.fn().mockResolvedValue({ rows: [] }),
@@ -43,6 +46,8 @@ vi.mock("../db/queries/brands", () => ({
 
 vi.mock("../db/queries/sessions", () => ({
   getLeaderboard: mocks.getLeaderboard,
+  getSession: mocks.getSession,
+  LEADERBOARD_SORTS: ["score", "rank", "created_at"] as const,
 }));
 
 vi.mock("../middleware/authenticate", () => ({
@@ -310,6 +315,70 @@ describe("challenges routes", () => {
         reportLimiter: (_req: any, res: any) =>
           res.status(429).json({ error: "Too many report requests, please try again later" }),
       }));
+    });
+  });
+
+  describe("GET /challenges/:id/session", () => {
+    const challengeId = randomUUID();
+    const userId = randomUUID();
+
+    it("returns 401 when unauthenticated", async () => {
+      mocks.authMockUser = null;
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/session`);
+      expect(response.status).toBe(401);
+    });
+
+    it("returns 400 for a challenge id that is neither a UUID nor an integer", async () => {
+      mocks.authMockUser = { sub: userId };
+      const response = await fetch(`${baseUrl}/challenges/not-a-valid-id/session`);
+      expect(response.status).toBe(400);
+      const data: any = await response.json();
+      expect(data.code).toBe("INVALID_CHALLENGE_ID");
+    });
+
+    it("returns the most recent session for the authenticated user and challenge", async () => {
+      mocks.authMockUser = { sub: userId };
+      mocks.getChallengeByIdAny.mockResolvedValue({ id: challengeId });
+      mocks.getSession.mockResolvedValue({
+        id: "session-1",
+        status: "completed",
+        total_score: 300,
+        challenge_started_at: "2026-01-01T00:00:00.000Z",
+        warmup_started_at: "2025-12-31T23:59:00.000Z",
+        completed_at: "2026-01-01T00:05:00.000Z",
+      });
+
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/session`);
+      expect(response.status).toBe(200);
+
+      const data: any = await response.json();
+      expect(data.session).toEqual({
+        id: "session-1",
+        status: "completed",
+        total_score: 300,
+        started_at: "2026-01-01T00:00:00.000Z",
+        completed_at: "2026-01-01T00:05:00.000Z",
+      });
+      expect(mocks.getSession).toHaveBeenCalledWith(userId, challengeId);
+    });
+
+    it("returns 404 with a structured error when no session exists", async () => {
+      mocks.authMockUser = { sub: userId };
+      mocks.getChallengeByIdAny.mockResolvedValue({ id: challengeId });
+      mocks.getSession.mockResolvedValue(null);
+
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/session`);
+      expect(response.status).toBe(404);
+      const data: any = await response.json();
+      expect(data.code).toBe("SESSION_NOT_FOUND");
+    });
+
+    it("returns 404 when the challenge itself does not exist", async () => {
+      mocks.authMockUser = { sub: userId };
+      mocks.getChallengeByIdAny.mockResolvedValue(null);
+
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/session`);
+      expect(response.status).toBe(404);
     });
   });
 

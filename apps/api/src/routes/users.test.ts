@@ -7,6 +7,7 @@ import crypto from "crypto";
 var mockFindUserById = vi.fn();
 var mockFindUserByPhoneHash = vi.fn();
 var mockGetUserPublicProfileByUsername = vi.fn();
+var mockSearchUsersByUsername = vi.fn();
 var mockUpdateUserWallet = vi.fn();
 var mockMarkPhoneVerified = vi.fn();
 var mockSendVerificationCode = vi.fn();
@@ -41,6 +42,7 @@ vi.mock("../db/queries/users", () => ({
   getUserPublicProfileByUsername: mockGetUserPublicProfileByUsername,
   updateUserWallet: mockUpdateUserWallet,
   markPhoneVerified: mockMarkPhoneVerified,
+  searchUsersByUsername: mockSearchUsersByUsername,
 }));
 
 vi.mock("../services/phone", () => ({
@@ -71,6 +73,9 @@ vi.mock("../middleware/rate-limit", () => ({
   challengeStartLimiter: (_req: any, _res: any, next: any) => next(),
   uploadLimiter: (_req: any, _res: any, next: any) => next(),
   webhookLimiter: (_req: any, _res: any, next: any) => next(),
+  webhookRotationLimiter: (_req: any, _res: any, next: any) => next(),
+  waitlistLimiter: (_req: any, _res: any, next: any) => next(),
+  reportLimiter: (_req: any, _res: any, next: any) => next(),
   phoneRateLimit: async (req: any, res: any, next: any) => {
     const key = `phone:send:${req.body?.phone}`;
     const attempts = await mockRedisIncr(key);
@@ -85,6 +90,7 @@ vi.mock("../middleware/rate-limit", () => ({
 
 vi.mock("@brandblitz/stellar", () => ({
   WARMUP_MIN_SECONDS: 20,
+  MIN_POOL_STROOPS: 1_000_000_000,
   validateMuxedAccount: vi.fn(),
   createMuxedAccount: vi.fn(),
 }));
@@ -98,6 +104,8 @@ const phoneHash = crypto.createHash("sha256").update(phone).digest("hex");
 const authToken = () =>
   jwt.sign({ sub: userId, email: "me@example.com" }, process.env.JWT_SECRET as string, {
     expiresIn: "1h",
+    issuer: process.env.JWT_ISSUER ?? "brandblitz-api",
+    audience: process.env.JWT_AUDIENCE ?? "brandblitz-client",
   });
 
 const userRecord = {
@@ -122,15 +130,12 @@ const userRecord = {
   username: "testuser",
 };
 
-let registerRoutes: (app: express.Express) => void;
-
 beforeAll(async () => {
   process.env.JWT_SECRET = process.env.JWT_SECRET ?? "test-secret";
   app = express();
   app.use(express.json());
-  const routes = await import("../routes");
-  registerRoutes = routes.registerRoutes;
-  registerRoutes(app);
+  const { default: usersRouter } = await import("./users");
+  app.use("/users", usersRouter);
   app.use(errorHandler);
 });
 
@@ -138,6 +143,7 @@ beforeEach(() => {
   mockFindUserById.mockReset();
   mockFindUserByPhoneHash.mockReset();
   mockGetUserPublicProfileByUsername.mockReset();
+  mockSearchUsersByUsername.mockReset();
   mockUpdateUserWallet.mockReset();
   mockMarkPhoneVerified.mockReset();
   mockSendVerificationCode.mockReset();
@@ -616,6 +622,115 @@ describe("users routes integration", () => {
     it("requires authentication", async () => {
       const response = await request(app).get("/users/me/referrals").expect(401);
       expect(response.body.error).toBe("No token provided");
+    });
+  });
+
+  describe("GET /users/search", () => {
+    beforeEach(() => {
+      mockRedisGet.mockResolvedValue(null);
+    });
+
+    it("requires authentication", async () => {
+      const response = await request(app).get("/users/search?q=al").expect(401);
+      expect(response.body.error).toBe("No token provided");
+    });
+
+    it("returns 400 when q is missing", async () => {
+      const response = await request(app)
+        .get("/users/search")
+        .set("Authorization", `Bearer ${authToken()}`)
+        .expect(400);
+      expect(response.body.code).toBe("INVALID_QUERY");
+    });
+
+    it("returns 400 when q is shorter than 2 characters", async () => {
+      const response = await request(app)
+        .get("/users/search?q=a")
+        .set("Authorization", `Bearer ${authToken()}`)
+        .expect(400);
+      expect(response.body.code).toBe("INVALID_QUERY");
+    });
+
+    it("returns an empty array when no users match", async () => {
+      mockSearchUsersByUsername.mockResolvedValue([]);
+
+      const response = await request(app)
+        .get("/users/search?q=zzzzz")
+        .set("Authorization", `Bearer ${authToken()}`)
+        .expect(200);
+
+      expect(response.body).toEqual([]);
+    });
+
+    it("returns only public-safe fields for matching users", async () => {
+      mockSearchUsersByUsername.mockResolvedValue([
+        {
+          id: "u1",
+          username: "alice",
+          avatar_url: "https://example.com/alice.png",
+          total_earned_usdc: "12.5000000",
+          email: "alice@example.com",
+          phone_hash: "should-not-leak",
+        },
+      ]);
+
+      const response = await request(app)
+        .get("/users/search?q=al")
+        .set("Authorization", `Bearer ${authToken()}`)
+        .expect(200);
+
+      expect(response.body).toEqual([
+        {
+          id: "u1",
+          username: "alice",
+          avatar_url: "https://example.com/alice.png",
+          total_earnings: "12.5000000",
+        },
+      ]);
+      expect(response.body[0]).not.toHaveProperty("email");
+      expect(response.body[0]).not.toHaveProperty("phone_hash");
+    });
+
+    it("supports the page query parameter for pagination", async () => {
+      mockSearchUsersByUsername.mockResolvedValue([]);
+
+      await request(app)
+        .get("/users/search?q=al&page=3")
+        .set("Authorization", `Bearer ${authToken()}`)
+        .expect(200);
+
+      expect(mockSearchUsersByUsername).toHaveBeenCalledWith("al", 3, 20);
+    });
+
+    it("caps results at 20 per request even when more rows are returned", async () => {
+      const rows = Array.from({ length: 25 }, (_, i) => ({
+        id: `u${i}`,
+        username: `alice${i}`,
+        avatar_url: null,
+        total_earned_usdc: "0.0000000",
+      }));
+      // Simulate the query-layer LIMIT already capping at 20; the route
+      // must request page size 20 regardless of how many rows a caller mocks.
+      mockSearchUsersByUsername.mockResolvedValue(rows.slice(0, 20));
+
+      const response = await request(app)
+        .get("/users/search?q=al")
+        .set("Authorization", `Bearer ${authToken()}`)
+        .expect(200);
+
+      expect(response.body).toHaveLength(20);
+      expect(mockSearchUsersByUsername).toHaveBeenCalledWith("al", 1, 20);
+    });
+
+    it("defaults to page 1 when page is not provided", async () => {
+      mockSearchUsersByUsername.mockResolvedValue([]);
+
+      await request(app)
+        .get("/users/search?q=al")
+        .set("Authorization", `Bearer ${authToken()}`)
+        .expect(200);
+
+      expect(mockSearchUsersByUsername).toHaveBeenCalledWith("al", 1, 20);
     });
   });
 });

@@ -29,31 +29,32 @@ describe("POST /waitlist", () => {
     vi.clearAllMocks();
   });
 
-  it("returns 200 on successful signup", async () => {
+  it("returns 201 on successful signup", async () => {
     mocks.dbQuery.mockResolvedValueOnce({ rows: [] });
 
     const res = await request(app)
       .post("/waitlist")
       .send({ email: "test@example.com" });
 
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ success: true });
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ message: "You're on the list!" });
     expect(mocks.dbQuery).toHaveBeenCalledWith(
       expect.stringContaining("ON CONFLICT (email) DO NOTHING"),
       ["test@example.com", null]
     );
   });
 
-  it("returns 200 even for a duplicate email (idempotent)", async () => {
-    // ON CONFLICT DO NOTHING means the INSERT is a no-op; same 200 response
+  it("returns 201 even for a duplicate email (idempotent, no second row inserted)", async () => {
+    // ON CONFLICT DO NOTHING means the INSERT is a no-op; same 201 response
     mocks.dbQuery.mockResolvedValueOnce({ rows: [] });
 
     const res = await request(app)
       .post("/waitlist")
       .send({ email: "duplicate@example.com" });
 
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ success: true });
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ message: "You're on the list!" });
+    expect(mocks.dbQuery).toHaveBeenCalledTimes(1);
   });
 
   it("accepts optional referral_code", async () => {
@@ -63,40 +64,58 @@ describe("POST /waitlist", () => {
       .post("/waitlist")
       .send({ email: "ref@example.com", referral_code: "FRIENDS10" });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     expect(mocks.dbQuery).toHaveBeenCalledWith(
       expect.stringContaining("ON CONFLICT (email) DO NOTHING"),
       ["ref@example.com", "FRIENDS10"]
     );
   });
 
-  it("returns 400 for an invalid email", async () => {
+  it("returns 422 for an invalid email", async () => {
     const res = await request(app)
       .post("/waitlist")
       .send({ email: "not-an-email" });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe("INVALID_EMAIL");
+    expect(mocks.dbQuery).not.toHaveBeenCalled();
   });
 
-  it("returns 429 when rate limited", async () => {
-    // Re-create app with a blocking limiter
+  it("returns 422 for an email over 254 characters", async () => {
+    const longEmail = `${"a".repeat(250)}@example.com`;
+    expect(longEmail.length).toBeGreaterThan(254);
+
+    const res = await request(app)
+      .post("/waitlist")
+      .send({ email: longEmail });
+
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe("INVALID_EMAIL");
+  });
+
+  it("returns 429 when the rate limiter blocks the request", async () => {
     const blockedApp = express();
     blockedApp.use(express.json());
 
+    vi.resetModules();
     vi.doMock("../middleware/rate-limit", () => ({
       apiLimiter: (_req: any, _res: any, next: any) => next(),
       waitlistLimiter: (_req: any, res: any) =>
         res.status(429).json({ error: "Too many signup attempts, please try again later" }),
     }));
+    vi.doMock("../db/index", () => ({
+      query: mocks.dbQuery,
+      pool: { connect: vi.fn() },
+    }));
 
-    // The static import won't pick up doMock at runtime in this test; verify via static limiter
-    // The integration is covered by the middleware unit — this confirms the shape:
-    const rateLimitRes = await request(app)
+    const { default: blockedWaitlistRouter } = await import("./waitlist");
+    blockedApp.use("/waitlist", blockedWaitlistRouter);
+    blockedApp.use(errorHandler);
+
+    const res = await request(blockedApp)
       .post("/waitlist")
-      .set("X-Forwarded-For", "10.0.0.1") // ensure IP is set
       .send({ email: "rate@example.com" });
 
-    // With the mocked pass-through limiter this should be 200; 429 shape is verified above
-    expect([200, 429]).toContain(rateLimitRes.status);
+    expect(res.status).toBe(429);
   });
 });
