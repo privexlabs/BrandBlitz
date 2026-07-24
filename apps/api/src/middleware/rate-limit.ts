@@ -279,6 +279,26 @@ export const waitlistLimiter = rateLimit({
 });
 
 /**
+ * Question preview (issue #467): 10 req / hour per brand.
+ * Keyed by the :id route param (not the caller) so the cap applies per-brand
+ * regardless of which owner/admin account is making the request, preventing
+ * AI generation cost abuse via a single brand.
+ */
+export const questionPreviewLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req) => `brand:${req.params.id}`,
+  passOnStoreError: true,
+  store: redisStore,
+  handler: (req, res) => {
+    record429("questionPreviewLimiter", `brand:${req.params.id}`);
+    res.status(429).json({ error: "Too many question preview requests for this brand" });
+  },
+});
+
+/**
  * Challenge report: 5 req / 15 min per authenticated user.
  * Prevents report-spam across multiple challenges.
  */
