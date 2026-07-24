@@ -8,6 +8,7 @@ import {
   updateUserWallet,
   updateUserProfile,
   getUserPublicProfileByUsername,
+  searchUsersByUsername,
 } from "../db/queries/users";
 import { getReferralStats, ensureUserReferralCode } from "../services/referrals";
 import { stroopsToUsdc } from "../lib/usdc";
@@ -113,6 +114,37 @@ router.get("/me/history", authenticate, async (req, res) => {
   });
 
   res.json({ items, nextCursor });
+});
+
+const UserSearchQuerySchema = z.object({
+  q: z.string().min(2),
+  page: z.coerce.number().int().min(1).default(1),
+});
+
+const USER_SEARCH_PAGE_SIZE = 20;
+
+/**
+ * GET /users/search
+ * Case-insensitive prefix search against username. Authenticated to prevent
+ * unauthenticated enumeration. Returns only public-safe fields.
+ */
+router.get("/search", authenticate, async (req, res) => {
+  const parsed = UserSearchQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw createError("Query parameter 'q' must be at least 2 characters", 400, "INVALID_QUERY");
+  }
+
+  const { q, page } = parsed.data;
+  const users = await searchUsersByUsername(q, page, USER_SEARCH_PAGE_SIZE);
+
+  res.json(
+    users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      avatar_url: u.avatar_url,
+      total_earnings: u.total_earned_usdc,
+    })),
+  );
 });
 
 router.get("/:id/streak", authenticate, async (req, res) => {
