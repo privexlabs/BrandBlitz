@@ -20,6 +20,7 @@ import {
   verifyOtpWithBruteForceProtection,
 } from "../services/phone";
 import { authenticate } from "../middleware/authenticate";
+import { requireActiveUser } from "../middleware/require-active-user";
 import { createError } from "../middleware/error";
 import { redis } from "../lib/redis";
 import { apiLimiter, phoneRateLimit } from "../middleware/rate-limit";
@@ -569,6 +570,270 @@ router.patch("/me/notifications/read-all", authenticate, async (req, res) => {
   );
 
   res.json({ success: true });
+});
+
+/**
+ * GET /users/me/badges
+ * Returns all badges earned by the authenticated user, ordered by awarded_at descending.
+ * Supports optional ?category= filter.
+ */
+router.get("/me/badges", authenticate, async (req, res) => {
+  const parsed = z
+    .object({
+      category: z.string().optional(),
+    })
+    .safeParse(req.query);
+
+  if (!parsed.success) {
+    throw createError("Invalid query parameters", 400, "INVALID_QUERY");
+  }
+
+  const { category } = parsed.data;
+
+  const result = await query<{
+    id: string;
+    badge_id: string;
+    badge_name: string;
+    badge_description: string;
+    icon_url: string;
+    awarded_at: string;
+    trigger_event: string;
+    category: string;
+  }>(
+    `SELECT
+       ub.id,
+       ub.badge_slug AS badge_id,
+       bd.name AS badge_name,
+       bd.description AS badge_description,
+       bd.icon_url,
+       ub.awarded_at,
+       bd.category,
+       bd.criteria AS trigger_event
+     FROM user_badges ub
+     LEFT JOIN badge_definitions bd ON ub.badge_slug = bd.slug
+     WHERE ub.user_id = $1
+     ${category ? "AND bd.category = $2" : ""}
+     ORDER BY ub.awarded_at DESC`,
+    category ? [req.user!.sub, category] : [req.user!.sub]
+  );
+
+  res.json({
+    items: result.rows,
+    total: result.rows.length,
+  });
+});
+
+/**
+ * GET /users/me/earnings
+ * Returns paginated USDC payout history for the authenticated user.
+ * Supports status filtering (pending | settled | failed | all).
+ * Cursor-based pagination with default limit 25, max 100.
+ */
+router.get("/me/earnings", authenticate, requireActiveUser, async (req, res) => {
+
+  const parsed = z
+    .object({
+      status: z.enum(["pending", "settled", "failed", "all"]).default("all"),
+      cursor: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(100).default(25),
+    })
+    .safeParse(req.query);
+
+  if (!parsed.success) {
+    throw createError("Invalid query parameters", 400, "INVALID_QUERY");
+  }
+
+  const { status, cursor, limit } = parsed.data;
+  const userId = req.user!.sub;
+
+  let statusFilter = "";
+  const params: unknown[] = [userId];
+  let paramIndex = 2;
+
+  if (status !== "all") {
+    statusFilter = `AND p.status = $${paramIndex}`;
+    params.push(status);
+    paramIndex++;
+  }
+
+  const decodeCursorSafe = (c: string | undefined) => {
+    if (!c) return null;
+    try {
+      const decoded = JSON.parse(Buffer.from(c, "base64url").toString("utf8"));
+      return decoded;
+    } catch {
+      return null;
+    }
+  };
+
+  let cursorWhere = "";
+  if (cursor) {
+    const decoded = decodeCursorSafe(cursor);
+    if (decoded && decoded.created_at && decoded.id) {
+      cursorWhere = `AND (p.created_at < $${paramIndex} OR (p.created_at = $${paramIndex} AND p.id < $${paramIndex + 1}))`;
+      params.push(decoded.created_at, decoded.id);
+      paramIndex += 2;
+    }
+  }
+
+  const payoutsResult = await query<{
+    payout_id: string;
+    amount_usdc: string;
+    status: string;
+    created_at: string;
+    settled_at: string | null;
+    stellar_tx_hash: string | null;
+    challenge_id: string;
+    id: string;
+  }>(
+    `SELECT
+       p.id AS payout_id,
+       (p.amount_stroops::numeric / 10000000)::numeric(20,7)::text AS amount_usdc,
+       p.status,
+       p.created_at,
+       p.updated_at AS settled_at,
+       p.tx_hash AS stellar_tx_hash,
+       p.challenge_id,
+       p.id
+     FROM payouts p
+     WHERE p.user_id = $1 ${statusFilter} ${cursorWhere}
+     ORDER BY p.created_at DESC, p.id DESC
+     LIMIT $${paramIndex}`,
+    [...params, limit + 1]
+  );
+
+  const payouts = payoutsResult.rows.slice(0, limit);
+  const hasMore = payoutsResult.rows.length > limit;
+
+  const totalsResult = await query<{
+    lifetime_earned_usdc: string;
+    pending_usdc: string;
+  }>(
+    `SELECT
+       COALESCE((SUM(CASE WHEN p.status IN ('sent', 'confirmed') THEN p.amount_stroops ELSE 0 END)::numeric / 10000000)::numeric(20,7)::text, '0') AS lifetime_earned_usdc,
+       COALESCE((SUM(CASE WHEN p.status = 'pending' THEN p.amount_stroops ELSE 0 END)::numeric / 10000000)::numeric(20,7)::text, '0') AS pending_usdc
+     FROM payouts
+     WHERE user_id = $1`,
+    [userId]
+  );
+
+  const totals = totalsResult.rows[0] || {
+    lifetime_earned_usdc: "0",
+    pending_usdc: "0",
+  };
+
+  const nextCursor = hasMore && payouts.length > 0
+    ? Buffer.from(
+        JSON.stringify({
+          created_at: payouts[payouts.length - 1]!.created_at,
+          id: payouts[payouts.length - 1]!.payout_id,
+        })
+      ).toString("base64url")
+    : null;
+
+  res.json({
+    items: payouts.map((p) => ({
+      payout_id: p.payout_id,
+      amount_usdc: p.amount_usdc,
+      status: p.status,
+      created_at: p.created_at,
+      settled_at: p.settled_at,
+      stellar_tx_hash: p.stellar_tx_hash,
+      challenge_id: p.challenge_id,
+    })),
+    totals: {
+      lifetime_earned_usdc: totals.lifetime_earned_usdc,
+      pending_usdc: totals.pending_usdc,
+    },
+    nextCursor,
+  });
+});
+
+/**
+ * GET /users/me/referrals (enhanced)
+ * Returns referrals where the authenticated user is the referrer.
+ * Each item includes bonus_status (pending | paid | expired) derived from referral_payouts table.
+ * Supports optional status filter (pending | paid | expired | all).
+ */
+router.get("/me/referrals", authenticate, async (req, res) => {
+  const parsed = z
+    .object({
+      status: z.enum(["pending", "paid", "expired", "all"]).default("all"),
+    })
+    .safeParse(req.query);
+
+  if (!parsed.success) {
+    throw createError("Invalid query parameters", 400, "INVALID_QUERY");
+  }
+
+  const { status } = parsed.data;
+  const userId = req.user!.sub;
+
+  const referralCode = await ensureUserReferralCode(userId);
+
+  let statusFilter = "";
+  const params: unknown[] = [userId];
+
+  if (status !== "all") {
+    statusFilter = `AND rp.status = $2`;
+    params.push(status);
+  }
+
+  const referralsResult = await query<{
+    referral_id: string;
+    referred_user_id: string;
+    referred_username: string;
+    joined_at: string;
+    activated_at: string | null;
+    bonus_status: string;
+    bonus_amount_usdc: string;
+  }>(
+    `SELECT
+       r.id AS referral_id,
+       r.referred_id AS referred_user_id,
+       CASE WHEN u.deleted_at IS NOT NULL THEN '[deleted]' ELSE u.username END AS referred_username,
+       u.created_at AS joined_at,
+       CASE WHEN r.rewarded = TRUE THEN u.created_at ELSE NULL END AS activated_at,
+       COALESCE(rp.status, 'pending') AS bonus_status,
+       COALESCE((rp.referrer_amount_stroops::numeric / 10000000)::numeric(20,7)::text, '0') AS bonus_amount_usdc
+     FROM referrals r
+     JOIN users u ON r.referred_id = u.id
+     LEFT JOIN referral_payouts rp ON r.id = rp.referral_id
+     WHERE r.referrer_id = $1 ${statusFilter}
+     ORDER BY u.created_at DESC`,
+    params
+  );
+
+  const totalsResult = await query<{
+    total_referrals: string;
+    total_paid: string;
+    total_pending_bonuses_usdc: string;
+  }>(
+    `SELECT
+       COUNT(DISTINCT r.id)::text AS total_referrals,
+       COUNT(DISTINCT CASE WHEN rp.status = 'sent' THEN r.id END)::text AS total_paid,
+       COALESCE((SUM(CASE WHEN rp.status = 'pending' THEN rp.referrer_amount_stroops ELSE 0 END)::numeric / 10000000)::numeric(20,7)::text, '0') AS total_pending_bonuses_usdc
+     FROM referrals r
+     LEFT JOIN referral_payouts rp ON r.id = rp.referral_id
+     WHERE r.referrer_id = $1`,
+    [userId]
+  );
+
+  const totals = totalsResult.rows[0] || {
+    total_referrals: "0",
+    total_paid: "0",
+    total_pending_bonuses_usdc: "0",
+  };
+
+  res.json({
+    referralCode,
+    referrals: referralsResult.rows,
+    summary: {
+      total_referrals: parseInt(totals.total_referrals, 10),
+      total_paid: parseInt(totals.total_paid, 10),
+      total_pending_bonuses_usdc: totals.total_pending_bonuses_usdc,
+    },
+  });
 });
 
 export default router;
