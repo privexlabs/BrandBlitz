@@ -62,6 +62,10 @@ vi.mock("../middleware/authenticate", () => ({
   },
 }));
 
+vi.mock("../middleware/require-active-user", () => ({
+  requireActiveUser: (_req: any, _res: any, next: any) => next(),
+}));
+
 vi.mock("../lib/redis", () => ({
   redis: {
     get: mocks.redisGet,
@@ -422,6 +426,112 @@ describe("challenges routes", () => {
       });
 
       expect(mocks.getLeaderboard).toHaveBeenCalledWith("chal-leader", 10, 5);
+    });
+  });
+
+  describe("POST /challenges/:id/report", () => {
+    const challengeId = randomUUID();
+    const userId = randomUUID();
+
+    beforeEach(() => {
+      mocks.authMockUser = { sub: userId };
+      mocks.getChallengeByIdAny.mockResolvedValue({ id: challengeId, status: "active" });
+      mocks.mockClient.query.mockResolvedValue({ rows: [] });
+    });
+
+    it("reports a challenge with required fields", async () => {
+      mocks.mockClient.query
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce()
+        .mockResolvedValueOnce()
+        .mockResolvedValueOnce();
+
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason: "misleading",
+          details: "This brand content is misleading",
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const data: any = await response.json();
+      expect(data).toHaveProperty("report_id");
+    });
+
+    it("returns 409 when duplicate report from same user", async () => {
+      mocks.mockClient.query
+        .mockResolvedValueOnce({ rows: [{ id: "existing-report" }] })
+        .mockResolvedValueOnce();
+
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "offensive" }),
+      });
+
+      expect(response.status).toBe(409);
+      const data: any = await response.json();
+      expect(data.code).toBe("ALREADY_REPORTED");
+    });
+
+    it("returns 404 when challenge does not exist", async () => {
+      mocks.getChallengeByIdAny.mockResolvedValue(null);
+
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "spam" }),
+      });
+
+      expect(response.status).toBe(404);
+    });
+
+    it("returns 404 when challenge is not active", async () => {
+      mocks.getChallengeByIdAny.mockResolvedValue({ id: challengeId, status: "ended" });
+
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "misleading" }),
+      });
+
+      expect(response.status).toBe(404);
+    });
+
+    it("returns 401 when not authenticated", async () => {
+      mocks.authMockUser = null;
+
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "misleading" }),
+      });
+
+      expect(response.status).toBe(401);
+    });
+
+    it("validates reason enum", async () => {
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "invalid_reason" }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it("validates details max length", async () => {
+      const longDetails = "x".repeat(501);
+
+      const response = await fetch(`${baseUrl}/challenges/${challengeId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "misleading", details: longDetails }),
+      });
+
+      expect(response.status).toBe(400);
     });
   });
 });
