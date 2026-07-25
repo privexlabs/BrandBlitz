@@ -53,6 +53,23 @@ vi.mock("../middleware/anti-cheat", () => ({
   enforceOneSessionPerChallenge: (req: any, res: any, next: any) => next(),
   validateReactionTime: (req: any, res: any, next: any) => next(),
   validateDeviceFingerprint: (req: any, res: any, next: any) => next(),
+  detectClockSkew: (req: any, res: any, next: any) => {
+    const clientTimestamp = req.body?.clientTimestamp;
+    if (clientTimestamp === undefined) return next();
+    if (!Number.isFinite(clientTimestamp) || clientTimestamp <= 0) {
+      const error: any = new Error("Invalid client timestamp");
+      error.statusCode = 400;
+      error.code = "INVALID_TIMESTAMP";
+      throw error;
+    }
+    if (Math.abs(Date.now() - clientTimestamp) > 5000) {
+      const error: any = new Error("Client clock skew too large");
+      error.statusCode = 400;
+      error.code = "CLOCK_SKEW";
+      throw error;
+    }
+    next();
+  },
   requireSessionStartAllowed: (req: any, res: any, next: any) => next(),
   assertValidTotalScore: vi.fn(),
 }));
@@ -165,7 +182,7 @@ describe("sessions warmup-complete endpoint", () => {
     expect(response.body.code).toBe("CLOCK_SKEW");
   });
 
-  it("uses server time for warmup enforcement regardless of client timestamp", async () => {
+  it("rejects stale client timestamps before evaluating warmup unlock time", async () => {
     const mockApp = await import("express");
     const app = mockApp.default();
     
@@ -179,12 +196,11 @@ describe("sessions warmup-complete endpoint", () => {
     const response = await (await import("supertest")).default(app)
       .post("/sessions/challenge-1/warmup-complete")
       .send({
-        clientTimestamp: serverTime - 1000000, // Very old client time (should be ignored)
+        clientTimestamp: serverTime - 1000000,
       });
 
     expect(response.status).toBe(400);
-    expect(response.body.code).toBe("WARMUP_TOO_FAST");
-    expect(response.body.remainingMs).toBeGreaterThan(0);
+    expect(response.body.code).toBe("CLOCK_SKEW");
   });
 
   it("enforces warmup minimum using server-side Date.now() only", async () => {

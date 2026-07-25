@@ -2,23 +2,45 @@ import { Worker, type Job, type WorkerOptions } from "bullmq";
 import { redis } from "../../lib/redis";
 import { logger } from "../../lib/logger";
 import { addUtcDays, getUtcWeekStart } from "../../lib/week";
-import { rankAndFlagWeek, recalculateWeeklyPoints, seedWeekAssignments } from "../../db/queries/leagues";
+import { seedWeekAssignments } from "../../db/queries/leagues";
 import { query } from "../../db";
+import { leagueQueue } from "../league.queue";
 
 const ACTIVE_SESSION_DEFER_MINUTES = 30;
 const SHUTDOWN_TIMEOUT_MS = 30000; // 30 seconds
 
-async function hasActiveSession(userId: string): Promise<boolean> {
+async function countRecentActiveSessions(): Promise<number> {
   const result = await query<{ count: string }>(
     `SELECT COUNT(*) as count
      FROM game_sessions
-     WHERE user_id = $1
-       AND status = 'active'
+     WHERE status = 'active'
        AND challenge_started_at IS NOT NULL
-     LIMIT 1`,
-    [userId]
+       AND challenge_started_at >= NOW() - ($1 * INTERVAL '1 minute')`,
+    [ACTIVE_SESSION_DEFER_MINUTES]
   );
-  return parseInt(result.rows[0]?.count ?? "0", 10) > 0;
+  return parseInt(result.rows[0]?.count ?? "0", 10);
+}
+
+async function deferWeekStartForActiveSessions(weekStart: string): Promise<boolean> {
+  const activeSessionCount = await countRecentActiveSessions();
+  if (activeSessionCount === 0) {
+    return false;
+  }
+
+  await leagueQueue.add("start-week", {}, {
+    jobId: `league:start-week:deferred:${weekStart}`,
+    delay: ACTIVE_SESSION_DEFER_MINUTES * 60 * 1000,
+    removeOnComplete: true,
+    removeOnFail: 10,
+  });
+
+  logger.info("Deferring league week seeding because active sessions are still running", {
+    weekStart,
+    activeSessionCount,
+    deferMinutes: ACTIVE_SESSION_DEFER_MINUTES,
+  });
+
+  return true;
 }
 
 export function createLeagueWorker(WorkerCtor: typeof Worker = Worker, opts?: WorkerOptions) {
@@ -34,6 +56,9 @@ export function createLeagueWorker(WorkerCtor: typeof Worker = Worker, opts?: Wo
 
       if (job.name === "start-week") {
         const weekStart = getUtcWeekStart(new Date());
+        if (await deferWeekStartForActiveSessions(weekStart)) {
+          return;
+        }
         logger.info("Seeding league week", { weekStart });
         await seedWeekAssignments(weekStart);
         return;
