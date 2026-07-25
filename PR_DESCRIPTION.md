@@ -32,9 +32,14 @@ This branch completes the smallest remaining code-path fixes from the current se
 - I did not mark unrelated issues as solved in this draft.
 - `#321` and `#324` are still follow-up scope, not part of the code changes on this branch.
 
-## Issue coverage
+## Upstream assigned issues
 
-- Closes #325
-- Closes #326
-- Follow-up for #321
-- Follow-up for #324
+- Closes privexlabs/BrandBlitz#399
+- Closes privexlabs/BrandBlitz#436
+- Closes privexlabs/BrandBlitz#441
+- Closes privexlabs/BrandBlitz#447
+
+## Local scope note
+
+- Follow-up for #325
+- Follow-up for #326
