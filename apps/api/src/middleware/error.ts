@@ -40,12 +40,22 @@ export function errorHandler(
 
   let statusCode = err.statusCode;
   let message = err.message;
+  const dbCode = (err as any).code;
 
   if (err instanceof ZodError) {
     statusCode = 400;
     message = "Validation Error";
   } else if (err instanceof BadRequestError) {
     statusCode = 400;
+  } else if (dbCode === "23505") {
+    statusCode = 409;
+    message = "Resource already exists";
+  } else if (dbCode === "23503") {
+    statusCode = 409;
+    message = "Foreign key constraint violation";
+  } else if (dbCode === "23514") {
+    statusCode = 400;
+    message = "Check constraint violation";
   }
 
   statusCode = statusCode ?? 500;
