@@ -435,6 +435,207 @@ export async function getGlobalLeaderboardFromView(
   return result.rows;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Session History
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type HistoryStatusFilter = "completed" | "disqualified" | "all";
+
+export interface HistoryRound {
+  round: 1 | 2 | 3;
+  answer: string | null;
+  score: number;
+  reaction_time_ms: number | null;
+}
+
+export interface HistoryItem {
+  session_id: string;
+  challenge_id: string;
+  challenge_title: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  total_score: number;
+  /**
+   * Outcome:
+   *   won           — status=completed, not flagged, payout.status=completed
+   *   lost          — status=completed, not flagged, no completed payout
+   *   disqualified  — flagged=true (status=flagged)
+   *   in_progress   — warmup | active | abandoned (only included when status=all)
+   */
+  outcome: "won" | "lost" | "disqualified" | "in_progress";
+  payout_amount_usdc: string | null;
+  rounds?: HistoryRound[];
+}
+
+/**
+ * Fetch paginated session history for a single user.
+ *
+ * @param userId        — must match game_sessions.user_id (ownership enforced in SQL)
+ * @param opts.status   — "completed" | "disqualified" | "all"  (default: "completed")
+ * @param opts.cursor   — opaque keyset cursor from a previous response
+ * @param opts.limit    — page size, 1–100 (default 20)
+ * @param opts.includeRounds — whether to join session_round_scores
+ */
+export async function getSessionHistory(
+  userId: string,
+  opts: {
+    status?: HistoryStatusFilter;
+    cursor?: string;
+    limit?: number;
+    includeRounds?: boolean;
+  } = {}
+): Promise<{ items: HistoryItem[]; nextCursor: string | null }> {
+  const { status = "completed", cursor, limit = 20, includeRounds = false } = opts;
+
+  // ── Status filter ────────────────────────────────────────────────────────
+  let statusClause: string;
+  if (status === "completed") {
+    // Completed + not flagged only; excludes in-progress (warmup/active/abandoned)
+    statusClause = "gs.status = 'completed' AND gs.flagged = FALSE";
+  } else if (status === "disqualified") {
+    statusClause = "gs.flagged = TRUE";
+  } else {
+    // all — every session belonging to the user
+    statusClause = "TRUE";
+  }
+
+  // ── Cursor ───────────────────────────────────────────────────────────────
+  const params: unknown[] = [userId];
+  let cursorClause = "";
+
+  if (cursor) {
+    const decoded = decodeCursorSafe(cursor, ["completed_at", "id"]);
+    if (decoded !== null) {
+      const completedAt = decoded.completed_at;
+      const id = decoded.id;
+      // Rows older than the cursor (completed_at DESC, id DESC)
+      params.push(completedAt, id);
+      cursorClause = `AND (
+        gs.completed_at < $${params.length - 1}
+        OR (gs.completed_at = $${params.length - 1} AND gs.id < $${params.length}::uuid)
+        OR gs.completed_at IS NULL
+      )`;
+    }
+  }
+
+  params.push(limit + 1);
+  const limitParam = `$${params.length}`;
+
+  // ── Main query ───────────────────────────────────────────────────────────
+  const sql = `
+    SELECT
+      gs.id                        AS session_id,
+      gs.challenge_id,
+      c.challenge_id               AS challenge_title,
+      gs.challenge_started_at      AS started_at,
+      gs.completed_at,
+      gs.total_score,
+      gs.flagged,
+      gs.status,
+      -- Outcome derivation
+      CASE
+        WHEN gs.flagged = TRUE                         THEN 'disqualified'
+        WHEN gs.status = 'completed'
+             AND p.status = 'completed'               THEN 'won'
+        WHEN gs.status = 'completed'                  THEN 'lost'
+        ELSE                                               'in_progress'
+      END                          AS outcome,
+      -- Payout (NULL when no completed payout exists)
+      CASE
+        WHEN p.status = 'completed'
+          THEN (p.amount_stroops::numeric / 10000000)::numeric(20,7)::text
+        ELSE NULL
+      END                          AS payout_amount_usdc
+    FROM game_sessions gs
+    JOIN challenges c ON gs.challenge_id = c.id
+    LEFT JOIN payouts p ON p.session_id = gs.id AND p.status = 'completed'
+    WHERE gs.user_id = $1
+      AND ${statusClause}
+      ${cursorClause}
+    ORDER BY gs.completed_at DESC NULLS LAST, gs.id DESC
+    LIMIT ${limitParam}
+  `;
+
+  const result = await query<{
+    session_id: string;
+    challenge_id: string;
+    challenge_title: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    total_score: number;
+    flagged: boolean;
+    status: string;
+    outcome: "won" | "lost" | "disqualified" | "in_progress";
+    payout_amount_usdc: string | null;
+  }>(sql, params);
+
+  const hasMore = result.rows.length > limit;
+  const rows = result.rows.slice(0, limit);
+
+  // ── Round scores (optional) ──────────────────────────────────────────────
+  let roundsBySession: Map<string, HistoryRound[]> = new Map();
+
+  if (includeRounds && rows.length > 0) {
+    const sessionIds = rows.map((r) => r.session_id);
+    const roundResult = await query<{
+      session_id: string;
+      round: 1 | 2 | 3;
+      answer: string | null;
+      score: number;
+      reaction_time_ms: number | null;
+    }>(
+      `SELECT session_id, round, answer, score, reaction_time_ms
+       FROM session_round_scores
+       WHERE session_id = ANY($1::uuid[])
+       ORDER BY session_id, round`,
+      [sessionIds]
+    );
+
+    for (const row of roundResult.rows) {
+      const existing = roundsBySession.get(row.session_id) ?? [];
+      existing.push({
+        round: row.round,
+        answer: row.answer,
+        score: row.score,
+        reaction_time_ms: row.reaction_time_ms,
+      });
+      roundsBySession.set(row.session_id, existing);
+    }
+  }
+
+  // ── Build items ──────────────────────────────────────────────────────────
+  const items: HistoryItem[] = rows.map((row) => {
+    const item: HistoryItem = {
+      session_id: row.session_id,
+      challenge_id: row.challenge_id,
+      challenge_title: row.challenge_title,
+      started_at: row.started_at,
+      completed_at: row.completed_at,
+      total_score: row.total_score,
+      outcome: row.outcome,
+      payout_amount_usdc: row.payout_amount_usdc,
+    };
+
+    if (includeRounds) {
+      item.rounds = roundsBySession.get(row.session_id) ?? [];
+    }
+
+    return item;
+  });
+
+  // ── Next cursor ──────────────────────────────────────────────────────────
+  let nextCursor: string | null = null;
+  if (hasMore && items.length > 0) {
+    const last = items[items.length - 1];
+    nextCursor = encodeCursor({
+      completed_at: last.completed_at,
+      id: last.session_id,
+    });
+  }
+
+  return { items, nextCursor };
+}
+
 export async function getArchivedLeaderboard(
   challengeId: string,
   limit = 20,

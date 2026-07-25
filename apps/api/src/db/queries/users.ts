@@ -452,3 +452,27 @@ export async function updateLastLogin(userId: string): Promise<void> {
     [userId],
   );
 }
+
+export interface UserSearchResult {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  total_earned_usdc: string;
+}
+
+export async function searchUsersByUsername(
+  prefix: string,
+  page: number,
+  pageSize: number,
+): Promise<UserSearchResult[]> {
+  const result = await query<UserSearchResult>(
+    `SELECT id, username, avatar_url, total_earned_usdc
+     FROM users
+     WHERE deleted_at IS NULL
+       AND username ILIKE $1
+     ORDER BY username ASC
+     LIMIT $2 OFFSET $3`,
+    [`${prefix}%`, pageSize, (page - 1) * pageSize],
+  );
+  return result.rows;
+}

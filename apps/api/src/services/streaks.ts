@@ -10,6 +10,7 @@ import {
 
 const STREAK_MILESTONES = [3, 7, 14, 30] as const;
 const NOTIFICATION_MILESTONES = new Set([7, 30, 100]);
+const STREAK_FREEZE_DAYS = 1;
 
 export interface StreakResponse {
   streak: number;
@@ -18,6 +19,19 @@ export interface StreakResponse {
   nextMilestone: number;
   progress: number;
   milestoneJustHit: boolean;
+}
+
+export interface StreakDetailResponse {
+  current_streak: number;
+  longest_streak: number;
+  last_activity_at: string | null;
+  is_at_risk: boolean;
+  repair_deadline_at: string | null;
+  next_milestone: {
+    days_required: number;
+    reward_badge_id: string;
+  };
+  streak_frozen: boolean;
 }
 
 export async function updateStreak(userId: string, now = new Date()): Promise<StreakState> {
@@ -55,6 +69,48 @@ export async function getStreak(userId: string, now = new Date()): Promise<Strea
   const current = await getUserStreak(userId);
   if (!current) throw new Error("User not found");
   return formatStreak(current, now);
+}
+
+export async function getStreakDetail(userId: string, now = new Date()): Promise<StreakDetailResponse> {
+  const current = await getUserStreak(userId);
+  if (!current) throw new Error("User not found");
+
+  const normalizedStreak = typeof current.streak === "number" ? current.streak : 0;
+  const lastPlayDay = normalizeDay(current.last_play_day);
+  const today = toUtcDay(now);
+
+  const nextMilestoneValue =
+    STREAK_MILESTONES.find((m) => m > normalizedStreak) ??
+    STREAK_MILESTONES[STREAK_MILESTONES.length - 1];
+
+  const isAtRisk = lastPlayDay && dayDiff(lastPlayDay, today) === 1;
+  let repairDeadlineAt: string | null = null;
+
+  if (isAtRisk && lastPlayDay) {
+    const deadline = new Date(lastPlayDay);
+    deadline.setDate(deadline.getDate() + 2);
+    repairDeadlineAt = deadline.toISOString();
+  }
+
+  const badgeMap: Record<number, string> = {
+    3: "streak_3_days",
+    7: "streak_7_days",
+    14: "streak_14_days",
+    30: "streak_30_days",
+  };
+
+  return {
+    current_streak: normalizedStreak,
+    longest_streak: normalizedStreak,
+    last_activity_at: lastPlayDay ? new Date(`${lastPlayDay}T00:00:00.000Z`).toISOString() : null,
+    is_at_risk: !!isAtRisk,
+    repair_deadline_at: repairDeadlineAt,
+    next_milestone: {
+      days_required: nextMilestoneValue,
+      reward_badge_id: badgeMap[nextMilestoneValue] || "streak_badge",
+    },
+    streak_frozen: false,
+  };
 }
 
 export async function repairStreak(

@@ -261,11 +261,11 @@ export const webhookRotationLimiter = rateLimit({
 });
 
 /**
- * Waitlist signup: 5 req / 15 min per IP.
+ * Waitlist signup: 5 req / hour per IP (#470).
  * Public endpoint — keyed by IP to prevent bulk scraping.
  */
 export const waitlistLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 60 * 60 * 1000,
   max: 5,
   standardHeaders: "draft-7",
   legacyHeaders: false,
@@ -275,6 +275,26 @@ export const waitlistLimiter = rateLimit({
   handler: (req, res) => {
     record429("waitlistLimiter", normalizeClientIp(req.ip));
     res.status(429).json({ error: "Too many signup attempts, please try again later" });
+  },
+});
+
+/**
+ * Question preview (issue #467): 10 req / hour per brand.
+ * Keyed by the :id route param (not the caller) so the cap applies per-brand
+ * regardless of which owner/admin account is making the request, preventing
+ * AI generation cost abuse via a single brand.
+ */
+export const questionPreviewLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req) => `brand:${req.params.id}`,
+  passOnStoreError: true,
+  store: redisStore,
+  handler: (req, res) => {
+    record429("questionPreviewLimiter", `brand:${req.params.id}`);
+    res.status(429).json({ error: "Too many question preview requests for this brand" });
   },
 });
 

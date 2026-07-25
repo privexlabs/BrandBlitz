@@ -57,11 +57,11 @@ describe("public config cache", () => {
   });
 
   it("queries Postgres once and serves the following request from Redis", async () => {
-    const payload = { anti_cheat: { minReactionTimeMs: 150 } };
+    const payload = { game_round_duration_seconds: 30 };
     mocks.getPublicConfig.mockResolvedValue(payload);
     mocks.redisGet
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(JSON.stringify({ config: payload }));
+      .mockResolvedValueOnce(JSON.stringify(payload));
 
     const app = createApp();
     const first = await request(app).get("/config").expect(200);
@@ -70,13 +70,36 @@ describe("public config cache", () => {
     expect(first.headers["x-cache"]).toBe("MISS");
     expect(second.headers["x-cache"]).toBe("HIT");
     expect(first.body).toEqual(second.body);
+    expect(first.body).toEqual(payload);
     expect(mocks.getPublicConfig).toHaveBeenCalledTimes(1);
     expect(mocks.redisSet).toHaveBeenCalledWith(
       PUBLIC_CONFIG_CACHE_KEY,
-      JSON.stringify({ config: payload }),
+      JSON.stringify(payload),
       "EX",
       PUBLIC_CONFIG_CACHE_TTL_SECONDS,
     );
+  });
+
+  it("sets a Cache-Control header with the expected max-age", async () => {
+    mocks.getPublicConfig.mockResolvedValue({});
+    mocks.redisGet.mockResolvedValue(null);
+
+    const app = createApp();
+    const res = await request(app).get("/config").expect(200);
+
+    expect(res.headers["cache-control"]).toBe(
+      `public, max-age=${PUBLIC_CONFIG_CACHE_TTL_SECONDS}`,
+    );
+  });
+
+  it("returns an empty object when no whitelisted keys exist in app_config", async () => {
+    mocks.getPublicConfig.mockResolvedValue({});
+    mocks.redisGet.mockResolvedValue(null);
+
+    const app = createApp();
+    const res = await request(app).get("/config").expect(200);
+
+    expect(res.body).toEqual({});
   });
 
   it("allows only admins to flush the public config cache", async () => {
