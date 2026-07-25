@@ -12,7 +12,7 @@ import {
 } from "../db/queries/users";
 import { getReferralStats, ensureUserReferralCode } from "../services/referrals";
 import { stroopsToUsdc } from "../lib/usdc";
-import { getStreak, repairStreak, getUserActivity } from "../services/streaks";
+import { getStreak, repairStreak, getUserActivity, getStreakDetail } from "../services/streaks";
 import { query } from "../db";
 import {
   sendVerificationCode,
@@ -64,7 +64,7 @@ router.get("/me", authenticate, async (req, res) => {
 });
 
 router.get("/me/streak", authenticate, async (req, res) => {
-  const streak = await getStreak(req.user!.sub).catch(() => null);
+  const streak = await getStreakDetail(req.user!.sub).catch(() => null);
   if (!streak) throw createError("User not found", 404);
 
   res.json(streak);

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { authenticate } from "../../middleware/authenticate";
 import { requireAdmin } from "../../middleware/require-admin";
 import { createError } from "../../middleware/error";
-import { query } from "../../db/index";
+import { query, pool } from "../../db/index";
 import { enqueuePayoutJob } from "../../queues/payout.queue";
 import { logger } from "../../lib/logger";
 
@@ -112,28 +112,38 @@ router.post("/:id/retry", async (req, res) => {
 
   const record = payout.rows[0];
   if (record.status !== "failed") {
-    throw createError("Only failed payouts can be retried", 400, "NOT_FAILED");
+    throw createError("Only failed payouts can be retried", 409, "NOT_FAILED");
   }
 
-  // Reset status to pending and clear error
-  await query(
-    "UPDATE payouts SET status = 'pending', error_message = NULL WHERE id = $1",
-    [id]
-  );
+  // Reset status to pending and write the audit entry atomically before the
+  // job is enqueued, so a crash between the two never leaves an audit-less
+  // status change.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "UPDATE payouts SET status = 'pending', error_message = NULL WHERE id = $1",
+      [id]
+    );
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_key, after)
+       VALUES ($1, 'payout_retry', 'payout', $2, $3::jsonb)`,
+      [
+        req.user!.sub,
+        id,
+        JSON.stringify({ payoutId: id, challengeId: record.challenge_id, previousStatus: "failed" }),
+      ]
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 
-  // Re-enqueue the payout job
+  // Re-enqueue the payout job after the transaction commits.
   await enqueuePayoutJob(record.challenge_id);
-
-  // Audit log
-  await query(
-    `INSERT INTO audit_log (actor_id, action, entity, entity_key, after)
-     VALUES ($1, 'payout_retry', 'payout', $2, $3::jsonb)`,
-    [
-      req.user!.sub,
-      id,
-      JSON.stringify({ payoutId: id, challengeId: record.challenge_id, previousStatus: "failed" }),
-    ]
-  );
 
   logger.info("Payout retried by admin", {
     payoutId: id,

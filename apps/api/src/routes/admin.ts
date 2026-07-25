@@ -15,9 +15,9 @@ import {
 import { feeBumpTransaction } from "@brandblitz/stellar";
 import { updatePayoutFeeBumpStatus } from "../db/queries/payouts";
 import { config } from "../lib/config";
-import { query } from "../db/index";
+import { query, pool } from "../db/index";
 import { webhookRotationLimiter } from "../middleware/rate-limit";
-import { createFraudFlag, getFraudFlags } from "../db/queries/fraud-flags";
+import { sessionTimeoutQueue } from "../queues/session-timeout.queue";
 
 const router = Router();
 
@@ -66,98 +66,204 @@ router.patch("/config/league-schedule", async (req, res) => {
   });
 });
 
-// ─── E2E Test Endpoints ────────────────────────────────────────────────────────
-// These endpoints are only available in test/development environments
-// and are used exclusively for Playwright E2E test setup.
+/**
+ * GET /admin/users/:id
+ * Full user view with sessions, fraud flags, and payout history.
+ * Protected by admin middleware.
+ * Response includes profile, recent sessions (last 20), fraud flags, and payout history.
+ */
+router.get("/users/:id", async (req, res) => {
+  const { id: userId } = z.object({ id: z.string().uuid() }).parse(req.params);
 
-if (process.env.NODE_ENV === "test" || process.env.PLAYWRIGHT_E2E === "true") {
-  router.post("/test/seed-fraud-flag", async (req, res) => {
-    const { sessionId, userId, flagType } = z
-      .object({
-        sessionId: z.string().uuid(),
-        userId: z.string().uuid(),
-        flagType: z.string().default("reaction_time_anomaly"),
-      })
-      .parse(req.body);
+  const userResult = await query<{
+    id: string;
+    email: string;
+    display_name: string;
+    username: string;
+    avatar_url: string | null;
+    status: string;
+    suspended_at: string | null;
+    suspension_reason: string | null;
+    created_at: string;
+    total_earned_usdc: string;
+    challenges_played: number;
+  }>(
+    `SELECT id, email, display_name, username, avatar_url, status, suspended_at, suspension_reason, created_at, total_earned_usdc, challenges_played
+     FROM users
+     WHERE id = $1`,
+    [userId]
+  );
 
-    await createFraudFlag({
-      sessionId,
-      userId,
-      flagType,
-      details: { severity: "test", createdBy: "e2e_test" },
-    });
+  if (userResult.rows.length === 0) {
+    throw createError("User not found", 404);
+  }
 
-    res.json({ flagId: sessionId, status: "created" });
+  const user = userResult.rows[0];
+
+  const sessionsResult = await query<{
+    id: string;
+    challenge_id: string;
+    score: number;
+    completed_at: string;
+    duration_ms: number;
+  }>(
+    `SELECT id, challenge_id, total_score as score, completed_at,
+            EXTRACT(EPOCH FROM (completed_at - started_at))::int * 1000 as duration_ms
+     FROM game_sessions
+     WHERE user_id = $1 AND status = 'completed'
+     ORDER BY completed_at DESC
+     LIMIT 20`,
+    [userId]
+  );
+
+  const fraudFlagsResult = await query<{
+    id: string;
+    flag_type: string;
+    severity: string | null;
+    created_at: string;
+    resolved_at: string | null;
+  }>(
+    `SELECT id, flag_type,
+            CASE WHEN flag_type = 'content_report' THEN 'high' ELSE 'medium' END as severity,
+            created_at, resolved_at
+     FROM fraud_flags
+     WHERE user_id = $1
+     ORDER BY created_at DESC`,
+    [userId]
+  );
+
+  const payoutsResult = await query<{
+    id: string;
+    amount_usdc: string;
+    status: string;
+    created_at: string;
+    updated_at: string;
+    challenge_id: string;
+  }>(
+    `SELECT id, (amount_stroops::numeric / 10000000)::numeric(20,7)::text as amount_usdc,
+            status, created_at, updated_at, challenge_id
+     FROM payouts
+     WHERE user_id = $1
+     ORDER BY created_at DESC`,
+    [userId]
+  );
+
+  res.json({
+    profile: {
+      id: user.id,
+      email: user.email,
+      display_name: user.display_name,
+      username: user.username,
+      avatar_url: user.avatar_url,
+      status: user.status,
+      suspended_at: user.suspended_at,
+      suspension_reason: user.suspension_reason,
+      created_at: user.created_at,
+      total_earned_usdc: user.total_earned_usdc,
+      challenges_played: user.challenges_played,
+    },
+    recentSessions: sessionsResult.rows.map((s) => ({
+      sessionId: s.id,
+      challengeId: s.challenge_id,
+      score: s.score,
+      completedAt: s.completed_at,
+      durationMs: s.duration_ms,
+    })),
+    fraudFlags: fraudFlagsResult.rows.map((f) => ({
+      id: f.id,
+      flagType: f.flag_type,
+      severity: f.severity,
+      detectedAt: f.created_at,
+      resolvedAt: f.resolved_at,
+    })),
+    payoutHistory: payoutsResult.rows.map((p) => ({
+      id: p.id,
+      amount_usdc: p.amount_usdc,
+      status: p.status,
+      created_at: p.created_at,
+      updated_at: p.updated_at,
+      challenge_id: p.challenge_id,
+    })),
+  });
+});
+
+/**
+ * POST /admin/users/:id/suspend
+ * Suspend a user account with reason.
+ * Sets suspendedAt and suspendReason, enqueues session terminations, logs to audit_log.
+ * Protected by admin middleware.
+ */
+router.post("/users/:id/suspend", async (req, res) => {
+  const { id: userId } = z.object({ id: z.string().uuid() }).parse(req.params);
+
+  const bodySchema = z.object({
+    reason: z.string().min(1).max(500),
+    durationDays: z.number().int().positive().optional(),
   });
 
-  router.post("/test/promote-to-admin", async (req, res) => {
-    const { userId } = z.object({ userId: z.string().uuid() }).parse(req.body);
+  const body = bodySchema.parse(req.body);
 
-    await query("UPDATE users SET role = $1 WHERE id = $2", ["admin", userId]);
+  const userResult = await query<{
+    id: string;
+    status: string;
+    suspended_at: string | null;
+  }>(
+    `SELECT id, status, suspended_at FROM users WHERE id = $1`,
+    [userId]
+  );
 
-    res.json({ status: "promoted" });
-  });
+  if (userResult.rows.length === 0) {
+    throw createError("User not found", 404);
+  }
 
-  router.get("/test/fraud-flags", async (req, res) => {
-    const { status } = z
-      .object({ status: z.string().optional() })
-      .parse(req.query);
+  const user = userResult.rows[0];
 
-    const result = await getFraudFlags({
-      status: status || undefined,
-      pageSize: 100,
-    });
+  if (user.status === "suspended" && user.suspended_at) {
+    throw createError("User is already suspended", 409);
+  }
 
-    res.json({ flags: result.flags });
-  });
+  const client = await pool.connect();
 
-  router.get("/test/gdpr-erasure-request", async (req, res) => {
-    const { userId } = z.object({ userId: z.string().uuid() }).parse(req.query);
+  try {
+    await client.query("BEGIN");
 
-    const result = await query(
-      `SELECT id, user_id, requested_at, scheduled_for FROM gdpr_erasure_requests
-       WHERE user_id = $1 LIMIT 1`,
+    await client.query(
+      `UPDATE users SET status = 'suspended', suspended_at = NOW(), suspension_reason = $1, suspended_by = $2
+       WHERE id = $3`,
+      [body.reason, req.user!.sub, userId]
+    );
+
+    await client.query(
+      `INSERT INTO audit_log (action, entity_type, entity_id, metadata)
+       VALUES ('suspend', 'user', $1, $2::jsonb)`,
+      [userId, JSON.stringify({
+        reason: body.reason,
+        duration_days: body.durationDays || null,
+        performed_by: req.user!.sub
+      })]
+    );
+
+    const sessionsResult = await client.query(
+      `SELECT id FROM game_sessions WHERE user_id = $1 AND status != 'completed'`,
       [userId]
     );
 
-    res.json({
-      requestFound: result.rows.length > 0,
-      request: result.rows[0] || null,
-    });
-  });
-
-  router.get("/test/audit-logs", async (req, res) => {
-    const { action, entity } = z
-      .object({
-        action: z.string().optional(),
-        entity: z.string().optional(),
-      })
-      .parse(req.query);
-
-    let whereClause = "WHERE 1=1";
-    const params: any[] = [];
-
-    if (action) {
-      whereClause += ` AND action = $${params.length + 1}`;
-      params.push(action);
+    for (const session of sessionsResult.rows) {
+      await sessionTimeoutQueue.add(
+        "terminate-session",
+        { sessionId: session.id },
+        { attempts: 2, removeOnComplete: true }
+      );
     }
 
-    if (entity) {
-      whereClause += ` AND entity = $${params.length + 1}`;
-      params.push(entity);
-    }
-
-    const result = await query(
-      `SELECT actor_id, action, entity, entity_key, before, after, created_at
-       FROM audit_log
-       ${whereClause}
-       ORDER BY created_at DESC
-       LIMIT 50`,
-      params
-    );
-
-    res.json({ logs: result.rows });
-  });
-}
+    await client.query("COMMIT");
+    res.status(200).json({ success: true, suspended_user_id: userId });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+});
 
 export default router;

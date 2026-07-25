@@ -2,8 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { query } from "../../db";
 import { createError } from "../../middleware/error";
+import { authenticate } from "../../middleware/authenticate";
+import { requireAdmin } from "../../middleware/require-admin";
 
-const router = Router();
+const router: Router = Router();
+
+router.use(authenticate);
+router.use(requireAdmin);
 
 export interface AuditLogEntry {
   id: string;
@@ -17,17 +22,28 @@ export interface AuditLogEntry {
   created_at: string;
 }
 
-const QuerySchema = z.object({
-  action: z.string().optional(),
-  from: z.string().optional(),
-  to: z.string().optional(),
-  search: z.string().optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(50),
-});
+const QuerySchema = z
+  .object({
+    action: z.string().optional(),
+    // entityType/entityId map onto this table's entity/entity_key columns.
+    // entityId is only meaningful alongside entityType (issue #464).
+    entityType: z.string().optional(),
+    entityId: z.string().optional(),
+    performedBy: z.string().uuid().optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+    search: z.string().optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(200).default(50),
+  })
+  .refine((data) => !data.entityId || data.entityType, {
+    message: "entityId requires entityType to also be set",
+    path: ["entityId"],
+  });
 
 router.get("/", async (req, res) => {
-  const { action, from, to, search, page, pageSize } = QuerySchema.parse(req.query);
+  const { action, entityType, entityId, performedBy, from, to, search, page, pageSize } =
+    QuerySchema.parse(req.query);
 
   let whereConditions: string[] = [];
   const params: unknown[] = [];
@@ -35,6 +51,21 @@ router.get("/", async (req, res) => {
   if (action) {
     params.push(action);
     whereConditions.push(`al.action = $${params.length}`);
+  }
+
+  if (entityType) {
+    params.push(entityType);
+    whereConditions.push(`al.entity = $${params.length}`);
+  }
+
+  if (entityId) {
+    params.push(entityId);
+    whereConditions.push(`al.entity_key = $${params.length}`);
+  }
+
+  if (performedBy) {
+    params.push(performedBy);
+    whereConditions.push(`al.actor_id = $${params.length}`);
   }
 
   if (from) {

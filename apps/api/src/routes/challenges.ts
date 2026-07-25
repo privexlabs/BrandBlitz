@@ -373,22 +373,23 @@ router.get("/:id/deposit-info", authenticate, async (req, res) => {
 
 /**
  * POST /challenges/:id/report
- * Report inappropriate challenge content. Requires authentication.
- * Rate-limited per user; one report per user per challenge enforced via challenge_reports.
- * Atomically increments reported_count within a transaction.
+ * Report inappropriate challenge content.
+ * Requires authentication + active user account.
+ * Rate-limited to 5 per user per hour.
+ * Returns 409 if same user already reported this challenge (duplicate detection).
  */
-router.post("/:id/report", authenticate, reportLimiter, async (req, res) => {
-  const challenge = await getChallengeByIdAny(req.params.id);
+router.post("/:id/report", authenticate, requireActiveUser, reportLimiter, async (req, res) => {
+  const { id: challengeId } = z.object({ id: z.string().uuid() }).parse(req.params);
+  const challenge = await getChallengeByIdAny(challengeId);
   if (!challenge) throw createError("Challenge not found", 404);
 
+  if (challenge.status !== "active") {
+    throw createError("Challenge is not active", 404);
+  }
+
   const ReportSchema = z.object({
-    reason: z.enum([
-      "misleading_content",
-      "inappropriate_language",
-      "factually_incorrect",
-      "other",
-    ]),
-    note: z.string().max(500).optional(),
+    reason: z.enum(["misleading", "offensive", "spam", "trademark_violation", "other"]),
+    details: z.string().max(500).optional(),
   });
 
   const body = ReportSchema.parse(req.body);
@@ -400,7 +401,7 @@ router.post("/:id/report", authenticate, reportLimiter, async (req, res) => {
 
     const existing = await client.query(
       `SELECT id FROM challenge_reports WHERE challenge_id = $1 AND user_id = $2`,
-      [challenge.id, userId]
+      [challengeId, userId]
     );
 
     if (existing.rows.length > 0) {
@@ -408,25 +409,28 @@ router.post("/:id/report", authenticate, reportLimiter, async (req, res) => {
       throw createError("You have already reported this challenge", 409, "ALREADY_REPORTED");
     }
 
+    const reportId = crypto.randomUUID();
+
     await client.query(
-      `INSERT INTO challenge_reports (challenge_id, user_id, reason, note)
-       VALUES ($1, $2, $3, $4)`,
-      [challenge.id, userId, body.reason, body.note ?? null]
+      `INSERT INTO challenge_reports (id, challenge_id, user_id, reason, details)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [reportId, challengeId, userId, body.reason, body.details ?? null]
     );
 
-    await client.query(`UPDATE challenges SET reported_count = reported_count + 1 WHERE id = $1`, [
-      challenge.id,
-    ]);
+    await client.query(
+      `INSERT INTO audit_log (action, entity_type, entity_id, metadata)
+       VALUES ('content_report', 'challenge', $1, $2::jsonb)`,
+      [challengeId, JSON.stringify({ reporter_user_id: userId, reason: body.reason, details: body.details })]
+    );
 
     await client.query("COMMIT");
+    res.status(201).json({ report_id: reportId });
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
   } finally {
     client.release();
   }
-
-  res.status(201).json({ success: true });
 });
 
 export default router;

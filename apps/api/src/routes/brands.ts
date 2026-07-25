@@ -23,7 +23,7 @@ import {
   deleteChallengeQuestion,
   insertChallengeQuestion,
 } from "../db/queries/challenges";
-import { generateChallengeQuestions } from "../services/questions";
+import { generateChallengeQuestions, generateQuestionPreview } from "../services/questions";
 import { optimizeImage, StorageError } from "@brandblitz/storage";
 import { authenticate } from "../middleware/authenticate";
 import { requireCurrentTosAccepted } from "../middleware/require-tos";
@@ -32,7 +32,7 @@ import { logger } from "../lib/logger";
 import { config } from "../lib/config";
 import { MIN_POOL_STROOPS } from "@brandblitz/stellar";
 import { query } from "../db/index";
-import { apiLimiter } from "../middleware/rate-limit";
+import { apiLimiter, questionPreviewLimiter } from "../middleware/rate-limit";
 import { decodeCursorSafe, encodeCursor } from "../db/pagination";
 import { sanitizeSvgText } from "../lib/svg-sanitize";
 
@@ -365,6 +365,36 @@ router.get("/:id/questions/preview", authenticate, async (req, res) => {
   const questions = await getChallengeQuestions(challenge.id);
   res.json({ questions, challenge });
 });
+
+const QuestionPreviewSchema = z.object({
+  topic: z.string().min(1).max(200),
+  difficulty: z.enum(["easy", "medium", "hard"]),
+  count: z.number().int().min(3).max(10),
+});
+
+/**
+ * POST /brands/:id/questions/preview
+ * Generate a draft set of questions from the brand's brief without
+ * persisting anything to challenge_questions. Lets a brand owner review AI
+ * questions before committing to a challenge. Idempotent — no DB writes.
+ */
+router.post(
+  "/:id/questions/preview",
+  authenticate,
+  questionPreviewLimiter,
+  async (req, res) => {
+    const brand = await getBrandById(req.params.id);
+    if (!brand) throw createError("Brand not found", 404);
+    if (brand.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
+
+    const { count } = QuestionPreviewSchema.parse(req.body);
+
+    const distractorBrands = await getActiveDistractorBrands(brand.id);
+    const questions = generateQuestionPreview(brand, distractorBrands, count);
+
+    res.json({ questions });
+  }
+);
 
 /**
  * POST /brands/:id/questions/:questionId/regenerate

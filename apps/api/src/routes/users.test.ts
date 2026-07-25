@@ -18,6 +18,7 @@ var mockRedisGet = vi.fn();
 var mockRedisSet = vi.fn();
 var mockRedisDel = vi.fn();
 var mockGetStreak = vi.fn();
+var mockGetStreakDetail = vi.fn();
 var mockRepairStreak = vi.fn();
 var mockQuery = vi.fn();
 var mockGetUserBadges = vi.fn();
@@ -64,6 +65,7 @@ vi.mock("../lib/redis", () => ({
 
 vi.mock("../services/streaks", () => ({
   getStreak: mockGetStreak,
+  getStreakDetail: mockGetStreakDetail,
   repairStreak: mockRepairStreak,
 }));
 
@@ -162,14 +164,18 @@ afterAll(() => {
 });
 
 describe("users routes integration", () => {
-  it("GET /users/me/streak returns formatted streak data", async () => {
-    mockGetStreak.mockResolvedValue({
-      streak: 7,
-      lastPlayDay: "2026-05-30",
-      repairAvailable: true,
-      nextMilestone: 14,
-      progress: 0.5,
-      milestoneJustHit: true,
+  it("GET /users/me/streak returns detailed streak data", async () => {
+    mockGetStreakDetail.mockResolvedValue({
+      current_streak: 7,
+      longest_streak: 14,
+      last_activity_at: "2026-05-30T00:00:00.000Z",
+      is_at_risk: false,
+      repair_deadline_at: null,
+      next_milestone: {
+        days_required: 14,
+        reward_badge_id: "streak_14_days",
+      },
+      streak_frozen: false,
     });
 
     const response = await request(app)
@@ -178,14 +184,18 @@ describe("users routes integration", () => {
       .expect(200);
 
     expect(response.body).toEqual({
-      streak: 7,
-      lastPlayDay: "2026-05-30",
-      repairAvailable: true,
-      nextMilestone: 14,
-      progress: 0.5,
-      milestoneJustHit: true,
+      current_streak: 7,
+      longest_streak: 14,
+      last_activity_at: "2026-05-30T00:00:00.000Z",
+      is_at_risk: false,
+      repair_deadline_at: null,
+      next_milestone: {
+        days_required: 14,
+        reward_badge_id: "streak_14_days",
+      },
+      streak_frozen: false,
     });
-    expect(mockGetStreak).toHaveBeenCalledWith(userId);
+    expect(mockGetStreakDetail).toHaveBeenCalledWith(userId);
   });
 
   it("POST /users/streaks/repair repairs an eligible streak", async () => {

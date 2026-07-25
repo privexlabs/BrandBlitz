@@ -159,3 +159,39 @@ function shuffle<T>(array: T[]): T[] {
 function optionLetter(index: number): "A" | "B" | "C" | "D" {
   return (["A", "B", "C", "D"] as const)[index] ?? "A";
 }
+
+export interface QuestionPreview {
+  text: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
+}
+
+/**
+ * Draft-only variant of generateChallengeQuestions for the preview endpoint
+ * (issue #467). Reuses the same deterministic round generation but returns a
+ * flat text/options/correctIndex/explanation shape and does not require a
+ * persisted challenge_id. `count` cycles through the 3 rounds to fill out
+ * however many preview questions were requested.
+ */
+export function generateQuestionPreview(
+  brand: Brand,
+  distractorPool: Pick<Brand, "name" | "tagline" | "usp">[],
+  count: number
+): QuestionPreview[] {
+  const rounds = generateChallengeQuestions("preview", brand, distractorPool);
+  if (rounds.length === 0) return [];
+
+  const previews: QuestionPreview[] = [];
+  for (let i = 0; i < count; i++) {
+    const round = rounds[i % rounds.length];
+    const options = [round.option_a, round.option_b, round.option_c, round.option_d];
+    previews.push({
+      text: round.question_text,
+      options,
+      correctIndex: options.indexOf(round.correct_answer),
+      explanation: `The correct answer is "${round.correct_answer}".`,
+    });
+  }
+  return previews;
+}

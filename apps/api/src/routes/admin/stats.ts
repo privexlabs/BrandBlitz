@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authenticate } from "../../middleware/authenticate";
 import { requireAdmin } from "../../middleware/require-admin";
 import { query } from "../../db/index";
+import { redis } from "../../lib/redis";
 
 const router = Router();
 
@@ -11,10 +12,28 @@ router.use(requireAdmin);
 
 const StatsQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(90).default(30),
+  refresh: z.coerce.boolean().default(false),
 });
 
+// Cached in Redis to avoid recomputing full-table aggregates on every admin
+// dashboard load (issue #465). Keyed per `days` window since results differ.
+const STATS_CACHE_TTL_SECONDS = 60;
+function statsCacheKey(days: number): string {
+  return `admin:stats:${days}`;
+}
+
 router.get("/", async (req, res) => {
-  const { days } = StatsQuerySchema.parse(req.query);
+  const { days, refresh } = StatsQuerySchema.parse(req.query);
+  const cacheKey = statsCacheKey(days);
+
+  if (!refresh) {
+    const cached = await redis.get(cacheKey).catch(() => null);
+    if (cached) {
+      res.json({ ...JSON.parse(cached), cacheHit: true });
+      return;
+    }
+  }
+
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
   const [dauResult, usdcResult, topBrandsResult, summaryResult] = await Promise.all([
@@ -70,13 +89,20 @@ router.get("/", async (req, res) => {
     ),
   ]);
 
-  res.json({
+  const payload = {
     dau: dauResult.rows,
     usdcVolume: usdcResult.rows,
     topBrands: topBrandsResult.rows,
     summary: summaryResult.rows[0],
     period: { days, since },
-  });
+    computedAt: new Date().toISOString(),
+  };
+
+  await redis
+    .set(cacheKey, JSON.stringify(payload), "EX", STATS_CACHE_TTL_SECONDS)
+    .catch(() => {});
+
+  res.json({ ...payload, cacheHit: false });
 });
 
 export default router;
