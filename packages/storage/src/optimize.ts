@@ -81,14 +81,69 @@ export async function assertImageMatchesDeclaredType(
 }
 
 /**
+ * Optimize an in-memory image Buffer for a given profile ("brand-logo", "product-image", "user-avatar").
+ * Validates declared MIME type if provided, resizes according to profile specs,
+ * and returns WebP and AVIF output buffers without writing to disk.
+ */
+export async function optimizeBuffer(
+  buffer: Buffer,
+  type: ImageType,
+  declaredMime?: string,
+): Promise<{ webpBuffer: Buffer; avifBuffer: Buffer }> {
+  if (declaredMime) {
+    await assertImageMatchesDeclaredType(buffer, declaredMime);
+  }
+
+  let metadata: sharp.Metadata;
+  try {
+    metadata = await sharp(buffer).metadata();
+  } catch (error) {
+    throw new StorageError(
+      `Sharp could not parse the buffer as an image: ${(error as Error).message}`,
+      "",
+      "",
+      "STORAGE_IMAGE_UNDECODABLE",
+    );
+  }
+
+  const supportedFormats = ["jpeg", "jpg", "png", "webp", "avif", "tiff"];
+  if (!metadata.format || !supportedFormats.includes(metadata.format)) {
+    throw new StorageError(
+      `Unsupported image format: ${metadata.format ?? "unknown"}`,
+      "",
+      "",
+      "STORAGE_MIME_UNSUPPORTED",
+    );
+  }
+
+  const spec = SPECS[type];
+
+  const webpBuffer = await sharp(buffer)
+    .resize(spec.width, spec.height, {
+      fit: spec.fit,
+      background: { r: 255, g: 255, b: 255, alpha: 0 },
+    })
+    .webp({ quality: 85 })
+    .toBuffer();
+
+  const avifBuffer = await sharp(buffer)
+    .resize(spec.width, spec.height, {
+      fit: spec.fit,
+      background: { r: 255, g: 255, b: 255, alpha: 0 },
+    })
+    .avif({ quality: 75 })
+    .toBuffer();
+
+  return { webpBuffer, avifBuffer };
+}
+
+/**
  * Fetch the original image from storage, resize + convert to WebP, overwrite in place.
  * Called after brand kit form submission — not at presign time (keeps presign flow fast).
  *
  * @returns The new key (with .webp extension)
  */
 export async function optimizeImage(key: string, type: ImageType): Promise<string> {
-  const spec = SPECS[type];
-
   const original = await s3.send(
     new GetObjectCommand({ Bucket: BUCKETS.BRAND_ASSETS, Key: key })
   );
@@ -103,10 +158,6 @@ export async function optimizeImage(key: string, type: ImageType): Promise<strin
 
   const buffer = Buffer.from(await original.Body.transformToByteArray());
 
-  // Secondary validation (issue #505): when the stored object declares a known
-  // image content type, confirm Sharp decodes it as exactly that type before we
-  // optimize and re-publish it. Objects without a recognized declared type fall
-  // through to the lenient format probe below.
   const declaredMime = original.ContentType;
   if (declaredMime && declaredMime in MIME_TO_SHARP_FORMATS) {
     await assertImageMatchesDeclaredType(buffer, declaredMime, key, BUCKETS.BRAND_ASSETS);
@@ -125,16 +176,10 @@ export async function optimizeImage(key: string, type: ImageType): Promise<strin
     return key;
   }
 
+  const { webpBuffer, avifBuffer } = await optimizeBuffer(buffer, type);
+
   const hash = createHash("sha256").update(buffer).digest("hex").slice(0, 8);
   const base = key.replace(/\.[^.]+$/, "");
-
-  const webpBuffer = await sharp(buffer)
-    .resize(spec.width, spec.height, {
-      fit: spec.fit,
-      background: { r: 255, g: 255, b: 255, alpha: 0 },
-    })
-    .webp({ quality: 85 })
-    .toBuffer();
 
   const webpKey = `${base}-${hash}.webp`;
   await uploadObject({
@@ -144,14 +189,6 @@ export async function optimizeImage(key: string, type: ImageType): Promise<strin
     contentType: "image/webp",
     immutable: true,
   });
-
-  const avifBuffer = await sharp(buffer)
-    .resize(spec.width, spec.height, {
-      fit: spec.fit,
-      background: { r: 255, g: 255, b: 255, alpha: 0 },
-    })
-    .avif({ quality: 75 })
-    .toBuffer();
 
   const avifKey = `${base}-${hash}.avif`;
   await uploadObject({
