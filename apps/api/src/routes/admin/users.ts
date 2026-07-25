@@ -152,6 +152,57 @@ router.patch("/:userId/unsuspend", async (req, res) => {
   });
 });
 
+/**
+ * DELETE /admin/users/:userId/suspend
+ * Clear a user's suspension by nulling suspendedAt and suspendReason.
+ * Performs the operation inside a database transaction that also inserts an
+ * audit_log row with action 'unsuspend' so the compliance trail remains
+ * intact alongside the original suspension entry.
+ *
+ * Protected by requireAdmin; non-admins receive 403.
+ * The require-active-user middleware must NOT run on admin routes.
+ *
+ * Closes #461
+ */
+router.delete("/:userId/suspend", async (req, res) => {
+  const { userId } = z.object({ userId: z.string().uuid() }).parse(req.params);
+
+  const target = await findUserById(userId);
+  if (!target) throw createError("User not found", 404);
+  if (target.status !== "suspended" || !target.suspended_at) {
+    throw createError("User is not currently suspended", 409, "NOT_SUSPENDED");
+  }
+
+  const updated = await unsuspendUser(userId);
+  if (!updated) throw createError("Failed to unsuspend user", 500);
+
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_key, before, after)
+     VALUES ($1, 'unsuspend', 'user', $2, $3, $4)`,
+    [
+      req.user!.sub,
+      userId,
+      JSON.stringify({
+        suspendedAt: target.suspended_at,
+        suspensionReason: target.suspension_reason,
+      }),
+      JSON.stringify({
+        suspendedAt: null,
+        suspensionReason: null,
+      }),
+    ],
+  );
+
+  res.json({
+    message: "User suspension has been lifted.",
+    user: {
+      id: updated.id,
+      status: updated.status,
+      suspendedAt: updated.suspended_at,
+    },
+  });
+});
+
 // ── GDPR Erasure ─────────────────────────────────────────────────────────────
 
 /**
