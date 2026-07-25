@@ -144,8 +144,8 @@ router.post(
   "/:challengeId/warmup-start",
   authenticate,
   requireActiveUser,
-  validateDeviceFingerprint,
   enforceOneSessionPerChallenge,
+  validateDeviceFingerprint,
   async (req, res) => {
     const challengeId = String(req.params.challengeId);
     const challenge = await getChallengeById(challengeId);
@@ -332,6 +332,13 @@ router.post(
             total_score: completed.total_score,
             is_practice: completed.is_practice,
           });
+          
+          // Invalidate Redis leaderboard cache
+          const keys = await redis.keys("leaderboard:*");
+          if (keys.length > 0) {
+            await redis.del(...keys);
+          }
+          await revalidateLeaderboard().catch(() => {});
         }
         const token = bearerToken(req);
         if (token) {
