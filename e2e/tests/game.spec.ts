@@ -36,7 +36,8 @@ test("player can complete warmup, play 3 rounds, and reach results", async ({
   }
 
   await expect(page.getByRole("heading", { name: "Challenge Complete!" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "View Leaderboard" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Challenge Leaderboard" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Global Leaderboard" })).toBeVisible();
 });
 
 test("offline banner appears when browser context goes offline", async ({ page }) => {
