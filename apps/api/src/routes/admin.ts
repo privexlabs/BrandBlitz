@@ -5,9 +5,7 @@ import { requireAdmin } from "../middleware/require-admin";
 import { getArchivedChallengeById } from "../db/queries/challenges";
 import { setConfig } from "../db/queries/config";
 import { ensureLeagueRepeatableJobs } from "../queues/league.queue";
-import { query } from "../db/index";
 import { decodeCursorSafe, encodeCursor } from "../db/pagination";
-import { createError } from "../middleware/error";
 import { createError } from "../middleware/error";
 import { logger } from "../lib/logger";
 import {
@@ -18,7 +16,7 @@ import {
 import { feeBumpTransaction } from "@brandblitz/stellar";
 import { updatePayoutFeeBumpStatus } from "../db/queries/payouts";
 import { config } from "../lib/config";
-import { query, pool } from "../db/index";
+import { pool, query } from "../db/index";
 import { webhookRotationLimiter } from "../middleware/rate-limit";
 import { sessionTimeoutQueue } from "../queues/session-timeout.queue";
 
