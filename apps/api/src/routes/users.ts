@@ -29,6 +29,8 @@ import { getBadgesForUser } from "../services/badges";
 import { config } from "../lib/config";
 import { getSessionHistory, type HistoryStatusFilter } from "../db/queries/sessions";
 import { CursorQuerySchema } from "../db/pagination";
+import { signAccessToken } from "../lib/tokens";
+import { tokenRevocationKey, tokenTtlSeconds } from "../middleware/authenticate";
 
 const router: Router = Router();
 
@@ -496,7 +498,26 @@ router.patch("/me/profile", authenticate, async (req, res) => {
     console.warn("Failed to trigger cache revalidation for profile update");
   }
 
-  res.json({ success: true, oldUsername, newUsername });
+  // Token rotation: revoke the old token and issue a new one
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (token) {
+    await redis.set(
+      tokenRevocationKey(token),
+      "1",
+      "EX",
+      tokenTtlSeconds(req.user!)
+    );
+  }
+
+  const updatedUser = await findUserById(req.user!.sub);
+  const newToken = signAccessToken({
+    id: updatedUser!.id,
+    email: updatedUser!.email,
+    role: req.user!.role,
+  });
+
+  res.json({ success: true, oldUsername, newUsername, token: newToken });
 });
 
 /**
