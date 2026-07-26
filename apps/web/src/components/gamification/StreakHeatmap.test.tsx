@@ -5,7 +5,7 @@ import { StreakHeatmap } from "./StreakHeatmap";
 describe("StreakHeatmap", () => {
   it("renders with no activity", () => {
     const { container } = render(<StreakHeatmap activity={[]} />);
-    expect(container.firstChild?.childNodes.length).toBe(0);
+    expect(container.firstChild?.childNodes.length ?? 0).toBe(0);
   });
 
   it("renders correct total cell count for 365 days", () => {

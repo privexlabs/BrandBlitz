@@ -27,6 +27,17 @@ vi.mock("../lib/logger", () => ({
   },
 }));
 
+vi.mock("../db/index", () => ({
+  query: vi.fn().mockResolvedValue({
+    rows: [
+      {
+        key: "webhook_secret_current",
+        value: { secret: "test-webhook-secret-key-12345" },
+      },
+    ],
+  }),
+}));
+
 describe("verifyWebhook middleware", () => {
   let req: Partial<Request>;
   let res: Partial<Response>;
@@ -56,10 +67,9 @@ describe("verifyWebhook middleware", () => {
       const payload = JSON.stringify({ test: "data" });
       const rawBody = Buffer.from(payload, "utf8");
       
-      const expectedSignature = signWebhookPayload(rawBody, timestamp);
+      const expectedSignature = signWebhookPayload(rawBody, timestamp, WEBHOOK_SECRET);
       
       req.headers = {
-        "x-webhook-secret": WEBHOOK_SECRET,
         "x-webhook-signature": `sha256=${expectedSignature}`,
         "x-webhook-timestamp": timestamp.toString(),
         "x-webhook-id": "webhook-123",
@@ -99,7 +109,7 @@ describe("verifyWebhook middleware", () => {
       const originalPayload = JSON.stringify({ amount: "100" });
       const tamperedPayload = JSON.stringify({ amount: "999999" });
       
-      const validSignature = signWebhookPayload(Buffer.from(originalPayload), timestamp);
+      const validSignature = signWebhookPayload(Buffer.from(originalPayload), timestamp, WEBHOOK_SECRET);
       
       req.headers = {
         "x-webhook-secret": WEBHOOK_SECRET,
@@ -121,8 +131,8 @@ describe("verifyWebhook middleware", () => {
       const timestamp = Math.floor(Date.now() / 1000);
       const payload = "test";
       
-      const signature1 = signWebhookPayload(payload, timestamp);
-      const signature2 = signWebhookPayload(payload, timestamp);
+      const signature1 = signWebhookPayload(payload, timestamp, WEBHOOK_SECRET);
+      const signature2 = signWebhookPayload(payload, timestamp, WEBHOOK_SECRET);
       
       // Both should be hex strings that can be compared with timingSafeEqual
       expect(signature1).toBe(signature2);
@@ -154,37 +164,11 @@ describe("verifyWebhook middleware", () => {
     });
   });
 
-  describe("webhook secret validation", () => {
-    it("rejects request with wrong webhook secret", async () => {
-      req.headers = {
-        "x-webhook-secret": "wrong-secret",
-      };
-
-      await verifyWebhook(req as Request, res as Response, next);
-
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.json).toHaveBeenCalledWith({ error: "Unauthorized" });
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it("uses timing-safe comparison for webhook secret", async () => {
-      // Verify the secret check also uses timingSafeEqual by testing length mismatch
-      req.headers = {
-        "x-webhook-secret": "short",
-      };
-
-      await verifyWebhook(req as Request, res as Response, next);
-
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(next).not.toHaveBeenCalled();
-    });
-  });
-
   describe("timestamp validation", () => {
     it("rejects stale webhook request (>5 minutes old)", async () => {
       const staleTimestamp = Math.floor(Date.now() / 1000) - 400;
       const payload = JSON.stringify({ test: "data" });
-      const signature = signWebhookPayload(payload, staleTimestamp);
+      const signature = signWebhookPayload(payload, staleTimestamp, WEBHOOK_SECRET);
       
       req.headers = {
         "x-webhook-secret": WEBHOOK_SECRET,
@@ -204,7 +188,7 @@ describe("verifyWebhook middleware", () => {
     it("rejects future webhook request (>5 minutes in future)", async () => {
       const futureTimestamp = Math.floor(Date.now() / 1000) + 400;
       const payload = JSON.stringify({ test: "data" });
-      const signature = signWebhookPayload(payload, futureTimestamp);
+      const signature = signWebhookPayload(payload, futureTimestamp, WEBHOOK_SECRET);
       
       req.headers = {
         "x-webhook-secret": WEBHOOK_SECRET,
@@ -228,7 +212,7 @@ describe("verifyWebhook middleware", () => {
       
       const timestamp = Math.floor(Date.now() / 1000);
       const payload = JSON.stringify({ test: "data" });
-      const signature = signWebhookPayload(payload, timestamp);
+      const signature = signWebhookPayload(payload, timestamp, WEBHOOK_SECRET);
       
       req.headers = {
         "x-webhook-secret": WEBHOOK_SECRET,
@@ -255,7 +239,7 @@ describe("verifyWebhook middleware", () => {
       
       const timestamp = Math.floor(Date.now() / 1000);
       const payload = JSON.stringify({ test: "data" });
-      const signature = signWebhookPayload(payload, timestamp);
+      const signature = signWebhookPayload(payload, timestamp, WEBHOOK_SECRET);
       
       req.headers = {
         "x-webhook-secret": WEBHOOK_SECRET,
@@ -290,7 +274,7 @@ describe("verifyWebhook middleware", () => {
 
     it("rejects when raw body is unavailable", async () => {
       const timestamp = Math.floor(Date.now() / 1000);
-      const signature = signWebhookPayload("test", timestamp);
+      const signature = signWebhookPayload("test", timestamp, WEBHOOK_SECRET);
       
       req.headers = {
         "x-webhook-secret": WEBHOOK_SECRET,

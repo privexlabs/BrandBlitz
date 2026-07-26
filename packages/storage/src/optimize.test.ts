@@ -21,6 +21,7 @@ vi.mock("sharp", () => {
     metadata: vi.fn().mockResolvedValue({ format: "png" }),
     resize: vi.fn().mockReturnThis(),
     webp: vi.fn().mockReturnThis(),
+    avif: vi.fn().mockReturnThis(),
     toBuffer: vi.fn().mockResolvedValue(Buffer.from("optimized")),
   }));
   return { default: mSharp };
@@ -34,9 +35,10 @@ describe("optimizeImage", () => {
   const dummyBuffer = Buffer.from("dummy");
 
   it("should process the image successfully (happy path)", async () => {
-    const optimizedContent = Buffer.from("optimized"); // matches the sharp mock's toBuffer result
-    const expectedHash = createHash("sha256").update(optimizedContent).digest("hex").slice(0, 8);
+    const optimizedContent = Buffer.from("optimized");
+    const expectedHash = createHash("sha256").update(dummyBuffer).digest("hex").slice(0, 8);
     const expectedKey = `test-image-${expectedHash}.webp`;
+    const expectedAvifKey = `test-image-${expectedHash}.avif`;
 
     vi.mocked(s3.send).mockResolvedValueOnce({
       Body: {
@@ -51,7 +53,8 @@ describe("optimizeImage", () => {
     // s3.send called once only (GetObjectCommand); upload goes through uploadObject
     expect(s3.send).toHaveBeenCalledTimes(1);
     expect(sharp).toHaveBeenCalledWith(dummyBuffer);
-    // uploadObject called with immutable: true so Cache-Control is set
+    // uploadObject called twice: once for webp, once for avif
+    expect(uploadObject).toHaveBeenCalledTimes(2);
     expect(uploadObject).toHaveBeenCalledWith({
       bucket: "brand-assets",
       key: expectedKey,
@@ -59,24 +62,32 @@ describe("optimizeImage", () => {
       contentType: "image/webp",
       immutable: true,
     });
+    expect(uploadObject).toHaveBeenCalledWith({
+      bucket: "brand-assets",
+      key: expectedAvifKey,
+      body: optimizedContent,
+      contentType: "image/avif",
+      immutable: true,
+    });
   });
 
-  it("uses different fingerprinted keys when the optimized content changes", async () => {
-    vi.mocked(s3.send).mockResolvedValue({
-      Body: { transformToByteArray: async () => dummyBuffer },
-    });
+  it("uses different fingerprinted keys when the original content changes", async () => {
+    const buffer1 = Buffer.from("first original image");
+    const buffer2 = Buffer.from("second original image");
+    vi.mocked(s3.send)
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => buffer1 },
+      })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => buffer2 },
+      });
     vi.mocked(sharp)
       .mockReturnValueOnce({
         metadata: vi.fn().mockResolvedValue({ format: "png" }),
         resize: vi.fn().mockReturnThis(),
         webp: vi.fn().mockReturnThis(),
-        toBuffer: vi.fn().mockResolvedValue(Buffer.from("first image")),
-      } as any)
-      .mockReturnValueOnce({
-        metadata: vi.fn().mockResolvedValue({ format: "png" }),
-        resize: vi.fn().mockReturnThis(),
-        webp: vi.fn().mockReturnThis(),
-        toBuffer: vi.fn().mockResolvedValue(Buffer.from("second image")),
+        avif: vi.fn().mockReturnThis(),
+        toBuffer: vi.fn().mockResolvedValue(Buffer.from("optimized")),
       } as any);
 
     const first = await optimizeImage("logos/logo.png", "brand-logo");

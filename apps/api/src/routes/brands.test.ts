@@ -32,6 +32,11 @@ vi.mock("../lib/logger", () => ({
   },
 }));
 
+vi.mock("../middleware/rate-limit", () => ({
+  apiLimiter: (_req: any, _res: any, next: any) => next(),
+  questionPreviewLimiter: (_req: any, _res: any, next: any) => next(),
+}));
+
 const JWT_SECRET = "dummy_jwt_secret_for_testing_purposes_only";
 
 vi.hoisted(() => {
