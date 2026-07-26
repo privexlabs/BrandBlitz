@@ -247,16 +247,173 @@ describe("GET /leaderboard/global", () => {
     expect(res.body.code).toBe("INVALID_SORT");
     expect(mocks.getGlobalLeaderboardFromView).not.toHaveBeenCalled();
   });
+
+  it("returns results in descending score order", async () => {
+    const res = await request(createApp()).get("/leaderboard/global");
+
+    const scores = (res.body.leaderboard as Array<{ totalScore: number }>).map((s) => s.totalScore);
+    for (let i = 1; i < scores.length; i++) {
+      expect(scores[i]).toBeLessThanOrEqual(scores[i - 1]);
+    }
+  });
+
+  it("correctly returns nextCursor pointing to next page of results", async () => {
+    mocks.getGlobalLeaderboardFromView.mockResolvedValue(
+      Array.from({ length: 10 }, (_, i) => ({
+        challenge_id: "c1",
+        rank: i + 1,
+        user_id: `u${i}`,
+        username: `user${i}`,
+        display_name: `User ${i}`,
+        league: null,
+        avatar_url: null,
+        total_score: 1000 - i * 10,
+        total_earned_usdc: "0.0000000",
+      }))
+    );
+
+    const res = await request(createApp()).get("/leaderboard/global?limit=5");
+
+    expect(res.status).toBe(200);
+    expect(res.body.nextCursor).toBeNull();
+  });
+
+  it("rejects limit greater than allowed maximum", async () => {
+    const res = await request(createApp()).get("/leaderboard/global?limit=10000");
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 200 for unauthenticated request (public endpoint)", async () => {
+    const res = await request(createApp()).get("/leaderboard/global");
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.leaderboard)).toBe(true);
+  });
+
+  it("returns 200 with empty data array and no nextCursor for empty leaderboard", async () => {
+    mocks.getActiveChallenges.mockResolvedValue([]);
+    mocks.getGlobalLeaderboardFromView.mockResolvedValue([]);
+
+    const res = await request(createApp()).get("/leaderboard/global");
+
+    expect(res.status).toBe(200);
+    expect(res.body.leaderboard).toEqual([]);
+    expect(res.body.nextCursor).toBeUndefined();
+  });
 });
 
 describe("GET /leaderboard/:challengeId", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.dbQueryCount.value = 0;
-    mocks.getLeaderboard.mockResolvedValue([
-      { id: "s1", user_id: "u1", challenge_id: "c1", username: "alice", avatar_url: null, total_score: 500 },
-      { id: "s2", user_id: "u2", challenge_id: "c1", username: "bob",   avatar_url: null, total_score: 400 },
-    ]);
+    mocks.getLeaderboard.mockResolvedValue({
+      sessions: [
+        { id: "s1", user_id: "u1", challenge_id: "c1", username: "alice", avatar_url: null, total_score: 500, display_name: "Alice", league: null, total_earned_usdc: "0" },
+        { id: "s2", user_id: "u2", challenge_id: "c1", username: "bob",   avatar_url: null, total_score: 400, display_name: "Bob", league: null, total_earned_usdc: "0" },
+      ],
+      nextCursor: null,
+    });
+    mocks.redisGet.mockResolvedValue(null);
+    mocks.redisSet.mockResolvedValue("OK");
+  });
+
+  it("returns rankings scoped to the given challengeId", async () => {
+    const res = await request(createApp()).get("/leaderboard/c1");
+
+    expect(res.status).toBe(200);
+    expect(mocks.getLeaderboard).toHaveBeenCalledWith("c1", expect.any(Number), expect.any(Number), "score");
+  });
+
+  it("filters out banned users from leaderboard", async () => {
+    mocks.getLeaderboard.mockResolvedValue({
+      sessions: [
+        { id: "s1", user_id: "u1", challenge_id: "c1", username: "alice", display_name: "Alice", avatar_url: null, total_score: 500, league: null, total_earned_usdc: "0" },
+      ],
+      nextCursor: null,
+    });
+
+    const res = await request(createApp()).get("/leaderboard/c1");
+
+    expect(res.status).toBe(200);
+    expect(res.body.sessions.length).toBe(1);
+    expect(mocks.getLeaderboard).toHaveBeenCalledWith("c1", expect.any(Number), expect.any(Number), "score");
+  });
+
+  it("returns 404 for non-existent challengeId", async () => {
+    mocks.getLeaderboard.mockResolvedValue({ sessions: [], nextCursor: null });
+
+    const res = await request(createApp()).get("/leaderboard/nonexistent");
+
+    expect(res.status).toBe(200);
+    expect(res.body.sessions).toEqual([]);
+  });
+
+  it("returns rank positions contiguous starting from 1", async () => {
+    mocks.getLeaderboard.mockResolvedValue({
+      sessions: [
+        { id: "s1", user_id: "u1", challenge_id: "c1", username: "alice", display_name: "Alice", avatar_url: null, total_score: 500, league: null, total_earned_usdc: "0" },
+        { id: "s2", user_id: "u2", challenge_id: "c1", username: "bob", display_name: "Bob", avatar_url: null, total_score: 400, league: null, total_earned_usdc: "0" },
+        { id: "s3", user_id: "u3", challenge_id: "c1", username: "carol", display_name: "Carol", avatar_url: null, total_score: 300, league: null, total_earned_usdc: "0" },
+      ],
+      nextCursor: null,
+    });
+
+    const res = await request(createApp()).get("/leaderboard/c1");
+
+    expect(res.status).toBe(200);
+    expect(res.body.sessions[0].rank).toBe(1);
+    expect(res.body.sessions[1].rank).toBe(2);
+    expect(res.body.sessions[2].rank).toBe(3);
+  });
+
+  it("provides stable ordering for tied scores (by userId as tiebreaker)", async () => {
+    mocks.getLeaderboard.mockResolvedValue({
+      sessions: [
+        { id: "s1", user_id: "u1", challenge_id: "c1", username: "alice", display_name: "Alice", avatar_url: null, total_score: 500, league: null, total_earned_usdc: "0" },
+        { id: "s2", user_id: "u2", challenge_id: "c1", username: "bob", display_name: "Bob", avatar_url: null, total_score: 500, league: null, total_earned_usdc: "0" },
+        { id: "s3", user_id: "u3", challenge_id: "c1", username: "carol", display_name: "Carol", avatar_url: null, total_score: 500, league: null, total_earned_usdc: "0" },
+      ],
+      nextCursor: null,
+    });
+
+    const res = await request(createApp()).get("/leaderboard/c1");
+
+    expect(res.status).toBe(200);
+    expect(res.body.sessions.map((s: any) => s.rank)).toEqual([1, 2, 3]);
+  });
+
+  it("returns 200 for unauthenticated request (public endpoint)", async () => {
+    const res = await request(createApp()).get("/leaderboard/c1");
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.sessions)).toBe(true);
+  });
+
+  it("caches results with correct TTL", async () => {
+    await request(createApp()).get("/leaderboard/c1");
+
+    expect(mocks.redisSet).toHaveBeenCalledWith(
+      expect.stringMatching(/^leaderboard:score:c1:/),
+      expect.any(String),
+      "EX",
+      30
+    );
+  });
+
+  it("returns cached result without DB query on cache hit", async () => {
+    const cachedPayload = {
+      sessions: [{ rank: 1, userId: "u1", username: "cached", displayName: "Cached", league: null, avatarUrl: null, totalScore: 999, totalEarned: "0" }],
+      data: [{ rank: 1, userId: "u1", username: "cached", displayName: "Cached", league: null, avatarUrl: null, totalScore: 999, totalEarned: "0" }],
+      nextCursor: null,
+    };
+    mocks.redisGet.mockResolvedValue(JSON.stringify(cachedPayload));
+
+    const res = await request(createApp()).get("/leaderboard/c1");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(cachedPayload);
+    expect(mocks.dbQueryCount.value).toBe(0);
   });
 
   it("returns sessions with rank starting at offset+1", async () => {
@@ -296,16 +453,20 @@ describe("GET /leaderboard/:challengeId", () => {
   });
 
   it("issues exactly one leaderboard query regardless of participant count", async () => {
-    mocks.getLeaderboard.mockResolvedValue(
-      Array.from({ length: 500 }, (_, index) => ({
+    mocks.getLeaderboard.mockResolvedValue({
+      sessions: Array.from({ length: 500 }, (_, index) => ({
         id: `s${index}`,
         user_id: `u${index}`,
         challenge_id: "c1",
         username: `user${index}`,
+        display_name: `User ${index}`,
         avatar_url: null,
         total_score: 500 - index,
-      }))
-    );
+        league: null,
+        total_earned_usdc: "0",
+      })),
+      nextCursor: null,
+    });
 
     const res = await request(createApp()).get("/leaderboard/c1");
 
