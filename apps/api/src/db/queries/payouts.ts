@@ -69,10 +69,6 @@ export async function updatePayoutStatus(
   } else {
     await query("UPDATE payouts SET status = $1 WHERE id = $2", [status, id]);
   }
-  await query(
-    "UPDATE payouts SET status = $1, tx_hash = $2, error_message = $3 WHERE id = $4",
-    [status, txHash ?? null, errorMessage ?? "", id]
-  );
 }
 
 export async function failPayoutsForChallenge(

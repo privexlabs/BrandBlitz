@@ -26,6 +26,7 @@ const DEFAULT_CONFETTI_COLORS = [
 function useAnimatedValue(target: number, durationMs: number): number {
   const [value, setValue] = useState(0);
   const startTimeRef = useRef<number | null>(null);
+  const lastTimestampRef = useRef<number | null>(null);
   const rafRef = useRef<number>(0);
   const hasStartedRef = useRef(false);
 
@@ -38,12 +39,19 @@ function useAnimatedValue(target: number, durationMs: number): number {
     hasStartedRef.current = true;
     
     startTimeRef.current = null;
+    lastTimestampRef.current = null;
 
     function easeOutCubic(t: number): number {
       return 1 - Math.pow(1 - t, 3);
     }
 
-    function step(timestamp: number) {
+    function step(rawTimestamp: number) {
+      let timestamp = rawTimestamp;
+      if (lastTimestampRef.current !== null && timestamp <= lastTimestampRef.current) {
+        timestamp = lastTimestampRef.current + 16;
+      }
+      lastTimestampRef.current = timestamp;
+
       if (startTimeRef.current === null) {
         startTimeRef.current = timestamp;
       }
@@ -119,8 +127,7 @@ export function ResultScreen({
   const isRankOne = rank === 1;
   useConfetti(isRankOne, primaryColor, secondaryColor);
 
-  const shareText = `I just scored ${formatScore(totalScore)} in a BrandBlitz challenge${estimatedUsdc ? ` and earned ~${formatUsdc(estimatedUsdc)} USDC` : ""}! 🏆`;
-  const leaderboardHref = `/challenge/${challengeId}`;
+  const shareText = `I just scored ${formatScore(totalScore)} in a BrandBlitz challenge${estimatedUsdc ? ` and earned ~${formatUsdc(estimatedUsdc)}` : ""}! 🏆`;
 
   async function handleShare(): Promise<void> {
     if (navigator.share) {
@@ -171,11 +178,18 @@ export function ResultScreen({
               Share Result
             </Button>
 
-            <Button asChild variant="secondary" className="w-full">
-              <Link href={leaderboardHref}>
-                View Leaderboard
-              </Link>
-            </Button>
+            <div className="flex gap-2">
+              <Button asChild variant="secondary" className="flex-1">
+                <Link href="/leaderboard">
+                  Global Leaderboard
+                </Link>
+              </Button>
+              <Button asChild variant="secondary" className="flex-1">
+                <Link href={`/leaderboard/${challengeId}`}>
+                  Challenge Leaderboard
+                </Link>
+              </Button>
+            </div>
 
             <Button asChild className="w-full">
               <Link href="/">Play Another Challenge</Link>

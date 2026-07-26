@@ -1,7 +1,7 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import request from "supertest";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import authRouter from "./auth";
 import { createError, errorHandler } from "../middleware/error";
 import type { User } from "../db/queries/users";
@@ -29,6 +29,9 @@ const mocks = vi.hoisted(() => ({
   redisPipelineExec: vi.fn(),
 }));
 
+const TEST_JWT_SECRET = "test-jwt-secret";
+const TEST_JWT_REFRESH_SECRET = "test-refresh-secret";
+
 vi.mock("../db/queries/users", () => ({
   upsertUser: mocks.upsertUser,
   findUserById: mocks.findUserById,
@@ -54,6 +57,31 @@ vi.mock("../lib/redis", () => ({
       del: mocks.redisPipelineDel,
       exec: mocks.redisPipelineExec,
     }),
+  },
+}));
+
+vi.mock("../services/referrals", () => ({
+  ensureUserReferralCode: mocks.ensureUserReferralCode,
+  consumePendingReferralAttribution: mocks.consumePendingReferralAttribution,
+}));
+
+vi.mock("../lib/redis", () => ({
+  redis: {
+    get: mocks.redisGet,
+    set: mocks.redisSet,
+    sadd: mocks.redisSadd,
+    expire: mocks.redisExpire,
+    smembers: mocks.redisSmembers,
+    pipeline: mocks.redisPipeline,
+    del: vi.fn(),
+  },
+}));
+
+vi.mock("../lib/config", () => ({
+  config: {
+    JWT_SECRET: "test-jwt-secret",
+    JWT_REFRESH_SECRET: "test-refresh-secret",
+    NODE_ENV: "test",
   },
 }));
 
@@ -97,7 +125,7 @@ function signAccessToken(user: Pick<User, "id" | "email" | "role">): string {
 function signRefreshToken(user: Pick<User, "id" | "email">): string {
   return jwt.sign(
     { sub: user.id, email: user.email, type: "refresh", jti: "seed-refresh-token" },
-    process.env.JWT_REFRESH_SECRET!,
+    TEST_JWT_REFRESH_SECRET,
     { expiresIn: "30d" }
   );
 }
@@ -185,13 +213,13 @@ describe("auth routes", () => {
       status: "active",
     });
 
-    const accessPayload = jwt.verify(response.body.token, process.env.JWT_SECRET!) as {
+    const accessPayload = jwt.verify(response.body.token, TEST_JWT_SECRET) as {
       sub: string;
       email: string;
     };
     const refreshPayload = jwt.verify(
       response.body.refreshToken,
-      process.env.JWT_REFRESH_SECRET!
+      TEST_JWT_REFRESH_SECRET
     ) as { sub: string; email: string; type: string };
 
     expect(accessPayload.sub).toBe(userFixture.id);
@@ -313,7 +341,7 @@ describe("auth routes", () => {
     expect(response.body.token).not.toBe(refreshToken);
     expect(response.body.refreshToken).not.toBe(refreshToken);
 
-    const nextAccessPayload = jwt.verify(response.body.token, process.env.JWT_SECRET!) as {
+    const nextAccessPayload = jwt.verify(response.body.token, TEST_JWT_SECRET) as {
       sub: string;
       email: string;
     };

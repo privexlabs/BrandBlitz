@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import withBundleAnalyzer from "@next/bundle-analyzer";
+import { PERMISSIONS_POLICY_HEADER } from "@brandblitz/config";
 
 const withAnalyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
@@ -41,13 +42,13 @@ function getImageRemotePatterns() {
       protocol: "http" as const,
       hostname: "localhost",
       port: "9000",
-      pathname: "/**",
+      pathname: "/brandblitz/**",
     },
     {
       protocol: "http" as const,
       hostname: "127.0.0.1",
       port: "9000",
-      pathname: "/**",
+      pathname: "/brandblitz/**",
     }
   );
 
@@ -57,16 +58,16 @@ function getImageRemotePatterns() {
     patterns.push({
       protocol: "https" as const,
       hostname: cdnHost,
-      pathname: "/**",
+      pathname: "/brandblitz/**",
     });
   }
 
   // Fallback to the legacy assets.brandblitz.app for backward compatibility
-  if (!cdnHost && process.env.NODE_ENV === "production") {
+  if (!cdnHost) {
     patterns.push({
       protocol: "https" as const,
       hostname: "assets.brandblitz.app",
-      pathname: "/**",
+      pathname: "/brandblitz/**",
     });
   }
 
@@ -95,6 +96,10 @@ const nextConfig: NextConfig = {
           {
             key: "Referrer-Policy",
             value: process.env.REFERRER_POLICY ?? "strict-origin-when-cross-origin",
+          },
+          {
+            key: "Permissions-Policy",
+            value: PERMISSIONS_POLICY_HEADER,
           },
         ],
       },

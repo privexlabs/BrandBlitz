@@ -9,11 +9,14 @@ import { computeFingerprint } from "../lib/fingerprint";
 import { createError } from "./error";
 import { normalizeClientIp } from "./rate-limit";
 import { MAX_ROUND_SCORE, MAX_TOTAL_SCORE } from "../services/scoring";
+import { config } from "../lib/config";
+import { query } from "../db/index";
 
 export const BOT_REACTION_THRESHOLD_MS = 80;
 // Fallback defaults — override at runtime via PATCH /admin/config/anti_cheat.thresholds
 export const MIN_HUMAN_REACTION_MS = 150;
 export const MAX_HUMAN_REACTION_MS = 30_000;
+export const MAX_CLOCK_SKEW_MS = 5000; // ±5 seconds tolerance for client timestamps
 
 const THRESHOLDS_CACHE_KEY = "config:cache:anti_cheat.thresholds";
 const THRESHOLDS_CONFIG_KEY = "anti_cheat.thresholds";
@@ -71,9 +74,51 @@ async function recordFraudFlag(
   if (!sessionId) return;
 
   await createFraudFlag({ sessionId, userId, flagType, details });
+  // Fraud review queries rely on idx_game_sessions_flagged for flagged-session scans.
 
   const severity = (details?.severity as string) || "warning";
   metrics.inc("antiCheat.flags_total", { severity, type: flagType });
+}
+
+/**
+ * Anti-cheat Layer 4 — client clock skew detection.
+ * Validates client-supplied timestamps are within ±5 seconds of server time.
+ * Flags requests with excessive clock skew as potential manipulation attempts.
+ */
+export async function detectClockSkew(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> {
+  const { clientTimestamp } = req.body as { clientTimestamp?: number };
+
+  if (clientTimestamp === undefined) {
+    next();
+    return;
+  }
+
+  if (!Number.isFinite(clientTimestamp) || clientTimestamp <= 0) {
+    await recordFraudFlag(req, "invalid_client_timestamp", {
+      clientTimestamp,
+      severity: "warning",
+    }).catch(() => {});
+    throw createError("Invalid client timestamp", 400, "INVALID_TIMESTAMP");
+  }
+
+  const serverTime = Date.now();
+  const clockSkewMs = Math.abs(serverTime - clientTimestamp);
+
+  if (clockSkewMs > MAX_CLOCK_SKEW_MS) {
+    await recordFraudFlag(req, "clock_skew", {
+      clientTimestamp,
+      serverTime,
+      clockSkewMs,
+      severity: "warning",
+    }).catch(() => {});
+    throw createError("Client clock skew too large", 400, "CLOCK_SKEW");
+  }
+
+  next();
 }
 
 /**
@@ -123,6 +168,8 @@ export async function validateReactionTime(
 /**
  * Enforces: 1 competitive session per account per challenge.
  * Uses the DB UNIQUE constraint atomically — no check-then-act race.
+ * If the existing session is abandoned (explicit quit or timeout), it is
+ * atomically replaced so the player can start fresh without a UNIQUE conflict.
  */
 export async function enforceOneSessionPerChallenge(
   req: Request,
@@ -131,14 +178,16 @@ export async function enforceOneSessionPerChallenge(
 ): Promise<void> {
   const userId = req.user!.sub;
   const { challengeId } = req.params;
+  const deviceId =
+    (req.headers["x-device-id"] as string | undefined) ??
+    (req.headers["x-visitor-id"] as string | undefined);
+  const isPractice = req.body.isPractice === true;
 
   const session = await claimSession({
     userId,
     challengeId,
-    deviceId:
-      (req.headers["x-device-id"] as string | undefined) ??
-      (req.headers["x-visitor-id"] as string | undefined),
-    isPractice: req.body.isPractice === true,
+    deviceId,
+    isPractice,
   });
 
   if (session) {
@@ -147,11 +196,44 @@ export async function enforceOneSessionPerChallenge(
     return;
   }
 
-  // Session already exists — fetch and return existing one idempotently
+  // Session already exists — fetch to check its status.
   const existing = await getSession(userId, challengeId);
   if (!existing) {
     throw createError("Session not found", 404);
   }
+
+  if (existing.status === "abandoned") {
+    // Atomically delete the abandoned session and insert a fresh one.
+    // The CTE guards against the race where two concurrent requests both
+    // see the abandoned row: only the request whose DELETE matches (rowCount
+    // = 1) proceeds to INSERT; the other falls through to the refetch below.
+    const result = await query<import("../db/queries/sessions").GameSession>(
+      `WITH del AS (
+         DELETE FROM game_sessions
+         WHERE user_id = $1 AND challenge_id = $2 AND status = 'abandoned'
+         RETURNING id
+       )
+       INSERT INTO game_sessions (user_id, challenge_id, device_id, is_practice)
+       SELECT $1, $2, $3, $4
+       WHERE EXISTS (SELECT 1 FROM del)
+       ON CONFLICT (user_id, challenge_id) DO NOTHING
+       RETURNING *`,
+      [userId, challengeId, deviceId ?? null, isPractice]
+    );
+    const fresh = result.rows[0] ?? null;
+    if (!fresh) {
+      // Concurrent request won the race and already created a new session.
+      const refetched = await getSession(userId, challengeId);
+      if (!refetched) throw createError("Session not found", 404);
+      (req as any).session = refetched;
+      next();
+      return;
+    }
+    (req as any).session = fresh;
+    next();
+    return;
+  }
+
   (req as any).session = existing;
   next();
 }
@@ -253,6 +335,135 @@ export async function validateRoundScore(
       "ROUND_SCORE_OUT_OF_RANGE"
     );
   }
+
+  next();
+}
+
+// ─── Session-start brute-force lockout (issue #509) ──────────────────────────
+
+const SESSION_START_LOCKOUT_CONFIG_KEY = "session_start_lockout";
+
+interface SessionStartLockoutConfig {
+  threshold: number;
+  windowSeconds: number;
+}
+
+function sessionStartLockoutKey(userId: string): string {
+  return `lockout:session_start:${userId}`;
+}
+
+/**
+ * Resolve the lockout threshold/window, preferring the runtime-tunable
+ * app_config key `session_start_lockout` and falling back to env-configured
+ * defaults so ops can adjust limits without a deploy.
+ */
+async function getSessionStartLockoutConfig(): Promise<SessionStartLockoutConfig> {
+  const fallback: SessionStartLockoutConfig = {
+    threshold: config.SESSION_START_LOCKOUT_THRESHOLD,
+    windowSeconds: config.SESSION_START_LOCKOUT_WINDOW_SECONDS,
+  };
+  try {
+    const cfg = await getConfig(SESSION_START_LOCKOUT_CONFIG_KEY);
+    const threshold = Number(cfg?.threshold);
+    const windowSeconds = Number(cfg?.window_seconds);
+    return {
+      threshold: Number.isFinite(threshold) && threshold > 0 ? threshold : fallback.threshold,
+      windowSeconds:
+        Number.isFinite(windowSeconds) && windowSeconds > 0
+          ? windowSeconds
+          : fallback.windowSeconds,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeSessionStartLockoutAudit(
+  userId: string,
+  cfg: SessionStartLockoutConfig
+): Promise<void> {
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_key, before, after)
+     VALUES ($1, 'session_start_lockout', 'user', $2, $3, $4)`,
+    [userId, userId, null, { threshold: cfg.threshold, windowSeconds: cfg.windowSeconds }]
+  );
+}
+
+/**
+ * Brute-force guard for POST /sessions/:challengeId/start.
+ *
+ * Maintains a rolling failure counter in Redis per user
+ * (`lockout:session_start:{userId}`). Once the configured threshold of failed
+ * start attempts is reached within the window, further start requests are
+ * rejected with HTTP 429 + Retry-After until the key's TTL expires. Successful
+ * starts never increment or consume the counter. Fails open if Redis is down.
+ */
+export async function requireSessionStartAllowed(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const userId = req.user?.sub;
+  if (!userId) {
+    next();
+    return;
+  }
+
+  const key = sessionStartLockoutKey(userId);
+  const cfg = await getSessionStartLockoutConfig();
+
+  let count = 0;
+  let ttl = cfg.windowSeconds;
+  try {
+    const [raw, currentTtl] = await Promise.all([redis.get(key), redis.ttl(key)]);
+    count = raw ? parseInt(raw, 10) : 0;
+    if (typeof currentTtl === "number" && currentTtl > 0) ttl = currentTtl;
+  } catch (error) {
+    // Redis outage must never block legitimate logins — fail open.
+    logger.warn("Redis unavailable during session-start lockout check; failing open", {
+      userId,
+      error: (error as Error).message,
+    });
+    next();
+    return;
+  }
+
+  if (count >= cfg.threshold) {
+    res.setHeader("Retry-After", String(ttl));
+    metrics.inc("antiCheat.session_start_lockout_total", {});
+    throw createError(
+      "Too many failed session start attempts. Please try again later.",
+      429,
+      "SESSION_START_LOCKED"
+    );
+  }
+
+  // Increment the failure counter only when the start attempt actually fails.
+  // Registered before next() so the listener observes the final status code.
+  res.on("finish", () => {
+    if (res.statusCode < 400) return;
+    void (async () => {
+      try {
+        const updated = await redis.incr(key);
+        if (updated === 1) {
+          await redis.expire(key, cfg.windowSeconds);
+        }
+        if (updated === cfg.threshold) {
+          await writeSessionStartLockoutAudit(userId, cfg).catch((error) => {
+            logger.warn("Failed to write session_start_lockout audit event", {
+              userId,
+              error: (error as Error).message,
+            });
+          });
+        }
+      } catch (error) {
+        logger.warn("Failed to record session-start failure", {
+          userId,
+          error: (error as Error).message,
+        });
+      }
+    })();
+  });
 
   next();
 }

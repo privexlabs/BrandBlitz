@@ -2,47 +2,30 @@ import { Router } from "express";
 import { z } from "zod";
 import { query } from "../db/index";
 import { createError } from "../middleware/error";
-import { apiLimiter } from "../middleware/rate-limit";
-import crypto from "crypto";
+import { apiLimiter, waitlistLimiter } from "../middleware/rate-limit";
 
 const router = Router();
 
 const WaitlistSchema = z.object({
-  email: z.string().email(),
+  email: z.string().max(254).email(),
+  referral_code: z.string().max(64).optional(),
 });
 
-router.post("/", apiLimiter, async (req, res) => {
-  const body = WaitlistSchema.parse(req.body);
-  const emailHash = crypto.createHash("sha256").update(body.email.toLowerCase().trim()).digest("hex").slice(0, 16);
-
-  const existing = await query(
-    "SELECT id, position FROM waitlist_signups WHERE email = $1",
-    [body.email.toLowerCase().trim()]
-  );
-
-  if (existing.rows.length > 0) {
-    res.json({
-      success: true,
-      position: existing.rows[0].position,
-      message: "You are already on the waitlist.",
-      ref: emailHash,
-    });
-    return;
+router.post("/", waitlistLimiter, async (req, res) => {
+  const parsed = WaitlistSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw createError("Invalid email address", 422, "INVALID_EMAIL");
   }
+  const email = parsed.data.email.toLowerCase().trim();
 
-  const result = await query<{ position: number }>(
-    `INSERT INTO waitlist_signups (email, email_hash)
+  await query(
+    `INSERT INTO waitlist (email, referral_code)
      VALUES ($1, $2)
-     RETURNING position`,
-    [body.email.toLowerCase().trim(), emailHash]
+     ON CONFLICT (email) DO NOTHING`,
+    [email, parsed.data.referral_code ?? null]
   );
 
-  res.status(201).json({
-    success: true,
-    position: result.rows[0].position,
-    message: "You have been added to the waitlist!",
-    ref: emailHash,
-  });
+  res.status(201).json({ message: "You're on the list!" });
 });
 
 router.get("/position/:email", apiLimiter, async (req, res) => {

@@ -50,10 +50,12 @@ function writeSse(res: any, payload: unknown) {
  */
 router.get("/stream", async (req, res) => {
   parseLeaderboardSort(req.query);
-  const { challengeId, intervalMs } = z.object({
-    challengeId: z.string().optional(),
-    intervalMs: z.coerce.number().min(500).max(30_000).default(2000),
-  }).parse(req.query);
+  const { challengeId, intervalMs } = z
+    .object({
+      challengeId: z.string().optional(),
+      intervalMs: z.coerce.number().min(500).max(30_000).default(2000),
+    })
+    .parse(req.query);
 
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -192,7 +194,6 @@ router.get("/:challengeId", async (req, res) => {
   });
 
   res.json(responseBody);
-});
 });
 
 export default router;

@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatScore, formatUsdc, safeDivide } from "@/lib/format";
 import { StreakBadge } from "@/components/gamification/streak-badge";
+import { StreakHeatmap } from "@/components/gamification/StreakHeatmap";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -58,30 +59,83 @@ export async function generateMetadata({ params }: ProfilePageProps): Promise<Me
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
+interface PublicProfileBadge {
+  slug: string;
+  name: string;
+  description: string;
+  iconUrl: string | null;
+  awardedAt: string;
+}
+
+interface PublicProfileLeague {
+  tier: "bronze" | "silver" | "gold";
+  rank: number | null;
+  season: string;
+}
+
+interface PublicProfile {
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+  joinedAt: string;
+  winCount: number;
+  totalSessionsPlayed: number;
+  accuracyPct: number;
+  league: PublicProfileLeague | null;
+  badges: PublicProfileBadge[];
+}
+
 async function getUserProfile(
   username: string,
-): Promise<{ user: UserProfile | null; failed: boolean; redirect?: string }> {
+): Promise<{ user: UserProfile | null; publicProfile: PublicProfile | null; failed: boolean; redirect?: string }> {
+  // Check for a username redirect first
   try {
-    const res = await fetch(`${API_URL}/users/profile/${username}`, {
+    const redirectRes = await fetch(`${API_URL}/users/profile/${username}`, {
       next: { tags: [`profile-${username}`] },
     });
-    if (!res.ok) throw new Error("Failed to fetch");
-    const data = await res.json();
-    if (data.redirect) {
-      return { user: null, failed: false, redirect: data.redirect };
+    if (redirectRes.ok) {
+      const data = await redirectRes.json();
+      if (data.redirect) {
+        return { user: null, publicProfile: null, failed: false, redirect: data.redirect };
+      }
     }
-    return { user: data.user, failed: false };
   } catch {
-    return { user: null, failed: true };
+    // fall through to public profile fetch
+  }
+
+  // Fetch from the new public endpoint
+  try {
+    const res = await fetch(`${API_URL}/users/${username}/public`, {
+      next: { tags: [`profile-${username}`] },
+    });
+    if (res.status === 404) {
+      return { user: null, publicProfile: null, failed: false };
+    }
+    if (!res.ok) throw new Error("Failed to fetch");
+    const publicProfile: PublicProfile = await res.json();
+
+    // Map PublicProfile to UserProfile for backward-compatible rendering
+    const user: UserProfile = {
+      displayName: publicProfile.displayName,
+      username: publicProfile.username,
+      league: publicProfile.league?.tier ?? null,
+      totalEarned: "0",
+      totalChallenges: publicProfile.totalSessionsPlayed,
+      avatarUrl: publicProfile.avatarUrl,
+      createdAt: publicProfile.joinedAt,
+    };
+
+    return { user, publicProfile, failed: false };
+  } catch {
+    return { user: null, publicProfile: null, failed: true };
   }
 }
 
-async function getUserBadges(userId: string): Promise<UserBadge[]> {
+async function getUserActivity(username: string) {
   try {
-    const res = await fetch(`${API_URL}/users/${userId}/badges`);
+    const res = await fetch(`${API_URL}/users/${username}/activity`);
     if (!res.ok) throw new Error("Failed to fetch");
-    const data = await res.json();
-    return data.badges ?? [];
+    return await res.json();
   } catch {
     return [];
   }
@@ -101,7 +155,7 @@ const LEAGUE_CONFIG = {
 export default async function ProfilePage({ params }: ProfilePageProps) {
   const { username } = await params;
   if (!username?.trim()) notFound();
-  const { user, failed, redirect: redirectTarget } = await getUserProfile(username);
+  const { user, publicProfile, failed, redirect: redirectTarget } = await getUserProfile(username);
 
   if (redirectTarget) {
     redirect(`/profile/${redirectTarget}`);
@@ -125,8 +179,20 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
 
   if (!user) notFound();
 
-  const badges = user.userId ? await getUserBadges(user.userId) : [];
-  const earnedIds = badges.filter((b) => b.earned).map((b) => b.id);
+  // Badges come from the public endpoint (already limited to 6 most recent).
+  // Map them to the BadgeGrid shape expected by the component.
+  const badges: UserBadge[] = (publicProfile?.badges ?? []).map((b) => ({
+    id: b.slug,
+    slug: b.slug,
+    name: b.name,
+    description: b.description,
+    iconUrl: b.iconUrl ?? "",
+    earned: true,
+    earnedAt: b.awardedAt,
+    criteria: "",
+  }));
+  const earnedIds = badges.map((b) => b.id);
+  const activity = await getUserActivity(username);
 
   const streak = user.streak ?? 0;
   const recentSessions = user.recentSessions ?? [];
@@ -165,28 +231,42 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
           )}
         </div>
         {user.isOwner && (
-          <Link href="/settings/profile">
-            <Button variant="outline" size="sm">
-              Edit Profile
-            </Button>
-          </Link>
+          <div className="flex gap-2">
+            <Link href={`/profile/${user.username}/earnings`}>
+              <Button variant="outline" size="sm">
+                Earnings
+              </Button>
+            </Link>
+            <Link href="/settings/profile">
+              <Button variant="outline" size="sm">
+                Edit Profile
+              </Button>
+            </Link>
+          </div>
         )}
       </div>
 
       {/* League banner */}
-      {user.league && (
-        <Card className={`mb-8 border-0 ${LEAGUE_CONFIG[user.league].color}`}>
+      {(user.league ?? publicProfile?.league?.tier) && (
+        <Card className={`mb-8 border-0 ${LEAGUE_CONFIG[user.league ?? publicProfile!.league!.tier].color}`}>
           <CardContent className="flex items-center gap-4 py-4">
-            <div className={`flex h-14 w-14 items-center justify-center rounded-full ${LEAGUE_CONFIG[user.league].color} border-2 border-white/30 text-2xl`}>
-              {user.league === "gold" ? "🏆" : user.league === "silver" ? "🥈" : "🥉"}
+            <div className={`flex h-14 w-14 items-center justify-center rounded-full ${LEAGUE_CONFIG[user.league ?? publicProfile!.league!.tier].color} border-2 border-white/30 text-2xl`}>
+              {(user.league ?? publicProfile?.league?.tier) === "gold" ? "🏆" : (user.league ?? publicProfile?.league?.tier) === "silver" ? "🥈" : "🥉"}
             </div>
             <div>
-              <p className={`text-lg font-bold ${LEAGUE_CONFIG[user.league].textColor}`}>
-                {LEAGUE_CONFIG[user.league].label}
+              <p className={`text-lg font-bold ${LEAGUE_CONFIG[user.league ?? publicProfile!.league!.tier].textColor}`}>
+                {LEAGUE_CONFIG[user.league ?? publicProfile!.league!.tier].label}
               </p>
-              <p className={`text-sm ${LEAGUE_CONFIG[user.league].textColor}/80`}>
-                Current league placement
-              </p>
+              {publicProfile?.league?.rank != null && (
+                <p className={`text-sm ${LEAGUE_CONFIG[user.league ?? publicProfile!.league!.tier].textColor}/80`}>
+                  Rank #{publicProfile.league.rank} this week
+                </p>
+              )}
+              {publicProfile?.league?.rank == null && (
+                <p className={`text-sm ${LEAGUE_CONFIG[user.league ?? publicProfile!.league!.tier].textColor}/80`}>
+                  Current league placement
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -226,12 +306,9 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
       {/* Stats */}
       <div className="mb-8 grid grid-cols-3 gap-4">
         {[
-          { label: "Challenges", value: user.totalChallenges ?? 0 },
-          { label: "Best Score", value: formatScore(user.bestScore ?? 0) },
-          {
-            label: "USDC Earned",
-            value: `${formatUsdc(user.totalEarned ?? "0")}`,
-          },
+          { label: "Sessions Played", value: publicProfile?.totalSessionsPlayed ?? user.totalChallenges ?? 0 },
+          { label: "Wins", value: publicProfile?.winCount ?? 0 },
+          { label: "Accuracy", value: `${publicProfile?.accuracyPct ?? 0}%` },
         ].map(({ label, value }) => (
           <Card key={label} className="text-center">
             <CardContent className="pb-4 pt-6">
@@ -254,6 +331,18 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
           </CardHeader>
           <CardContent>
             <BadgeGrid badges={badges} previouslyEarned={earnedIds} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Activity heatmap */}
+      {activity.length > 0 && (
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <StreakHeatmap activity={activity} />
           </CardContent>
         </Card>
       )}

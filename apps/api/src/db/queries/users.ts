@@ -31,6 +31,7 @@ export interface User {
   last_play_day: string | null;
   streak_repairs_this_month: number;
   streak_repair_available: boolean;
+  last_active_at: string | null;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -214,6 +215,16 @@ export async function updateUserProfile(
   await query(
     `UPDATE users SET display_name = $2, username = $3, updated_at = NOW() WHERE id = $1`,
     [userId, displayName, newUsername]
+  );
+
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_key, before, after)
+     VALUES ($1, 'update_profile', 'user', $1, $2, $3)`,
+    [
+      userId,
+      JSON.stringify({ display_name: current.rows[0].display_name, username: current.rows[0].username }),
+      JSON.stringify({ display_name: displayName, username: newUsername })
+    ]
   );
 
   return { oldUsername, newUsername };
@@ -450,4 +461,28 @@ export async function updateLastLogin(userId: string): Promise<void> {
     "UPDATE users SET last_login = NOW(), updated_at = NOW() WHERE id = $1",
     [userId],
   );
+}
+
+export interface UserSearchResult {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  total_earned_usdc: string;
+}
+
+export async function searchUsersByUsername(
+  prefix: string,
+  page: number,
+  pageSize: number,
+): Promise<UserSearchResult[]> {
+  const result = await query<UserSearchResult>(
+    `SELECT id, username, avatar_url, total_earned_usdc
+     FROM users
+     WHERE deleted_at IS NULL
+       AND username ILIKE $1
+     ORDER BY username ASC
+     LIMIT $2 OFFSET $3`,
+    [`${prefix}%`, pageSize, (page - 1) * pageSize],
+  );
+  return result.rows;
 }
