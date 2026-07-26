@@ -17,7 +17,10 @@ vi.mock("../middleware/authenticate", () => ({
     next();
   },
 }));
-vi.mock("../middleware/rate-limit", () => ({ apiLimiter: mocks.limiter }));
+vi.mock("../middleware/rate-limit", () => ({
+  apiLimiter: mocks.limiter,
+  questionPreviewLimiter: mocks.limiter,
+}));
 vi.mock("../db/queries/brands", () => ({
   createBrand: vi.fn(),
   getBrandsByOwner: vi.fn(),
