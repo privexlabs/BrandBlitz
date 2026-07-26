@@ -217,6 +217,16 @@ export async function updateUserProfile(
     [userId, displayName, newUsername]
   );
 
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_key, before, after)
+     VALUES ($1, 'update_profile', 'user', $1, $2, $3)`,
+    [
+      userId,
+      JSON.stringify({ display_name: current.rows[0].display_name, username: current.rows[0].username }),
+      JSON.stringify({ display_name: displayName, username: newUsername })
+    ]
+  );
+
   return { oldUsername, newUsername };
 }
 
