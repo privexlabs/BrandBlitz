@@ -361,4 +361,166 @@ describe("upload routes integration", () => {
 
     expect(response.body.error).toBe("Validation Error");
   });
+
+  describe("POST /upload/complete", () => {
+    const mockOptimizeImage = vi.fn();
+    const mockQuery = vi.fn();
+
+    vi.mock("@brandblitz/storage", () => ({
+      s3: { send: mockSend },
+      BUCKETS: {
+        BRAND_ASSETS: "brand-assets",
+        SHARE_CARDS: "share-cards",
+      },
+      PRESIGNED_URL_TTL_SECONDS: 60,
+      getPublicUrl: mockGetPublicUrl,
+      optimizeImage: mockOptimizeImage,
+    }));
+
+    vi.mock("../db/index", () => ({
+      query: mockQuery,
+    }));
+
+    beforeEach(() => {
+      mockOptimizeImage.mockResolvedValue("logos/optimized-abc123.webp");
+      mockQuery.mockResolvedValue({ rows: [] });
+    });
+
+    it("returns 200 and the associated DB record is updated with the new asset URL", async () => {
+      mockRedisGet.mockResolvedValueOnce("1"); // ownership confirmed
+      mockSend.mockResolvedValueOnce({}); // HeadObject success
+
+      const response = await request(app)
+        .post("/upload/complete")
+        .send({
+          uploadId: "logos/test-upload-id",
+          resourceType: "brand-logo",
+          resourceId: "brand-123",
+        })
+        .expect(200);
+
+      expect(response.body.assetUrl).toBeDefined();
+      expect(response.body.optimizedKey).toBe("logos/optimized-abc123.webp");
+      expect(mockQuery).toHaveBeenCalledWith(
+        "UPDATE brands SET logo_url = $1 WHERE id = $2",
+        [expect.any(String), "brand-123"]
+      );
+    });
+
+    it("the image optimisation pipeline is invoked exactly once per successful completion", async () => {
+      mockRedisGet.mockResolvedValueOnce("1");
+      mockSend.mockResolvedValueOnce({});
+
+      await request(app)
+        .post("/upload/complete")
+        .send({
+          uploadId: "logos/test-upload-id",
+          resourceType: "brand-logo",
+          resourceId: "brand-123",
+        })
+        .expect(200);
+
+      expect(mockOptimizeImage).toHaveBeenCalledTimes(1);
+      expect(mockOptimizeImage).toHaveBeenCalledWith("logos/test-upload-id", "brand-logo");
+    });
+
+    it("if S3 reports the object does not exist, the endpoint returns 422 and neither the DB nor the optimiser are called", async () => {
+      mockRedisGet.mockResolvedValueOnce("1");
+      mockSend.mockRejectedValueOnce(new Error("Not found"));
+
+      const response = await request(app)
+        .post("/upload/complete")
+        .send({
+          uploadId: "logos/test-upload-id",
+          resourceType: "brand-logo",
+          resourceId: "brand-123",
+        })
+        .expect(422);
+
+      expect(response.body.error).toBe("Object does not exist in storage");
+      expect(mockOptimizeImage).not.toHaveBeenCalled();
+      expect(mockQuery).not.toHaveBeenCalled();
+    });
+
+    it("an unauthenticated request returns 401", async () => {
+      const response = await request(app)
+        .post("/upload/complete")
+        .send({
+          uploadId: "logos/test-upload-id",
+          resourceType: "brand-logo",
+          resourceId: "brand-123",
+        })
+        .expect(401);
+
+      expect(response.body.error).toBeDefined();
+    });
+
+    it("completing an upload for a resource the authenticated user does not own returns 403", async () => {
+      mockRedisGet.mockResolvedValueOnce(null); // no ownership record
+
+      const response = await request(app)
+        .post("/upload/complete")
+        .send({
+          uploadId: "logos/test-upload-id",
+          resourceType: "brand-logo",
+          resourceId: "brand-123",
+        })
+        .expect(403);
+
+      expect(response.body.error).toBe("Upload not found or not owned by user");
+      expect(mockOptimizeImage).not.toHaveBeenCalled();
+      expect(mockQuery).not.toHaveBeenCalled();
+    });
+
+    it("a malformed uploadId in the request body returns 400", async () => {
+      const response = await request(app)
+        .post("/upload/complete")
+        .send({
+          uploadId: "not-a-uuid",
+          resourceType: "brand-logo",
+          resourceId: "brand-123",
+        })
+        .expect(400);
+
+      expect(response.body.error).toBeDefined();
+    });
+
+    it("updates user avatar when resourceType is user-avatar", async () => {
+      mockRedisGet.mockResolvedValueOnce("1");
+      mockSend.mockResolvedValueOnce({});
+
+      await request(app)
+        .post("/upload/complete")
+        .send({
+          uploadId: "avatars/test-upload-id",
+          resourceType: "user-avatar",
+          resourceId: "user-123",
+        })
+        .expect(200);
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        "UPDATE users SET avatar_url = $1 WHERE id = $2",
+        [expect.any(String), "user-123"]
+      );
+    });
+
+    it("updates challenge asset when resourceType is challenge-asset", async () => {
+      mockRedisGet.mockResolvedValueOnce("1");
+      mockSend.mockResolvedValueOnce({});
+
+      await request(app)
+        .post("/upload/complete")
+        .send({
+          uploadId: "products/test-upload-id",
+          resourceType: "challenge-asset",
+          resourceId: "challenge-123",
+        })
+        .expect(200);
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        "UPDATE challenges SET asset_url = $1 WHERE id = $2",
+        [expect.any(String), "challenge-123"]
+      );
+    });
+  });
 });
