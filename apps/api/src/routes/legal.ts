@@ -45,6 +45,16 @@ router.get("/:type/:version", async (req, res) => {
  */
 router.post("/accept", authenticate, async (req, res) => {
   const { type, version } = AcceptSchema.parse(req.body);
+
+  const current = await getCurrentLegalDocument(type);
+  if (current && current.version !== version) {
+    throw createError(
+      `Version mismatch: current ${type} version is ${current.version}`,
+      400,
+      "LEGAL_VERSION_MISMATCH"
+    );
+  }
+
   const ip = req.ip ?? req.socket.remoteAddress ?? "";
   const acceptance = await recordUserLegalAcceptance(req.user!.sub, type, version, ip);
   res.status(201).json({ acceptance });
