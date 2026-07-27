@@ -15,6 +15,7 @@ export interface Challenge {
   id: string;
   brand_id: string;
   challenge_id: string;
+  deposit_memo?: string | null;
   pool_amount_stroops: string;
   pool_amount_usdc: string;
   participant_count?: number;
@@ -52,18 +53,20 @@ export interface ChallengeQuestion {
 export async function createChallenge(data: {
   brandId: string;
   challengeId: string;
+  depositMemo?: string;
   poolAmountUsdc: string;
   maxPlayers?: number;
   endsAt?: string;
 }): Promise<Challenge> {
   const result = await query<Challenge>(
     `INSERT INTO challenges
-       (brand_id, challenge_id, pool_amount_stroops, max_players, ends_at)
-     VALUES ($1,$2,$3,$4,$5)
+       (brand_id, challenge_id, deposit_memo, pool_amount_stroops, max_players, ends_at)
+     VALUES ($1,$2,$3,$4,$5,$6)
      RETURNING *, (pool_amount_stroops::numeric / 10000000)::numeric(20,7)::text AS pool_amount_usdc`,
     [
       data.brandId,
       data.challengeId,
+      data.depositMemo ?? data.challengeId,
       usdcToStroops(data.poolAmountUsdc),
       data.maxPlayers ?? null,
       data.endsAt ?? null,
