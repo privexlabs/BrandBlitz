@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import request from "supertest";
+import { errorHandler } from "../middleware/error";
 
 const mocks = vi.hoisted(() => ({
   redisGet: vi.fn(),
@@ -86,14 +87,18 @@ vi.mock("../middleware/require-active-user", () => ({
   requireActiveUser: (req: any, res: any, next: any) => next(),
 }));
 
-vi.mock("../middleware/error", () => ({
-  createError: (message: string, code: number, errorCode?: string) => {
-    const error: any = new Error(message);
-    error.statusCode = code;
-    error.code = errorCode;
-    return error;
-  },
-}));
+vi.mock("../middleware/error", async () => {
+  const actual = await vi.importActual<typeof import("../middleware/error")>("../middleware/error");
+  return {
+    errorHandler: actual.errorHandler,
+    createError: (message: string, code: number, errorCode?: string) => {
+      const error: any = new Error(message);
+      error.statusCode = code;
+      error.code = errorCode;
+      return error;
+    },
+  };
+});
 
 vi.mock("../middleware/rate-limit", () => ({
   challengeStartLimiter: (req: any, res: any, next: any) => next(),
@@ -124,7 +129,8 @@ describe("sessions warmup-complete endpoint", () => {
     app.use(express.json());
     const sessionsRouter = await import("./sessions");
     app.use("/sessions", sessionsRouter.default);
-    
+    app.use(errorHandler);
+
     mocks.getChallengeById.mockResolvedValue({
       id: "challenge-1",
       status: "active",
@@ -257,4 +263,172 @@ describe("sessions warmup-complete endpoint", () => {
   });
 
 
+});
+
+describe("GET /sessions/:challengeId (recovery)", () => {
+  let app: express.Express;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = express();
+    app.use(express.json());
+    const sessionsRouter = await import("./sessions");
+    app.use("/sessions", sessionsRouter.default);
+    app.use(errorHandler);
+
+    mocks.getChallengeById.mockResolvedValue({ id: "challenge-1", status: "active" });
+    mocks.getSession.mockResolvedValue({
+      id: "session-1",
+      user_id: "user-1",
+      total_score: 0,
+      round_1_answer: null,
+      round_1_score: 0,
+      round_2_answer: null,
+      round_2_score: 0,
+      round_3_answer: null,
+      round_3_score: 0,
+      status: "warmup",
+      completed_at: null,
+      challenge_started_at: null,
+    });
+  });
+
+  it("returns 401 when no auth token is provided", async () => {
+    const response = await request(app).get("/sessions/challenge-1");
+
+    expect(response.status).toBe(401);
+    expect(mocks.getSession).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when the challenge does not exist", async () => {
+    mocks.getChallengeById.mockResolvedValue(null);
+
+    const response = await request(app)
+      .get("/sessions/challenge-1")
+      .set("Authorization", "Bearer test-token");
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe("Challenge not found");
+    expect(mocks.getSession).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when the caller has no session for the challenge", async () => {
+    mocks.getSession.mockResolvedValue(null);
+
+    const response = await request(app)
+      .get("/sessions/challenge-1")
+      .set("Authorization", "Bearer test-token");
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe("Session not found");
+  });
+
+  it("returns 403 when the session belongs to a different user", async () => {
+    mocks.getSession.mockResolvedValue({
+      id: "session-1",
+      user_id: "someone-else",
+      round_1_score: 0,
+      round_2_score: 0,
+      round_3_score: 0,
+    });
+
+    const response = await request(app)
+      .get("/sessions/challenge-1")
+      .set("Authorization", "Bearer test-token");
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe("Forbidden");
+  });
+
+  it("returns warmup status and round 1 as the current round for a fresh session", async () => {
+    const response = await request(app)
+      .get("/sessions/challenge-1")
+      .set("Authorization", "Bearer test-token");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      session: {
+        id: "session-1",
+        status: "warmup",
+        last_answered_round: 0,
+        current_round: 1,
+        total_score: 0,
+      },
+    });
+    expect(response.body.session.round_scores).toEqual([0, 0, 0]);
+  });
+
+  it("reports in_progress status and the next unanswered round once the challenge has started", async () => {
+    mocks.getSession.mockResolvedValue({
+      id: "session-1",
+      user_id: "user-1",
+      total_score: 0,
+      round_1_answer: "A",
+      round_1_score: 100,
+      round_2_answer: null,
+      round_2_score: 0,
+      round_3_answer: null,
+      round_3_score: 0,
+      status: "active",
+      completed_at: null,
+      challenge_started_at: new Date().toISOString(),
+    });
+
+    const response = await request(app)
+      .get("/sessions/challenge-1")
+      .set("Authorization", "Bearer test-token");
+
+    expect(response.status).toBe(200);
+    expect(response.body.session.status).toBe("in_progress");
+    expect(response.body.session.last_answered_round).toBe(1);
+    expect(response.body.session.current_round).toBe(2);
+  });
+
+  it("reports completed status and the summed total score once all rounds are answered", async () => {
+    mocks.getSession.mockResolvedValue({
+      id: "session-1",
+      user_id: "user-1",
+      total_score: 0,
+      round_1_answer: "A",
+      round_1_score: 100,
+      round_2_answer: "B",
+      round_2_score: 150,
+      round_3_answer: "C",
+      round_3_score: 200,
+      status: "completed",
+      completed_at: new Date().toISOString(),
+      challenge_started_at: new Date().toISOString(),
+    });
+
+    const response = await request(app)
+      .get("/sessions/challenge-1")
+      .set("Authorization", "Bearer test-token");
+
+    expect(response.status).toBe(200);
+    expect(response.body.session.status).toBe("completed");
+    expect(response.body.session.last_answered_round).toBe(3);
+    expect(response.body.session.current_round).toBe(3);
+    expect(response.body.session.total_score).toBe(450);
+  });
+
+  it("reports expired status for an abandoned session", async () => {
+    mocks.getSession.mockResolvedValue({
+      id: "session-1",
+      user_id: "user-1",
+      total_score: 0,
+      round_1_score: 0,
+      round_2_score: 0,
+      round_3_score: 0,
+      status: "abandoned",
+      completed_at: null,
+      challenge_started_at: null,
+    });
+
+    const response = await request(app)
+      .get("/sessions/challenge-1")
+      .set("Authorization", "Bearer test-token");
+
+    expect(response.status).toBe(200);
+    expect(response.body.session.status).toBe("expired");
+  });
 });
