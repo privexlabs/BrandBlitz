@@ -99,7 +99,8 @@ async function getUserProfile(
         return { user: null, publicProfile: null, failed: false, redirect: data.redirect };
       }
     }
-  } catch {
+  } catch (err) {
+    console.error("Failed to check username redirect:", err);
     // fall through to public profile fetch
   }
 
@@ -126,7 +127,8 @@ async function getUserProfile(
     };
 
     return { user, publicProfile, failed: false };
-  } catch {
+  } catch (err) {
+    console.error("Failed to fetch public profile:", err);
     return { user: null, publicProfile: null, failed: true };
   }
 }
@@ -136,7 +138,8 @@ async function getUserActivity(username: string) {
     const res = await fetch(`${API_URL}/users/${username}/activity`);
     if (!res.ok) throw new Error("Failed to fetch");
     return await res.json();
-  } catch {
+  } catch (err) {
+    console.error("Failed to fetch user activity:", err);
     return [];
   }
 }

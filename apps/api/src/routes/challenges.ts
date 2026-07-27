@@ -90,7 +90,13 @@ router.get("/", optionalAuth, async (req, res) => {
     throw createError("Invalid query parameters", 400, "INVALID_QUERY");
   }
 
-  const { brandId, limit, cursor, status, min_pool, end_before } = parsed.data;
+  const { brandId, limit, cursor, status, min_pool, end_before, offset } = parsed.data;
+
+  // Emit deprecation header if legacy offset is used
+  if (offset !== undefined) {
+    res.setHeader("Deprecation", "offset");
+    res.setHeader("Link", '<https://docs.api.brandblitz.com/pagination>; rel="deprecation"; type="text/html"');
+  }
 
   if (brandId) {
     const { challenges, nextCursor } = await getChallengesByBrandId(brandId, limit, cursor);

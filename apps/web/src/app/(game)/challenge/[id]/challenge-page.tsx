@@ -170,8 +170,11 @@ export function ChallengePage({ params }: Props) {
         if (cancelled) return;
         setChallenge(res.data.challenge);
         setQuestions(res.data.questions);
-      } catch {
-        if (!cancelled) setLoadError("Couldn't load the challenge. Check your connection and try again.");
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Failed to load challenge:", err);
+          setLoadError("Couldn't load the challenge. Check your connection and try again.");
+        }
         return;
       }
 
@@ -186,6 +189,7 @@ export function ChallengePage({ params }: Props) {
         }
       } catch (err: any) {
         if (err?.response?.status && err.response.status !== 404) {
+          console.error("Failed to check session status:", err);
           if (!cancelled) setLoadError("Couldn't check your session status. Please try again.");
           return;
         }
@@ -195,7 +199,8 @@ export function ChallengePage({ params }: Props) {
         const r = await api.post(`/sessions/${challengeId}/warmup-start`, { deviceId: visitorId });
         if (cancelled) return;
         setPhase("preview");
-      } catch {
+      } catch (err) {
+        console.error("Failed to start warmup:", err);
         if (!cancelled) setLoadError("Couldn't start the game session. Please try again.");
       }
     })();

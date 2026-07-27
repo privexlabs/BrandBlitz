@@ -18,9 +18,11 @@ interface CountdownTimerProps {
   onTick?: () => void;
   className?: string;
   paused?: boolean;
+  /** Called when the pause state changes (for parent to disable buttons) */
+  onPausedChange?: (isPaused: boolean) => void;
 }
 
-export function CountdownTimer({ durationSeconds, deadlineAt, onExpire, onTick, className, paused = false }: CountdownTimerProps) {
+export function CountdownTimer({ durationSeconds, deadlineAt, onExpire, onTick, className, paused = false, onPausedChange }: CountdownTimerProps) {
   const { timeLeftMs, isPaused } = useCountdown({ durationSeconds, deadlineAt, onExpire, paused });
 
   const seconds = Math.ceil(timeLeftMs / 1000);
@@ -35,6 +37,11 @@ export function CountdownTimer({ durationSeconds, deadlineAt, onExpire, onTick, 
     }
     prevSecondsRef.current = seconds;
   }, [seconds, isLow, onTick]);
+
+  // Notify parent of pause state changes
+  React.useEffect(() => {
+    onPausedChange?.(isPaused);
+  }, [isPaused, onPausedChange]);
 
   return (
     <div className={cn("flex flex-col items-center gap-2", className)}>
