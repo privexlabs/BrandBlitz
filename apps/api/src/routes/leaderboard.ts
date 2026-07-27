@@ -168,7 +168,13 @@ router.get("/global", async (req, res) => {
  */
 router.get("/:challengeId", async (req, res) => {
   const sortBy = parseLeaderboardSort(req.query);
-  const { limit, cursor } = CursorQuerySchema.parse(req.query);
+  const { limit, cursor, offset } = CursorQuerySchema.parse(req.query);
+
+  // Emit deprecation header if legacy offset is used
+  if (offset !== undefined) {
+    res.setHeader("Deprecation", "offset");
+    res.setHeader("Link", '<https://docs.api.brandblitz.com/pagination>; rel="deprecation"; type="text/html"');
+  }
 
   const cacheKey = `leaderboard:${sortBy}:${req.params.challengeId}:${limit}:${cursor ?? ""}`;
 
