@@ -8,6 +8,7 @@ import cors from "cors";
 import compression from "compression";
 import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
+import healthRoutes from "./routes/health";
 import { errorHandler } from "./middleware/error";
 import { referralAttributionMiddleware } from "./middleware/referral-attribution";
 import { apiLimiter } from "./middleware/rate-limit";
@@ -158,17 +159,17 @@ app.use(express.urlencoded({ extended: true }));
 app.use(apiLimiter);
 
 // ── Health check (before auth middleware) ──────────────────────────────────
-app.get("/health", (_req, res) => {
-  if (isShuttingDown) {
-    res.status(503).json({ status: "shutting_down" });
-    return;
-  }
-  res.json({
-    status: "ok",
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-  });
-});
+app.use(
+  "/health",
+  (_req, res, next) => {
+    if (isShuttingDown) {
+      res.status(503).json({ status: "shutting_down" });
+      return;
+    }
+    next();
+  },
+  healthRoutes
+);
 
 // ── API Routes ─────────────────────────────────────────────────────────────
 registerRoutes(app);
