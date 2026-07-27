@@ -198,12 +198,40 @@ export async function updateBrand(
   return result.rows[0] ?? null;
 }
 
-export async function deleteBrand(id: string, ownerUserId: string): Promise<boolean> {
-  const result = await query(
-    "UPDATE brands SET deleted_at = NOW() WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL RETURNING id",
-    [id, ownerUserId]
+export async function deleteBrand(
+  id: string,
+  ownerUserId?: string,
+): Promise<{ deletedAt: string; cancelledChallenges: number } | null> {
+  const result = await query<{ deleted_at: string; cancelled_count: number }>(
+    `WITH deleted_brand AS (
+       UPDATE brands
+       SET deleted_at = NOW()
+       WHERE id = $1
+         AND deleted_at IS NULL
+         AND ($2::uuid IS NULL OR owner_user_id = $2)
+       RETURNING id, deleted_at
+     ),
+     cancelled AS (
+       UPDATE challenges
+       SET status = 'cancelled'
+       WHERE brand_id IN (SELECT id FROM deleted_brand)
+         AND status IN ('pending_deposit', 'active')
+         AND deleted_at IS NULL
+       RETURNING id
+     )
+     SELECT db.deleted_at, COUNT(c.id)::int AS cancelled_count
+     FROM deleted_brand db
+     LEFT JOIN cancelled c ON TRUE
+     GROUP BY db.deleted_at`,
+    [id, ownerUserId ?? null],
   );
-  return (result.rowCount ?? 0) > 0;
+  const row = result.rows[0];
+  return row
+    ? {
+        deletedAt: row.deleted_at,
+        cancelledChallenges: row.cancelled_count,
+      }
+    : null;
 }
 
 export interface BrandChallengeStats {

@@ -133,7 +133,8 @@ describeIntegration("brands soft-delete challenge cascade", () => {
         .set("Authorization", `Bearer ${ownerToken}`);
     }
     
-    expect(deleteRes.status).toBe(204);
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.body.cancelledChallenges).toBe(1);
 
     // Wait, what if the endpoint is DELETE /brands/:id or POST /brands/:id/delete?
     // Let's check if deleteRes is 200, if not, we'll try again with the right path later.
@@ -155,5 +156,10 @@ describeIntegration("brands soft-delete challenge cascade", () => {
     // We'll just verify the brand is soft-deleted.
     const verifyBrandRes = await query(`SELECT deleted_at FROM brands WHERE id = $1`, [brandId]);
     expect(verifyBrandRes.rows[0].deleted_at).not.toBeNull();
+
+    const verifyChallengeRes = await query(`SELECT status FROM challenges WHERE id = $1`, [
+      c1Res.rows[0].id,
+    ]);
+    expect(verifyChallengeRes.rows[0].status).toBe("cancelled");
   });
 });

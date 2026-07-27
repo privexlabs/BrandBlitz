@@ -30,7 +30,7 @@ import { requireCurrentTosAccepted } from "../middleware/require-tos";
 import { createError } from "../middleware/error";
 import { logger } from "../lib/logger";
 import { config } from "../lib/config";
-import { MIN_POOL_STROOPS } from "@brandblitz/stellar";
+import { generateDepositMemo, MIN_POOL_STROOPS } from "@brandblitz/stellar";
 import { query } from "../db/index";
 import { apiLimiter, questionPreviewLimiter } from "../middleware/rate-limit";
 import { decodeCursorSafe, encodeCursor } from "../db/pagination";
@@ -116,8 +116,15 @@ const QuestionTemplateSchema = z
   .nullable();
 
 const PatchBrandSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  logo_url: z.string().url().nullable().optional(),
+  primary_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
+  secondary_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
+  tagline: z.string().max(100).nullable().optional(),
+  brand_story: z.string().max(500).nullable().optional(),
+  usp: z.string().max(200).nullable().optional(),
   question_template: QuestionTemplateSchema.optional(),
-});
+}).strict();
 
 function validateChallengeEndsAt(endsAt: string): void {
   const endsAtMs = new Date(endsAt).getTime();
@@ -248,6 +255,21 @@ router.get("/", authenticate, apiLimiter, async (req, res) => {
     total: totalResult.rows[0]?.total ?? 0,
   });
 });
+
+/**
+ * GET /brands/:id/distractors
+ * Return up to three public-safe alternate brands for a game round.
+ */
+router.get("/:id/distractors", authenticate, async (req, res) => {
+  const brand = await getBrandById(req.params.id);
+  if (!brand) throw createError("Brand not found", 404);
+
+  const distractors = (await getActiveDistractorBrands(brand.id))
+    .slice(0, 3)
+    .map(({ id, name, logo_url }) => ({ id, name, logo_url }));
+
+  res.json({ distractors });
+});
 /**
  * GET /brands/:id
  */
@@ -302,14 +324,18 @@ router.patch("/:id", authenticate, async (req, res) => {
     throw createError("Invalid request body", 422, "INVALID_QUESTION_TEMPLATE");
   }
 
-  const { question_template } = result.data;
-  if (question_template === undefined) {
+  const updates = result.data;
+  if (Object.keys(updates).length === 0) {
     res.json({ brand: toBrandApi(brand) });
     return;
   }
 
   const updated = await updateBrand(req.params.id, req.user!.sub, {
-    question_template: question_template as Record<string, unknown> | null,
+    ...updates,
+    question_template: updates.question_template as
+      | Record<string, unknown>
+      | null
+      | undefined,
   } as Parameters<typeof updateBrand>[2]);
 
   if (!updated) throw createError("Brand not found", 404);
@@ -323,12 +349,21 @@ router.patch("/:id", authenticate, async (req, res) => {
 router.delete("/:id", authenticate, async (req, res) => {
   const meta = await getBrandMetaById(req.params.id);
   if (!meta || meta.deleted_at) throw createError("Brand not found", 404);
-  if (meta.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
+  const isAdmin = req.user!.role === "admin" || req.user!.role === "super_admin";
+  if (meta.owner_user_id !== req.user!.sub && !isAdmin) {
+    throw createError("Forbidden", 403);
+  }
 
-  const deleted = await deleteBrand(req.params.id, req.user!.sub);
+  const deleted = await deleteBrand(
+    req.params.id,
+    isAdmin ? undefined : req.user!.sub,
+  );
   if (!deleted) throw createError("Brand not found", 404);
 
-  res.status(204).send();
+  res.status(200).json({
+    brand: { id: req.params.id, deleted_at: deleted.deletedAt },
+    cancelledChallenges: deleted.cancelledChallenges,
+  });
 });
 
 /**
@@ -515,10 +550,14 @@ router.post("/", authenticate, async (req, res) => {
 /**
  * POST /brands/challenges
  * Create a new challenge and generate questions from brand kit.
- * Returns the Stellar memo (challenge_id) for the deposit instructions.
+ * Returns a unique Stellar text memo for the deposit instructions.
  */
 router.post("/challenges", authenticate, requireCurrentTosAccepted, async (req, res) => {
-  const body = ChallengeSchema.parse(req.body);
+  const parsedBody = ChallengeSchema.safeParse(req.body);
+  if (!parsedBody.success) {
+    throw createError("Invalid challenge fields", 422, "VALIDATION_ERROR");
+  }
+  const body = parsedBody.data;
   validateChallengeEndsAt(body.endsAt);
 
   const brand = await getBrandById(body.brandId);
@@ -526,9 +565,11 @@ router.post("/challenges", authenticate, requireCurrentTosAccepted, async (req, 
   if (brand.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
 
   const challengeId = randomUUID();
+  const depositMemo = generateDepositMemo();
   const challenge = await createChallenge({
     brandId: body.brandId,
     challengeId,
+    depositMemo,
     poolAmountUsdc: body.poolAmountUsdc,
     maxPlayers: body.maxPlayers,
     endsAt: body.endsAt,
@@ -550,10 +591,10 @@ router.post("/challenges", authenticate, requireCurrentTosAccepted, async (req, 
     challenge,
     depositInstructions: {
       hotWalletAddress: config.HOT_WALLET_PUBLIC_KEY,
-      memo: challengeId,
+      memo: depositMemo,
       amount: body.poolAmountUsdc,
       asset: "USDC",
-      note: `Send exactly ${body.poolAmountUsdc} USDC to the hot wallet with memo: ${challengeId}`,
+      note: `Send exactly ${body.poolAmountUsdc} USDC to the hot wallet with memo: ${depositMemo}`,
     },
   });
 });
