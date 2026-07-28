@@ -371,7 +371,10 @@ router.get("/:id/deposit-info", authenticate, async (req, res) => {
   res.json({
     depositInfo: {
       hotWalletAddress: config.HOT_WALLET_PUBLIC_KEY,
-      memo: challenge.id,
+      // Return the dedicated deposit_memo — the value reconciliation matches on
+      // (getChallengeByMemo) and which is generated to fit Stellar's 28-byte text
+      // memo limit. Fall back to the id only if a legacy row lacks a memo.
+      memo: challenge.deposit_memo ?? challenge.id,
       amount: challenge.pool_amount_usdc,
     },
   });

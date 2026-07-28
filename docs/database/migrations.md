@@ -33,69 +33,21 @@ files under `apps/api/migrations/`.
 - `CREATE INDEX IF NOT EXISTS` / `DROP INDEX IF EXISTS` are used where possible
   so replays are safe on already-upgraded databases.
 
-## Safely adding an index to a large table
+### CI validation (dual-path + down-migration exercise)
 
-When a new index is needed on a large, frequently-written table
-(e.g. `game_sessions`, `payouts`, `challenges`) the normal migration
-runner **must not** be used — it wraps every file in a transaction,
-which prevents `CREATE INDEX CONCURRENTLY` and forces a full table lock
-for the duration of the DDL.
-
-Use this out-of-band procedure instead.
-
-### Procedure
-
-1. **Write the migration SQL file** as usual under `migrations/` (e.g.
-   `00010_large_table_idx.sql`). The file stays in git for review and
-   lineage, but the runner will *skip* it because we manually pre-record
-   it below.
-
-2. **Run `CREATE INDEX CONCURRENTLY` outside the runner** — directly
-   against the production or staging database via a one-off maintenance
-   script or a manual `psql` session:
-
-   ```sql
-   CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_large_table_col
-     ON large_table (col);
-   ```
-
-   `CONCURRENTLY` allows the index build to proceed while other writes
-   continue. It takes longer (two table scans instead of one) and
-   consumes more resources, but avoids blocking writes.
-
-3. **Record the migration as already applied** so the runner and
-   `migrate:dryrun` in CI skip it:
-
-   ```sql
-   INSERT INTO schema_migrations (version, applied_at)
-   VALUES ('00010_large_table_idx.sql', NOW());
-   ```
-
-   The `schema_migrations` table is the runner's bookkeeping table
-   (see `apps/api/scripts/migrate.ts:60-64`). Once the row exists, the
-   `runUp` loop skips the file and `runDryRun` considers everything
-   current.
-
-4. **Verify with `migrate:dryrun`.** Run `pnpm --filter @brandblitz/api migrate:dryrun` and confirm it reports `"All migrations have already been applied."`
-
-### Hash-mismatch edge case (not yet enforced)
-
-`docs/adr/003-migrations-framework.md` describes a future `hash` column
-in `schema_migrations` that would refuse to re-run a migration whose
-contents changed after application. If that column is ever added, the
-out-of-band `INSERT` above will need to include a correct hash of the
-migration file at the time it was applied. For now the version-keyed
-lookup in `getAppliedVersions` (`migrate.ts:67-72`) only checks for the
-presence of the version string, so the simple `INSERT` above is
-sufficient.
-
-### CI validation (dual-path)
-
-The workflow `.github/workflows/db-dual-path.yml` now checks two paths:
+The workflow `.github/workflows/db-dual-path.yml` now checks three paths:
 
 1. **Fresh path** - runs `init.sql`
 2. **Migration path** - seeds `00000-initial.sql` and then applies the forward
    migrations in `apps/api/migrations/`
+3. **Down-migration exercise** - applies all forward migrations, then rolls back
+   each available `.down.sql` file in reverse version order, re-applies the
+   corresponding up migration, and asserts the schema matches the pre-rollback
+   baseline (a round-trip check).
 
-Both paths are diffed with `pg_dump --schema-only`; the workflow fails if they
-diverge.
+Both the fresh and migration paths are diffed with `pg_dump --schema-only`; the
+workflow fails if they diverge.
+
+The down-migration exercise runs whenever a PR adds or modifies a `.down.sql`
+file under `apps/api/migrations/`. This ensures every rollback code path is
+validated before it is ever needed during a live incident.

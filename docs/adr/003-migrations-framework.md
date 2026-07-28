@@ -67,18 +67,15 @@ Considered alternatives:
   burden.
 - `migrate.ts` is now load-bearing — bugs in the runner can corrupt
   prod. Tested via `pnpm migrate:dryrun` in CI on every PR that
-  touches `migrations/`.
-- Down migrations remain rare; when they exist they're explicit and
-  reviewed alongside their up counterpart.
-- **`CREATE INDEX CONCURRENTLY` is never usable under this runner.**
-  Every migration file is wrapped in a transaction (`apps/api/scripts/migrate.ts:80-84`),
-  and Postgres does not allow `CONCURRENTLY` inside a transaction block.
-  Any index added through a normal migration file therefore takes a full
-  `SHARE ROW EXCLUSIVE` lock on the target table for the duration of the
-  migration — production-safe for small tables, but user-visible for large,
-  frequently-written tables such as `game_sessions`, `payouts`, or
-  `challenges`. See `docs/database/migrations.md` for the out-of-band
-  procedure to add an index to those tables without blocking writes.
+  touches `apps/api/migrations/` (see `ci.yml` `test-api` job).
+- Down migrations remain explicit and reviewed alongside their up
+  counterpart. They are now additionally exercised in CI: the
+  `exercise-down-migrations` job in `db-dual-path.yml` applies all
+  forward migrations, rolls back each `.down.sql` file in reverse
+  version order, re-applies the up migration, and asserts the schema
+  matches the pre-rollback baseline (round-trip check). This
+  validates every rollback code path before it is ever needed during
+  a live incident.
 - New contributors learn one tool (`pnpm migrate`) instead of two
   (an ORM model API + an ORM CLI).
 
