@@ -97,9 +97,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Seed test database
-        run: psql -h localhost -U brandblitz -d brandblitz_test -f init.sql
+        run: psql -v ON_ERROR_STOP=1 -h localhost -U brandblitz -d brandblitz_test -f init.sql
         env:
           PGPASSWORD: brandblitz_dev
+
+      - name: Verify migrations are up-to-date (dry-run)
+        run: pnpm --filter @brandblitz/api migrate:dryrun
+        env:
+          DATABASE_URL: postgresql://brandblitz:brandblitz_dev@localhost:5432/brandblitz_test
       - run: pnpm --filter @brandblitz/api test
 
   test-web:
