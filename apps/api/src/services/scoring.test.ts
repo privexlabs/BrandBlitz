@@ -48,6 +48,22 @@ describe("scoring service", () => {
       ).toBe(100);
     });
 
+    it("returns 100 (bonus 0) for 15001ms and does not throw", () => {
+      expect(() =>
+        calculateRoundScore({ ...base, reactionTimeMs: 15001 })
+      ).not.toThrow();
+      expect(
+        calculateRoundScore({ ...base, reactionTimeMs: 15001 })
+      ).toBe(100);
+    });
+
+    it("keeps median reaction time bonus strictly between 0 and max", () => {
+      const score = calculateRoundScore({ ...base, reactionTimeMs: 7500 });
+      const bonus = score - 100;
+      expect(bonus).toBeGreaterThan(0);
+      expect(bonus).toBeLessThan(MAX_ROUND_SCORE - 100);
+    });
+
     it("returns 0 for wrong answer", () => {
       expect(
         calculateRoundScore({
