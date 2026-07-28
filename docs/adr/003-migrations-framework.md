@@ -70,6 +70,15 @@ Considered alternatives:
   touches `migrations/`.
 - Down migrations remain rare; when they exist they're explicit and
   reviewed alongside their up counterpart.
+- **`CREATE INDEX CONCURRENTLY` is never usable under this runner.**
+  Every migration file is wrapped in a transaction (`apps/api/scripts/migrate.ts:80-84`),
+  and Postgres does not allow `CONCURRENTLY` inside a transaction block.
+  Any index added through a normal migration file therefore takes a full
+  `SHARE ROW EXCLUSIVE` lock on the target table for the duration of the
+  migration — production-safe for small tables, but user-visible for large,
+  frequently-written tables such as `game_sessions`, `payouts`, or
+  `challenges`. See `docs/database/migrations.md` for the out-of-band
+  procedure to add an index to those tables without blocking writes.
 - New contributors learn one tool (`pnpm migrate`) instead of two
   (an ORM model API + an ORM CLI).
 
