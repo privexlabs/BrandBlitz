@@ -33,13 +33,21 @@ files under `apps/api/migrations/`.
 - `CREATE INDEX IF NOT EXISTS` / `DROP INDEX IF EXISTS` are used where possible
   so replays are safe on already-upgraded databases.
 
-### CI validation (dual-path)
+### CI validation (dual-path + down-migration exercise)
 
-The workflow `.github/workflows/db-dual-path.yml` now checks two paths:
+The workflow `.github/workflows/db-dual-path.yml` now checks three paths:
 
 1. **Fresh path** - runs `init.sql`
 2. **Migration path** - seeds `00000-initial.sql` and then applies the forward
    migrations in `apps/api/migrations/`
+3. **Down-migration exercise** - applies all forward migrations, then rolls back
+   each available `.down.sql` file in reverse version order, re-applies the
+   corresponding up migration, and asserts the schema matches the pre-rollback
+   baseline (a round-trip check).
 
-Both paths are diffed with `pg_dump --schema-only`; the workflow fails if they
-diverge.
+Both the fresh and migration paths are diffed with `pg_dump --schema-only`; the
+workflow fails if they diverge.
+
+The down-migration exercise runs whenever a PR adds or modifies a `.down.sql`
+file under `apps/api/migrations/`. This ensures every rollback code path is
+validated before it is ever needed during a live incident.
