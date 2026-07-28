@@ -5,10 +5,13 @@ import request from "supertest";
 const mockSend = vi.fn();
 const mockGetSignedUrl = vi.fn();
 const mockGetPublicUrl = vi.fn((bucket: string, key: string) => `https://public/${bucket}/${key}`);
+const mockOptimizeImage = vi.fn();
 
 const mockRedisGet = vi.fn();
 const mockRedisSet = vi.fn();
 const mockRedisDel = vi.fn();
+
+const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
 
 vi.mock("../middleware/authenticate", () => ({
   authenticate: (req: any, _res: any, next: any) => {
@@ -38,6 +41,7 @@ vi.mock("@brandblitz/storage", () => ({
   },
   PRESIGNED_URL_TTL_SECONDS: 60,
   getPublicUrl: mockGetPublicUrl,
+  optimizeImage: mockOptimizeImage,
 }));
 
 vi.mock("@aws-sdk/s3-request-presigner", () => ({
@@ -50,6 +54,10 @@ vi.mock("../lib/redis", () => ({
     set: mockRedisSet,
     del: mockRedisDel,
   },
+}));
+
+vi.mock("../db/index", () => ({
+  query: mockQuery,
 }));
 
 import { errorHandler } from "../middleware/error";
@@ -253,6 +261,66 @@ describe("upload routes integration", () => {
     expect(mockSend).toHaveBeenCalledTimes(2);
   });
 
+  it("POST /upload/presign returns 400 and never calls the storage client when contentType is missing from the body", async () => {
+    const response = await request(app)
+      .post("/upload/presign")
+      .send({
+        type: "brand-logo",
+        contentLength: 1024,
+      })
+      .expect(400);
+
+    expect(response.body.error).toBe("Validation Error");
+    expect(mockGetSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("POST /upload/presign returns a well-formed HTTPS uploadUrl containing the expected bucket hostname", async () => {
+    mockGetSignedUrl.mockResolvedValueOnce(
+      "https://brand-assets.s3.amazonaws.com/logos/abc-123?X-Amz-Signature=deadbeef"
+    );
+
+    const response = await request(app)
+      .post("/upload/presign")
+      .send({
+        type: "brand-logo",
+        contentType: "image/png",
+        contentLength: 1024,
+      })
+      .expect(200);
+
+    const uploadUrl = new URL(response.body.uploadUrl);
+    expect(uploadUrl.protocol).toBe("https:");
+    expect(uploadUrl.hostname).toContain("brand-assets");
+  });
+
+  it("POST /upload/presign calls the storage client's presign function exactly once on success", async () => {
+    mockGetSignedUrl.mockResolvedValueOnce("https://signed-url");
+
+    await request(app)
+      .post("/upload/presign")
+      .send({
+        type: "brand-logo",
+        contentType: "image/png",
+        contentLength: 1024,
+      })
+      .expect(200);
+
+    expect(mockGetSignedUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("POST /upload/presign calls the storage client zero times when validation fails (oversize)", async () => {
+    await request(app)
+      .post("/upload/presign")
+      .send({
+        type: "brand-logo",
+        contentType: "image/png",
+        contentLength: 3 * 1024 * 1024,
+      })
+      .expect(400);
+
+    expect(mockGetSignedUrl).not.toHaveBeenCalled();
+  });
+
   it("POST /upload/presign rejects SVG files at the API layer", async () => {
     const response = await request(app)
       .post("/upload/presign")
@@ -363,24 +431,6 @@ describe("upload routes integration", () => {
   });
 
   describe("POST /upload/complete", () => {
-    const mockOptimizeImage = vi.fn();
-    const mockQuery = vi.fn();
-
-    vi.mock("@brandblitz/storage", () => ({
-      s3: { send: mockSend },
-      BUCKETS: {
-        BRAND_ASSETS: "brand-assets",
-        SHARE_CARDS: "share-cards",
-      },
-      PRESIGNED_URL_TTL_SECONDS: 60,
-      getPublicUrl: mockGetPublicUrl,
-      optimizeImage: mockOptimizeImage,
-    }));
-
-    vi.mock("../db/index", () => ({
-      query: mockQuery,
-    }));
-
     beforeEach(() => {
       mockOptimizeImage.mockResolvedValue("logos/optimized-abc123.webp");
       mockQuery.mockResolvedValue({ rows: [] });
