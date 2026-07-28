@@ -25,6 +25,7 @@ import cspReportRoutes from "./csp-report";
 import legalRoutes from "./legal";
 import configRoutes from "./config";
 import adminCacheRoutes from "./admin/cache";
+import adminTestRoutes from "./admin/test";
 import metricsRoutes from "./metrics";
 import waitlistRoutes from "./waitlist";
 
@@ -57,6 +58,7 @@ export function registerRoutes(app: Express): void {
   app.use("/admin/stats", adminStatsRoutes);
   app.use("/admin/queue-stats", adminQueueStatsRoutes);
   app.use("/admin/waitlist", adminWaitlistRoutes);
+  app.use("/admin/test", adminTestRoutes);
   // General admin endpoints (archive inspection, dead-letter queue triage).
   // Mounted after the more specific /admin/* routers; its own routes
   // (/admin/dlq, /admin/archive/...) do not overlap with them.

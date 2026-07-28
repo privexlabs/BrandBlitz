@@ -296,6 +296,9 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
+      '@brandblitz/stellar':
+        specifier: workspace:*
+        version: link:../../packages/stellar
       '@next/bundle-analyzer':
         specifier: ^16.2.6
         version: 16.2.6
