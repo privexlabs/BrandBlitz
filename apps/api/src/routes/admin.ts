@@ -8,11 +8,7 @@ import { ensureLeagueRepeatableJobs } from "../queues/league.queue";
 import { decodeCursorSafe, encodeCursor } from "../db/pagination";
 import { createError } from "../middleware/error";
 import { logger } from "../lib/logger";
-import {
-  DLQ_QUEUES,
-  DLQ_SOURCE_QUEUES,
-  type DeadLetterPayload,
-} from "../queues/dlq";
+import { DLQ_QUEUES, DLQ_SOURCE_QUEUES, type DeadLetterPayload } from "../queues/dlq";
 import { feeBumpTransaction } from "@brandblitz/stellar";
 import { updatePayoutFeeBumpStatus } from "../db/queries/payouts";
 import { config } from "../lib/config";
@@ -314,10 +310,7 @@ router.post("/users/:id/suspend", async (req, res) => {
     id: string;
     status: string;
     suspended_at: string | null;
-  }>(
-    `SELECT id, status, suspended_at FROM users WHERE id = $1`,
-    [userId]
-  );
+  }>(`SELECT id, status, suspended_at FROM users WHERE id = $1`, [userId]);
 
   if (userResult.rows.length === 0) {
     throw createError("User not found", 404);
@@ -343,11 +336,14 @@ router.post("/users/:id/suspend", async (req, res) => {
     await client.query(
       `INSERT INTO audit_log (action, entity_type, entity_id, metadata)
        VALUES ('suspend', 'user', $1, $2::jsonb)`,
-      [userId, JSON.stringify({
-        reason: body.reason,
-        duration_days: body.durationDays || null,
-        performed_by: req.user!.sub
-      })]
+      [
+        userId,
+        JSON.stringify({
+          reason: body.reason,
+          duration_days: body.durationDays || null,
+          performed_by: req.user!.sub,
+        }),
+      ]
     );
 
     const sessionsResult = await client.query(
@@ -371,6 +367,16 @@ router.post("/users/:id/suspend", async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+/**
+ * GET /admin/brands/:id/webhooks/deliveries
+ * Admin route to view brand webhook delivery status and history.
+ */
+router.get("/brands/:id/webhooks/deliveries", async (req, res) => {
+  const { getBrandWebhookDeliveries } = await import("../services/brand-webhooks");
+  const deliveries = await getBrandWebhookDeliveries(req.params.id);
+  res.json({ deliveries });
 });
 
 export default router;
