@@ -246,16 +246,10 @@ export async function finishSession(sessionId: string): Promise<GameSession> {
 }
 
 export async function storeSessionHmac(sessionId: string, hmac: string): Promise<void> {
-  await query(
-    "UPDATE game_sessions SET integrity_hmac = $1 WHERE id = $2",
-    [hmac, sessionId]
-  );
+  await query("UPDATE game_sessions SET integrity_hmac = $1 WHERE id = $2", [hmac, sessionId]);
 }
 
-export async function flagSession(
-  sessionId: string,
-  reasons: string[]
-): Promise<void> {
+export async function flagSession(sessionId: string, reasons: string[]): Promise<void> {
   await query(
     `UPDATE game_sessions
      SET flagged = TRUE,
@@ -349,7 +343,79 @@ export async function getLeaderboard(
      ${whereExtra}
      ORDER BY ${orderBy}, gs.id ASC
      LIMIT $${params.length}`,
-    params,
+    params
+  );
+
+  const sessions = result.rows;
+  const nextCursor: string | null =
+    sessions.length === limit
+      ? encodeCursor({
+          total_score: sessions[sessions.length - 1].total_score,
+          completed_at: sessions[sessions.length - 1].completed_at,
+          id: sessions[sessions.length - 1].id,
+        })
+      : null;
+
+  return { sessions, nextCursor };
+}
+
+export async function getLeaderboardForCsvExport(
+  challengeId: string,
+  limit = 500,
+  cursor?: string
+): Promise<{
+  sessions: Array<{
+    user_id: string;
+    username: string;
+    display_name: string;
+    total_score: number;
+    completed_at: string | null;
+    payout_amount_usdc: string;
+  }>;
+  nextCursor: string | null;
+}> {
+  const cursorValues = decodeCursorSafe(cursor, ["total_score", "completed_at", "id"]);
+  let whereExtra = "";
+  const params: unknown[] = [challengeId];
+
+  if (cursorValues) {
+    const score = cursorValues.total_score;
+    const completedAt = cursorValues.completed_at;
+    const id = cursorValues.id as string;
+    whereExtra = `AND (gs.total_score < $${params.length + 1} OR (gs.total_score = $${params.length + 1} AND (gs.completed_at > $${params.length + 2} OR (gs.completed_at = $${params.length + 2} AND gs.id > $${params.length + 3}))))`;
+    params.push(score, completedAt, id);
+  }
+
+  params.push(limit);
+
+  const result = await query<{
+    user_id: string;
+    username: string;
+    display_name: string;
+    total_score: number;
+    completed_at: string | null;
+    payout_amount_usdc: string;
+    id: string;
+  }>(
+    `SELECT gs.id,
+            gs.user_id,
+            gs.total_score,
+            gs.completed_at,
+            u.email AS username,
+            u.display_name,
+            COALESCE((p.amount_stroops::numeric / 10000000)::numeric(20,7)::text, '0') AS payout_amount_usdc
+     FROM game_sessions gs
+     JOIN users u ON gs.user_id = u.id
+     LEFT JOIN payouts p ON p.challenge_id = gs.challenge_id AND p.user_id = gs.user_id
+     WHERE gs.challenge_id = $1
+       AND gs.flagged = FALSE
+       AND gs.is_practice = FALSE
+       AND gs.status = 'completed'
+       AND u.deleted_at IS NULL
+     ${whereExtra}
+     ORDER BY gs.total_score DESC, gs.completed_at ASC, gs.id ASC
+     LIMIT $${params.length}`,
+    params
   );
 
   const sessions = result.rows;
@@ -639,8 +705,11 @@ export async function getSessionHistory(
 export async function getArchivedLeaderboard(
   challengeId: string,
   limit = 20,
-  cursor?: string,
-): Promise<{ sessions: Array<GameSession & { username: string; avatar_url: string }>; nextCursor: string | null }> {
+  cursor?: string
+): Promise<{
+  sessions: Array<GameSession & { username: string; avatar_url: string }>;
+  nextCursor: string | null;
+}> {
   const cursorValues = decodeCursorSafe(cursor, ["total_score", "challenge_ended_at", "id"]);
 
   let whereExtra = "";
@@ -668,7 +737,7 @@ export async function getArchivedLeaderboard(
      ${whereExtra}
      ORDER BY gs.total_score DESC, gs.challenge_ended_at ASC, gs.id ASC
      LIMIT $${params.length}`,
-    params,
+    params
   );
 
   const sessions = result.rows;

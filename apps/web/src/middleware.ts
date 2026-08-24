@@ -40,7 +40,7 @@ function generateNonce(): string {
 /**
  * Build Content-Security-Policy header value
  * Uses nonce-based approach for inline scripts
- * Report-Only mode for first 7 days; switch to enforce after triage
+ * Enforced mode active (Content-Security-Policy)
  */
 function buildCSPHeader(nonce: string): string {
   const cdnHost = process.env.NEXT_PUBLIC_CDN_HOST || "assets.brandblitz.app";
