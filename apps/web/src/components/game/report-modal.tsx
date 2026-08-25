@@ -82,6 +82,10 @@ export function ReportModal({ challengeId, open, onOpenChange }: ReportModalProp
           <DialogTitle>Report Challenge</DialogTitle>
           <DialogDescription>
             Help us keep BrandBlitz safe. Select a reason for your report.
+            {" "}
+            <a href="/docs/guides/reporting-a-challenge" className="underline" target="_blank" rel="noopener noreferrer">
+              Learn more
+            </a>
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
