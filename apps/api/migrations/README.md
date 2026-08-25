@@ -26,6 +26,8 @@ This ensures migrations are ordered correctly regardless of the number of digits
 
 Earlier migrations (00000-00012) used 5-digit prefixes, while migrations 0006-0026 used 4-digit prefixes. This mixed convention created ambiguity and a duplicate "0012" / "00012" that required historical files to remain unchanged. All new migrations must use 5-digit prefixes to prevent future confusion and ensure correct sort order.
 
+Some existing files (e.g. `0015_idx_audit_log_entity_key.sql`, `0021_session_round_scores_reaction_time.sql`) use an underscore after the sequence number instead of a hyphen. The migration runner sorts lexicographically and does not care which separator is used, so this does not affect correctness — but **a hyphen is the standard separator** per the convention above. Existing underscore-separated files are left as-is; all new migrations must use a hyphen.
+
 ## Adding a New Migration
 
 1. Find the highest sequence number currently in use (e.g., 00026)
