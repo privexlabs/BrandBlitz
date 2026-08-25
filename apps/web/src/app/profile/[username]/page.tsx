@@ -306,6 +306,14 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
         </Card>
       )}
 
+      {isOwner && (
+        <p className="mb-8 text-xs text-[var(--muted-foreground)]">
+          <Link href="/docs/guides/streaks-explained" className="underline hover:text-[var(--foreground)]">
+            How do streaks work?
+          </Link>
+        </p>
+      )}
+
       {/* Stats */}
       <div className="mb-8 grid grid-cols-3 gap-4">
         {[
