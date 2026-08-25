@@ -127,6 +127,7 @@ export function BadgeUnlockModal({ badges, onClose }: BadgeUnlockModalProps) {
         <h2 style={{ marginBottom: 8 }}>Badge Unlocked!</h2>
 
         {badge.iconUrl ? (
+          // External badge icon URLs; next/image would require domain config for each source
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={badge.iconUrl}
