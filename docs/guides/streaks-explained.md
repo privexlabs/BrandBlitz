@@ -118,7 +118,7 @@ POST /users/streaks/repair
 - Play at least one challenge every day to keep your streak alive
 - If you miss a day, check `is_at_risk` and `repair_deadline_at` to see if you can still repair
 - Use your repair strategically — you only get one per month
-- Target streak milestones for badge rewards
+- Target streak milestones (3, 7, 14, 30 days) for badge rewards
 
 ## Related
 
