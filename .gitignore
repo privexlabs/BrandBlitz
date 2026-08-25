@@ -22,6 +22,9 @@ build
 npm-debug.log*
 pnpm-debug.log*
 
+# Backup files
+*.bak
+
 # OS
 .DS_Store
 Thumbs.db

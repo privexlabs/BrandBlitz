@@ -279,6 +279,8 @@ pnpm type-check
 pnpm lint
 ```
 
+> Editor/IDE backup files (`*.bak`) should never be committed — they're covered by `.gitignore`, but double-check `git status` before committing if your editor creates them somewhere unusual.
+
 ### Common Issues
 
 | Symptom | Fix |
