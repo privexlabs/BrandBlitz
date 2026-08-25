@@ -40,6 +40,16 @@ import {
   getBrandWebhooks,
   getBrandWebhookDeliveries,
 } from "../services/brand-webhooks";
+import {
+  createChallengeTemplate,
+  getChallengeTemplatesByBrandId,
+  getChallengeTemplateById,
+  pauseChallengeTemplate,
+  resumeChallengeTemplate,
+  softDeleteChallengeTemplate,
+  getUpcomingChallengesFromTemplatesByBrandId,
+  type RecurrenceRule,
+} from "../db/queries/challenge-templates";
 
 const router = Router();
 const PublicBrandsQuerySchema = z.object({
@@ -603,10 +613,191 @@ router.post("/challenges", authenticate, requireCurrentTosAccepted, async (req, 
   });
 });
 
+const RecurrenceRuleSchema: z.ZodType<RecurrenceRule> = z.enum([
+  "daily",
+  "weekly",
+  "biweekly",
+  "monthly",
+  "custom",
+]);
+
+const ChallengeTemplateSchema = z.object({
+  poolAmountUsdc: z
+    .string()
+    .regex(/^\d+(\.\d{1,7})?$/)
+    .refine(
+      (val) => {
+        const stroops = Math.round(parseFloat(val) * 10_000_000);
+        return stroops >= MIN_POOL_STROOPS;
+      },
+      {
+        message: `Pool amount must be at least 100 USDC (${MIN_POOL_STROOPS.toLocaleString()} stroops)`,
+      }
+    ),
+  maxPlayers: z.number().int().positive().optional(),
+  durationHours: z.number().int().min(1),
+  recurrenceRule: RecurrenceRuleSchema,
+  recurrenceCron: z.string().optional(),
+  recurrenceTimezone: z.string().optional(),
+}).superRefine((val, ctx) => {
+  if (val.recurrenceRule === "custom" && !val.recurrenceCron) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "recurrenceCron is required for custom recurrence rule",
+      path: ["recurrenceCron"],
+    });
+  }
+});
+
 const WebhookSubscriptionSchema = z.object({
   url: z.string().url("url must be a valid URL"),
   secret: z.string().min(16).optional(),
   eventTypes: z.array(z.string()).optional(),
+});
+
+/**
+ * POST /brands/:id/challenge-templates
+ * Create a recurring challenge template that auto-spawns challenges on a schedule.
+ */
+router.post(
+  "/:id/challenge-templates",
+  authenticate,
+  requireCurrentTosAccepted,
+  async (req, res) => {
+    const brand = await getBrandById(req.params.id);
+    if (!brand) throw createError("Brand not found", 404);
+    if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+      throw createError("Forbidden", 403);
+    }
+
+    const parsed = ChallengeTemplateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw createError(
+        parsed.error.issues
+          .map((i) => `${i.path.join(".") || "body"}: ${i.message}`)
+          .join("; "),
+        422,
+        "VALIDATION_ERROR"
+      );
+    }
+    const body = parsed.data;
+
+    const template = await createChallengeTemplate({
+      brandId: brand.id,
+      poolAmountUsdc: body.poolAmountUsdc,
+      maxPlayers: body.maxPlayers,
+      durationHours: body.durationHours,
+      recurrenceRule: body.recurrenceRule,
+      recurrenceCron: body.recurrenceCron,
+      recurrenceTimezone: body.recurrenceTimezone,
+    });
+
+    res.status(201).json({ template });
+  }
+);
+
+/**
+ * GET /brands/:id/challenge-templates
+ * List challenge templates for a brand (ordered by most recently created).
+ */
+router.get("/:id/challenge-templates", authenticate, async (req, res) => {
+  const brand = await getBrandById(req.params.id);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+    throw createError("Forbidden", 403);
+  }
+
+  const templates = await getChallengeTemplatesByBrandId(brand.id);
+  res.json({ templates });
+});
+
+/**
+ * GET /brands/:id/challenge-templates/upcoming
+ * Preview upcoming auto-generated challenges (start/end times and pools)
+ * derived from active templates.
+ */
+router.get(
+  "/:id/challenge-templates/upcoming",
+  authenticate,
+  async (req, res) => {
+    const brand = await getBrandById(req.params.id);
+    if (!brand) throw createError("Brand not found", 404);
+    if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+      throw createError("Forbidden", 403);
+    }
+
+    const limit = Math.min(
+      20,
+      Math.max(1, parseInt(String(req.query.limit ?? "5"), 10) || 5)
+    );
+    const upcoming = await getUpcomingChallengesFromTemplatesByBrandId(
+      brand.id,
+      limit
+    );
+    res.json({ upcoming });
+  }
+);
+
+/**
+ * PATCH /brands/challenge-templates/:templateId/pause
+ * Pause a template so it no longer spawns new challenges.
+ * Existing spawned challenges are unaffected.
+ */
+router.patch("/challenge-templates/:templateId/pause", authenticate, async (req, res) => {
+  const template = await getChallengeTemplateById(req.params.templateId);
+  if (!template) throw createError("Template not found", 404);
+
+  const brand = await getBrandById(template.brand_id);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+    throw createError("Forbidden", 403);
+  }
+
+  const updated = await pauseChallengeTemplate(template.id);
+  if (!updated) {
+    throw createError("Template is not active", 400, "INVALID_STATE");
+  }
+  res.json({ template: updated });
+});
+
+/**
+ * PATCH /brands/challenge-templates/:templateId/resume
+ * Resume a paused template so it continues spawning new challenges
+ * for future periods.
+ */
+router.patch("/challenge-templates/:templateId/resume", authenticate, async (req, res) => {
+  const template = await getChallengeTemplateById(req.params.templateId);
+  if (!template) throw createError("Template not found", 404);
+
+  const brand = await getBrandById(template.brand_id);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+    throw createError("Forbidden", 403);
+  }
+
+  const updated = await resumeChallengeTemplate(template.id);
+  if (!updated) {
+    throw createError("Template is not paused", 400, "INVALID_STATE");
+  }
+  res.json({ template: updated });
+});
+
+/**
+ * DELETE /brands/challenge-templates/:templateId
+ * Soft-delete a template. Previously spawned challenges remain unchanged.
+ */
+router.delete("/challenge-templates/:templateId", authenticate, async (req, res) => {
+  const template = await getChallengeTemplateById(req.params.templateId);
+  if (!template) throw createError("Template not found", 404);
+
+  const brand = await getBrandById(template.brand_id);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+    throw createError("Forbidden", 403);
+  }
+
+  await softDeleteChallengeTemplate(template.id);
+  res.status(204).send();
 });
 
 /**

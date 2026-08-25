@@ -302,7 +302,8 @@ export async function getLeaderboard(
   challengeId: string,
   limit = 20,
   cursor?: string,
-  sortBy: LeaderboardSort = "score"
+  sortBy: LeaderboardSort = "score",
+  friendUserIds?: string[]
 ): Promise<{ sessions: LeaderboardSession[]; nextCursor: string | null }> {
   const orderBy = leaderboardOrderBy[sortBy];
   const cursorValues = decodeCursorSafe(cursor, ["total_score", "completed_at", "id"]);
@@ -312,11 +313,16 @@ export async function getLeaderboard(
   let whereExtra = "";
   const params: unknown[] = [challengeId];
 
+  if (friendUserIds && friendUserIds.length > 0) {
+    whereExtra = `AND gs.user_id = ANY($${params.length + 1}::uuid[])`;
+    params.push(friendUserIds);
+  }
+
   if (cursorValues) {
     const score = cursorValues.total_score;
     const completedAt = cursorValues.completed_at;
     const id = cursorValues.id as string;
-    whereExtra = `AND (gs.total_score ${scoreOp} $${params.length + 1} OR (gs.total_score = $${params.length + 1} AND (gs.completed_at > $${params.length + 2} OR (gs.completed_at = $${params.length + 2} AND gs.id > $${params.length + 3}))))`;
+    whereExtra += ` AND (gs.total_score ${scoreOp} $${params.length + 1} OR (gs.total_score = $${params.length + 1} AND (gs.completed_at > $${params.length + 2} OR (gs.completed_at = $${params.length + 2} AND gs.id > $${params.length + 3}))))`;
     params.push(score, completedAt, id);
   }
 
