@@ -95,15 +95,10 @@ export async function setUserReferralCode(userId: string, referralCode: string):
   );
 }
 
+import { slugify } from "../../lib/slugify";
+
 function slugifyUsername(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-{2,}/g, "-")
-    .slice(0, 24);
+  return slugify(value);
 }
 
 async function allocateUsername(
