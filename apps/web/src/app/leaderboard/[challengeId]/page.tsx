@@ -1,7 +1,6 @@
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { LeaderboardEntry } from "@/lib/api";
-import { LiveGlobalLeaderboard } from "@/components/leaderboard/live-global-leaderboard";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -9,6 +8,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { OfflineBanner } from "@/components/layout/offline-banner";
+import { ChallengeLeaderboardClient } from "./challenge-leaderboard-client";
 
 interface Props {
   params: {
@@ -21,7 +21,6 @@ export const metadata: Metadata = {
   description: "See the top performers for this challenge and their USDC earnings.",
 };
 
-// Enable ISR with 30-second revalidation
 export const revalidate = 30;
 
 async function getChallengeLeaderboard(challengeId: string): Promise<{
@@ -64,7 +63,7 @@ function LeaderboardSkeleton() {
 }
 
 async function LeaderboardContent({ challengeId }: { challengeId: string }) {
-  const { entries, hasMore, failed } = await getChallengeLeaderboard(challengeId);
+  const { entries, hasMore, failed } = await getChallengeLeaderboard(challengeId, "global");
 
   if (failed) {
     return (
@@ -82,9 +81,12 @@ async function LeaderboardContent({ challengeId }: { challengeId: string }) {
     );
   }
 
-  // LiveGlobalLeaderboard also supports a specific challengeId if passed
   return (
-    <LiveGlobalLeaderboard initial={entries} initialHasMore={hasMore} challengeId={challengeId} />
+    <ChallengeLeaderboardClient
+      challengeId={challengeId}
+      initialEntries={entries}
+      initialHasMore={hasMore}
+    />
   );
 }
 

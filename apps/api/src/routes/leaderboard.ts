@@ -9,6 +9,7 @@ import {
   LEADERBOARD_SORTS,
   type LeaderboardSort,
 } from "../db/queries/sessions";
+import { getReferralNetworkUserIds } from "../db/queries/referrals";
 import { withCoalescing } from "../lib/cache";
 import { CursorQuerySchema } from "../db/pagination";
 import { createError } from "../middleware/error";
@@ -223,12 +224,17 @@ router.get("/:challengeId/export.csv", optionalAuth, async (req, res, next) => {
 /**
  * GET /leaderboard/:challengeId
  * Paginated leaderboard for a challenge. Supports keyset cursor pagination.
+ *
+ * Query params:
+ *  - scope: "global" (default) | "friends" — filter to referral network
  */
-router.get("/:challengeId", async (req, res) => {
+router.get("/:challengeId", optionalAuth, async (req, res) => {
   const sortBy = parseLeaderboardSort(req.query);
   const { limit, cursor, offset } = CursorQuerySchema.parse(req.query);
+  const scopeRaw = typeof req.query.scope === "string" ? req.query.scope : undefined;
+  const scope = scopeRaw === "friends" ? "friends" : "global";
+  const userId = req.user?.sub;
 
-  // Emit deprecation header if legacy offset is used
   if (offset !== undefined) {
     res.setHeader("Deprecation", "offset");
     res.setHeader(
@@ -237,10 +243,24 @@ router.get("/:challengeId", async (req, res) => {
     );
   }
 
-  const cacheKey = `leaderboard:${sortBy}:${req.params.challengeId}:${limit}:${cursor ?? ""}`;
+  const friendUserIds: string[] = [];
+  if (scope === "friends" && userId) {
+    const ids = await getReferralNetworkUserIds(userId);
+    friendUserIds.push(...ids);
+  }
+
+  const scopeKey = scope === "friends" ? `friends:${userId ?? "anon"}` : "global";
+  const cacheKey = `leaderboard:${sortBy}:${req.params.challengeId}:${limit}:${cursor ?? ""}:${scopeKey}`;
 
   const responseBody = await withCoalescing(cacheKey, LEADERBOARD_CACHE_TTL_SEC, async () => {
-    const result = await getLeaderboard(req.params.challengeId, limit, cursor, sortBy);
+    const scopeFriendIds = scope === "friends" ? friendUserIds : undefined;
+    const result = await getLeaderboard(
+      req.params.challengeId,
+      limit,
+      cursor,
+      sortBy,
+      scopeFriendIds
+    );
 
     const mappedSessions = result.sessions.map((s, i) => ({
       rank: i + 1,
@@ -257,6 +277,7 @@ router.get("/:challengeId", async (req, res) => {
       sessions: mappedSessions,
       data: mappedSessions,
       nextCursor: result.nextCursor,
+      scope,
     };
   });
 
