@@ -45,6 +45,7 @@ data/
 
 # Tool caches
 .cache/
+.corepack/
 
 # Type-checked output
 *.tsbuildinfo

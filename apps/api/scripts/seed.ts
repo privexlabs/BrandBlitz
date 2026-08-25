@@ -10,7 +10,7 @@ import "dotenv/config";
 import { Pool } from "pg";
 import path from "path";
 
-// ─── DB connection ────────────────────────────────────────────────────────────
+// DB connection
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/brandblitz",
@@ -25,7 +25,7 @@ async function sql<T extends Record<string, unknown> = Record<string, unknown>>(
   return result.rows;
 }
 
-// ─── Deterministic RNG (mulberry32, seed = 0xDEADBEEF) ──────────────────────
+// Deterministic RNG (mulberry32, seed = 0xDEADBEEF)
 
 let _rngState = 0xdeadbeef;
 
@@ -44,7 +44,7 @@ function rngChoice<T>(arr: T[]): T {
   return arr[Math.floor(rng() * arr.length)];
 }
 
-// ─── Fixture definitions ──────────────────────────────────────────────────────
+// Fixture definitions
 
 const BRANDS = [
   {
@@ -77,7 +77,7 @@ const CHALLENGE_STATUSES = ["active", "active", "completed", "completed", "draft
 
 const QUESTION_TYPES = ["tagline", "usp", "product"] as const;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Helpers
 
 function logoUrl(filename: string): string {
   return `local://fixtures/logos/${filename}`;
@@ -95,7 +95,7 @@ function futureDate(daysAhead: number): string {
   return d.toISOString();
 }
 
-// ─── Reset ────────────────────────────────────────────────────────────────────
+// Reset
 
 async function resetFixtures(): Promise<void> {
   console.log("  Resetting seed fixtures…");
@@ -112,7 +112,7 @@ async function resetFixtures(): Promise<void> {
   console.log("  Reset complete.");
 }
 
-// ─── Seeding ──────────────────────────────────────────────────────────────────
+// Seeding
 
 async function seedUsers(): Promise<Record<string, string>> {
   console.log("  Seeding users (50)…");
