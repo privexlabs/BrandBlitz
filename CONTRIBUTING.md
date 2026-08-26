@@ -276,6 +276,30 @@ unrelated PR when a caret-permitted upgrade lands.
   in `apps/web` (e.g. `@testing-library/react`, `@testing-library/dom`) so that
   CI always resolves the same test-toolchain minor that was verified locally.
 
+### Runtime dependency pinning
+
+Most runtime dependencies in `apps/api/package.json` and `apps/web/package.json`
+are already pinned to an exact version (no `^`/`~`) rather than a caret range —
+this is the default convention for this repo, not an exception. A caret range
+lets `pnpm install` pick up a new minor release with no corresponding diff to
+review, which is a real risk for:
+
+- **Security-critical packages** (e.g. `express-rate-limit`, `helmet`,
+  `rate-limit-redis`) — an unreviewed bump to the library backing rate limiting
+  or security headers could silently change enforcement behavior.
+- **Packages with reproducibility requirements** (e.g. `@sentry/nextjs`) —
+  observability/instrumentation behavior should stay identical between what
+  was verified locally/in staging and what actually ships.
+- **Anything with user-visible or behavior-affecting output** (e.g.
+  `canvas-confetti`, `lucide-react`) — a minor bump can change animation
+  timing or the available icon set without any signal in the PR diff.
+
+**Policy:** when adding or updating a runtime dependency, pin it to the exact
+resolved version. If you specifically want caret-range auto-updates for a
+given package (e.g. a low-risk internal tool with no behavioral surface),
+call that out explicitly in the PR description — don't leave it as an
+unreviewed default.
+
 ---
 
 ## Getting Started
