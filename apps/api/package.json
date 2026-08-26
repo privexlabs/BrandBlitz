@@ -2,6 +2,9 @@
   "name": "@brandblitz/api",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22.11.0 <23"
+  },
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -64,8 +67,8 @@
     "@types/node": "25.5.0",
     "@types/pg": "8.20.0",
     "@types/supertest": "^7.2.0",
-    "@typescript-eslint/eslint-plugin": "^8.60.0",
-    "@typescript-eslint/parser": "^8.60.0",
+    "@typescript-eslint/eslint-plugin": "8.60.0",
+    "@typescript-eslint/parser": "8.60.0",
     "@vitest/coverage-v8": "4.1.2",
     "eslint": "10.1.0",
     "jiti": "^2.7.0",
