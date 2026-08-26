@@ -160,7 +160,7 @@ importers:
         specifier: 8.20.0
         version: 8.20.0
       '@types/supertest':
-        specifier: ^7.2.0
+        specifier: 7.2.0
         version: 7.2.0
       '@typescript-eslint/eslint-plugin':
         specifier: 8.60.0
@@ -175,7 +175,7 @@ importers:
         specifier: 10.1.0
         version: 10.1.0(jiti@2.7.0)
       jiti:
-        specifier: ^2.7.0
+        specifier: 2.7.0
         version: 2.7.0
       supertest:
         specifier: 7.2.2
@@ -291,8 +291,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/stellar
       '@next/bundle-analyzer':
-        specifier: ^16.2.6
-        version: 16.2.6
+        specifier: 16.2.1
+        version: 16.2.1
       '@tailwindcss/postcss':
         specifier: 4.2.2
         version: 4.2.2
@@ -1278,8 +1278,8 @@ packages:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
-  '@next/bundle-analyzer@16.2.6':
-    resolution: {integrity: sha512-amPkVtHCTJAdBwyhhl5+qztHk24O4JlASgrWqh15AmnYi74apfZR46NGC0u4pM6BMAU1mYld4WdzD3cRBP3dOA==}
+  '@next/bundle-analyzer@16.2.1':
+    resolution: {integrity: sha512-fbj2WE6dnCyG8CvQnrBfpHyxdOIyZ4aEHJY0bSqAmamRiIXDqunFQPDvuSOPo24mJE9zQHw7TY6d+sGrXO98TQ==}
 
   '@next/env@16.2.1':
     resolution: {integrity: sha512-n8P/HCkIWW+gVal2Z8XqXJ6aB3J0tuM29OcHpCsobWlChH/SITBs1DFBk/HajgrwDkqqBXPbuUuzgDvUekREPg==}
@@ -6938,7 +6938,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.1
     optional: true
 
-  '@next/bundle-analyzer@16.2.6':
+  '@next/bundle-analyzer@16.2.1':
     dependencies:
       webpack-bundle-analyzer: 4.10.1
     transitivePeerDependencies:

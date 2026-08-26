@@ -262,6 +262,39 @@ testing-library stack, and the shared Radix UI packages).
   it in the same PR, then commit the regenerated `pnpm-lock.yaml`.
 - Run `pnpm syncpack:check` locally before pushing to catch drift early.
 
+### zod version policy
+
+`zod` is declared as a direct runtime dependency in `apps/api`, `apps/web`, and
+`apps/deposit-monitor`. All three workspaces **must always declare the same
+exact version** and it is currently `4.3.6`.
+
+**Why this matters more than other shared dependencies:**
+
+- `apps/api` uses zod schemas to define every API request/response contract and
+  feeds them through `@asteasolutions/zod-to-openapi` to generate the canonical
+  `docs/openapi.yml` (run via `pnpm gen:openapi`).
+- `apps/web` validates API responses against those same schemas at the boundary
+  layer.
+- `apps/deposit-monitor` validates Stellar event payloads using zod schemas that
+  must be compatible with the types the API emits.
+
+A zod version mismatch between these three apps does **not** produce a
+TypeScript error or a failed test — it silently diverges runtime validation
+behaviour. For example, a new coercion rule or a changed `.parse()` error shape
+in one workspace will not surface until a request hits the wrong consumer in
+production.
+
+**When bumping zod:**
+
+1. Update `zod` in `apps/api/package.json`, `apps/web/package.json`, and
+   `apps/deposit-monitor/package.json` in a **single PR**.
+2. Review the zod release notes for breaking changes in `.parse()`, `.safeParse()`,
+   error shapes, and coercion behaviour.
+3. Run `pnpm gen:openapi:check` (in `apps/api`) to confirm the generated OpenAPI
+   spec is unchanged or intentionally updated.
+4. Commit the regenerated `pnpm-lock.yaml`.
+5. `pnpm syncpack:check` will fail CI if you miss any of the three files.
+
 ### Pinned tooling review policy (knip)
 
 `apps/web` pins `knip` to an **exact** version (no caret range) on purpose.
