@@ -40,12 +40,22 @@ export function errorHandler(
 
   let statusCode = err.statusCode;
   let message = err.message;
+  const dbCode = (err as any).code;
 
   if (err instanceof ZodError) {
     statusCode = 400;
     message = "Validation Error";
   } else if (err instanceof BadRequestError) {
     statusCode = 400;
+  } else if (dbCode === "23505") {
+    statusCode = 409;
+    message = "Resource already exists";
+  } else if (dbCode === "23503") {
+    statusCode = 409;
+    message = "Foreign key constraint violation";
+  } else if (dbCode === "23514") {
+    statusCode = 400;
+    message = "Check constraint violation";
   }
 
   statusCode = statusCode ?? 500;
@@ -80,6 +90,21 @@ export function errorHandler(
 
   if (!(isProduction && isServerError) && err.code) {
     payload.code = err.code;
+  }
+
+  // A few call sites attach client-actionable hints to the error before
+  // throwing (e.g. sessions.ts / scoring.ts set remainingMs, phone.ts sets
+  // retryAfter). Surface them so callers can act on the value instead of
+  // just the error code.
+  if (!(isProduction && isServerError)) {
+    const remainingMs = (err as any).remainingMs;
+    if (typeof remainingMs === "number") {
+      payload.remainingMs = remainingMs;
+    }
+    const retryAfter = (err as any).retryAfter;
+    if (typeof retryAfter === "number") {
+      payload.retryAfter = retryAfter;
+    }
   }
 
   if (!(isProduction && isServerError) && err instanceof ZodError) {

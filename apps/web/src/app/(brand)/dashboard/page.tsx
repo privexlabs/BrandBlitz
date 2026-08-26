@@ -126,6 +126,14 @@ export default function DashboardPage() {
           <p className="mt-1 text-[var(--muted-foreground)]">
             Manage your brand kits and challenges
           </p>
+          <div className="mt-2 flex gap-4 text-xs text-[var(--muted-foreground)]">
+            <Link href="/docs/guides/question-review-workflow" className="underline hover:text-[var(--foreground)]">
+              Review questions guide
+            </Link>
+            <Link href="/docs/guides/funding-a-challenge" className="underline hover:text-[var(--foreground)]">
+              Funding guide
+            </Link>
+          </div>
         </div>
         <Link href="/brand/new">
           <Button>+ New Brand</Button>

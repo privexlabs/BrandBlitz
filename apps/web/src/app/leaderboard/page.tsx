@@ -92,7 +92,17 @@ export default function LeaderboardPage() {
       <OfflineBanner />
       <main className="mx-auto max-w-3xl px-6 py-12">
         <h1 className="mb-2 text-3xl font-bold">Global Leaderboard</h1>
-        <p className="mb-8 text-[var(--muted-foreground)]">Top performers across all challenges</p>
+        <p className="mb-8 text-[var(--muted-foreground)]">
+          Top performers across all challenges{" "}
+          <Link
+            href="/docs/guides/scoring-explained"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-[var(--foreground)]"
+          >
+            How scoring works
+          </Link>
+        </p>
 
         <Card>
           <CardHeader>

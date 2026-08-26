@@ -90,7 +90,13 @@ router.get("/", optionalAuth, async (req, res) => {
     throw createError("Invalid query parameters", 400, "INVALID_QUERY");
   }
 
-  const { brandId, limit, cursor, status, min_pool, end_before } = parsed.data;
+  const { brandId, limit, cursor, status, min_pool, end_before, offset } = parsed.data;
+
+  // Emit deprecation header if legacy offset is used
+  if (offset !== undefined) {
+    res.setHeader("Deprecation", "offset");
+    res.setHeader("Link", '<https://docs.api.brandblitz.com/pagination>; rel="deprecation"; type="text/html"');
+  }
 
   if (brandId) {
     const { challenges, nextCursor } = await getChallengesByBrandId(brandId, limit, cursor);
@@ -365,7 +371,10 @@ router.get("/:id/deposit-info", authenticate, async (req, res) => {
   res.json({
     depositInfo: {
       hotWalletAddress: config.HOT_WALLET_PUBLIC_KEY,
-      memo: challenge.id,
+      // Return the dedicated deposit_memo — the value reconciliation matches on
+      // (getChallengeByMemo) and which is generated to fit Stellar's 28-byte text
+      // memo limit. Fall back to the id only if a legacy row lacks a memo.
+      memo: challenge.deposit_memo ?? challenge.id,
       amount: challenge.pool_amount_usdc,
     },
   });

@@ -129,15 +129,37 @@ const redisStore = config.NODE_ENV === "test" ? undefined : makeRedisStore();
 
 // ── Limiters ──────────────────────────────────────────────────────────────────
 
+import { getConfig } from "../db/queries/config";
+
+let cachedRateLimit = 200;
+let lastRateLimitFetch = 0;
+const RATE_LIMIT_CACHE_TTL = 10000; // 10 seconds
+
+async function getApiRateLimit(): Promise<number> {
+  const now = Date.now();
+  if (now - lastRateLimitFetch > RATE_LIMIT_CACHE_TTL) {
+    try {
+      const configObj = await getConfig("rate_limit_requests_per_minute");
+      if (configObj && typeof configObj.limit === "number") {
+        cachedRateLimit = configObj.limit;
+      }
+    } catch (err) {
+      logger.warn("Failed to fetch rate_limit_requests_per_minute", { error: (err as Error).message });
+    }
+    lastRateLimitFetch = now;
+  }
+  return cachedRateLimit;
+}
+
 /**
  * General API rate limit.
- *   - Authenticated users: 200 req / 15 min per user ID
- *   - Anonymous (IP):      200 req / 15 min per IP
+ *   - Authenticated users: dynamic req / 15 min per user ID
+ *   - Anonymous (IP):      dynamic req / 15 min per IP
  *     (higher than before to avoid punishing shared IPs)
  */
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: async () => await getApiRateLimit(),
   standardHeaders: "draft-7",
   legacyHeaders: false,
   keyGenerator: userAwareKey,

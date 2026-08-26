@@ -48,7 +48,7 @@ jobs:
 
       - name: Seed test database
         run: |
-          psql -h localhost -U brandblitz -d brandblitz -f init.sql
+          psql -v ON_ERROR_STOP=1 -h localhost -U brandblitz -d brandblitz -f init.sql
         env:
           PGPASSWORD: brandblitz_dev
 

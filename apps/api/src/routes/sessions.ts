@@ -4,6 +4,7 @@ import { getChallengeById, getChallengeQuestions } from "../db/queries/challenge
 import {
   getSession,
   markWarmupStarted,
+  markWarmupCompleted,
   markChallengeStarted,
   recordRoundScore,
   finishSession,
@@ -11,13 +12,14 @@ import {
   deleteOpenSession,
   abandonSession,
 } from "../db/queries/sessions";
-import { calculateRoundScore, completeWarmupWithLock, validateAnswer, validateRoundScore } from "../services/scoring";
+import { calculateRoundScore, validateAnswer, validateRoundScore } from "../services/scoring";
 import { authenticate } from "../middleware/authenticate";
 import { requireActiveUser } from "../middleware/require-active-user";
 import {
   enforceOneSessionPerChallenge,
   validateReactionTime,
   validateDeviceFingerprint,
+  detectClockSkew,
   assertValidTotalScore,
   requireSessionStartAllowed,
 } from "../middleware/anti-cheat";
@@ -30,6 +32,7 @@ import { checkAndAwardSessionBadges } from "../services/badges";
 import { WARMUP_MIN_SECONDS } from "@brandblitz/stellar";
 import { tokenRevocationKey, tokenTtlSeconds } from "../middleware/authenticate";
 import { revalidateLeaderboard } from "../lib/revalidate";
+import { query } from "../db/index";
 
 const router = Router();
 
@@ -144,8 +147,8 @@ router.post(
   "/:challengeId/warmup-start",
   authenticate,
   requireActiveUser,
-  validateDeviceFingerprint,
   enforceOneSessionPerChallenge,
+  validateDeviceFingerprint,
   async (req, res) => {
     const challengeId = String(req.params.challengeId);
     const challenge = await getChallengeById(challengeId);
@@ -171,7 +174,7 @@ router.post(
  * Completes warm-up and issues a short-lived challenge token.
  * Server enforces that minimum exposure time has passed using server-side timestamp.
  */
-router.post("/:challengeId/warmup-complete", authenticate, async (req, res) => {
+router.post("/:challengeId/warmup-complete", authenticate, detectClockSkew, async (req, res) => {
   const challengeId = String(req.params.challengeId);
   const challenge = await getChallengeById(challengeId);
   if (!challenge) throw createError("Challenge not found", 404);
@@ -179,18 +182,6 @@ router.post("/:challengeId/warmup-complete", authenticate, async (req, res) => {
   const session = await getSession(req.user!.sub, challenge.id);
   if (!session) throw createError("Session not found", 404);
   if (session.user_id !== req.user!.sub) throw createError("Forbidden", 403);
-
-  // Validate client timestamp if provided (optional telemetry)
-  const { clientTimestamp } = req.body as { clientTimestamp?: number };
-  if (clientTimestamp !== undefined) {
-    const serverTime = Date.now();
-    const clockSkewMs = Math.abs(serverTime - clientTimestamp);
-    const MAX_CLOCK_SKEW_MS = 5000; // ±5 seconds tolerance
-
-    if (clockSkewMs > MAX_CLOCK_SKEW_MS) {
-      throw createError("Client clock skew too large", 400, "CLOCK_SKEW");
-    }
-  }
 
   // Enforce server-side warmup minimum using server timestamp only
   const unlockAt = await redis.get(`warmup:unlock:${session.id}`);
@@ -332,6 +323,13 @@ router.post(
             total_score: completed.total_score,
             is_practice: completed.is_practice,
           });
+          
+          // Invalidate Redis leaderboard cache
+          const keys = await redis.keys("leaderboard:*");
+          if (keys.length > 0) {
+            await redis.del(...keys);
+          }
+          await revalidateLeaderboard().catch(() => {});
         }
         const token = bearerToken(req);
         if (token) {

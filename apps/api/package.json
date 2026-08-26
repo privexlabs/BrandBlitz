@@ -50,7 +50,7 @@
     "twilio": "5.13.1",
     "winston": "3.19.0",
     "zod": "4.3.6",
-    "@asteasolutions/zod-to-openapi": "^7.3.0",
+    "@asteasolutions/zod-to-openapi": "^9.1.0",
     "yaml": "^2.6.0"
   },
   "devDependencies": {

@@ -19,6 +19,7 @@ import { authenticate } from "../middleware/authenticate";
 import { uploadLimiter } from "../middleware/rate-limit";
 import { createError } from "../middleware/error";
 import { logger } from "../lib/logger";
+import { query } from "../db/index";
 
 /** Redis key that proves a user owns a pending upload. TTL must outlive the
  *  presign window plus the verify-retry window (~1.7 s × 3), so it is anchored
@@ -261,6 +262,69 @@ router.delete("/abort", authenticate, async (req, res) => {
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
   await redis.del(ownershipKey);
   res.status(204).end();
+});
+
+/**
+ * POST /upload/complete
+ * Finalizes an upload by verifying S3 object existence, enqueuing optimization,
+ * and updating the associated DB record (brand logo, challenge asset, etc.).
+ */
+router.post("/complete", authenticate, async (req, res) => {
+  const { uploadId, resourceType, resourceId } = z.object({
+    uploadId: z.string().uuid(),
+    resourceType: z.enum(["brand-logo", "challenge-asset", "user-avatar"]),
+    resourceId: z.string().uuid(),
+  }).parse(req.body);
+
+  // Verify the upload exists and the user owns it
+  const uploadKey = pendingUploadKey(req.user!.sub, uploadId);
+  const owned = await redis.get(uploadKey);
+  if (!owned) {
+    throw createError("Upload not found or not owned by user", 403);
+  }
+
+  const bucket =
+    uploadId.startsWith("logos/") ||
+    uploadId.startsWith("products/") ||
+    uploadId.startsWith("avatars/")
+      ? BUCKETS.BRAND_ASSETS
+      : BUCKETS.SHARE_CARDS;
+
+  // Verify the object exists in S3
+  try {
+    await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: uploadId }));
+  } catch {
+    throw createError("Object does not exist in storage", 422, "OBJECT_NOT_FOUND");
+  }
+
+  // Enqueue optimization job
+  const { optimizeImage } = await import("@brandblitz/storage");
+  const optimizedKey = await optimizeImage(uploadId, resourceType);
+
+  // Update the associated DB record
+  const publicUrl = getPublicUrl(bucket, optimizedKey);
+  
+  if (resourceType === "brand-logo") {
+    await query(
+      "UPDATE brands SET logo_url = $1 WHERE id = $2",
+      [publicUrl, resourceId]
+    );
+  } else if (resourceType === "user-avatar") {
+    await query(
+      "UPDATE users SET avatar_url = $1 WHERE id = $2",
+      [publicUrl, resourceId]
+    );
+  } else if (resourceType === "challenge-asset") {
+    await query(
+      "UPDATE challenges SET asset_url = $1 WHERE id = $2",
+      [publicUrl, resourceId]
+    );
+  }
+
+  // Clear ownership record
+  await redis.del(uploadKey);
+
+  res.json({ assetUrl: publicUrl, optimizedKey });
 });
 
 export default router;

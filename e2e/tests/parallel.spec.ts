@@ -73,7 +73,7 @@ test.describe("Parallel Game Sessions E2E", () => {
     ]);
 
     // Verify leaderboard rankings (independent scores)
-    await page1.getByRole("link", { name: "View Leaderboard" }).click();
+    await page1.getByRole("link", { name: "Global Leaderboard" }).click();
     await page1.waitForURL("**/leaderboard");
 
     // Both players should be on leaderboard
@@ -85,7 +85,7 @@ test.describe("Parallel Game Sessions E2E", () => {
     await context1.close();
     
     // Assert page2 is still fully usable
-    await page2.getByRole("link", { name: "View Leaderboard" }).click();
+    await page2.getByRole("link", { name: "Global Leaderboard" }).click();
     await expect(page2.getByText("Player One")).toBeVisible();
     await expect(page2.getByText("Player Two")).toBeVisible();
   });

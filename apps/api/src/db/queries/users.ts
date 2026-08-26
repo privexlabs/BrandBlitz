@@ -95,15 +95,10 @@ export async function setUserReferralCode(userId: string, referralCode: string):
   );
 }
 
+import { slugify } from "../../lib/slugify";
+
 function slugifyUsername(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-{2,}/g, "-")
-    .slice(0, 24);
+  return slugify(value);
 }
 
 async function allocateUsername(
@@ -215,6 +210,16 @@ export async function updateUserProfile(
   await query(
     `UPDATE users SET display_name = $2, username = $3, updated_at = NOW() WHERE id = $1`,
     [userId, displayName, newUsername]
+  );
+
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_key, before, after)
+     VALUES ($1, 'update_profile', 'user', $1, $2, $3)`,
+    [
+      userId,
+      JSON.stringify({ display_name: current.rows[0].display_name, username: current.rows[0].username }),
+      JSON.stringify({ display_name: displayName, username: newUsername })
+    ]
   );
 
   return { oldUsername, newUsername };

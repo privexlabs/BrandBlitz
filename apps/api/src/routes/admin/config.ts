@@ -39,6 +39,12 @@ const KnownConfigSchema = z.discriminatedUnion("key", [
       total: z.number().int().min(1),
     }),
   }),
+  z.object({
+    key: z.literal("rate_limit_requests_per_minute"),
+    value: z.object({
+      limit: z.number().int().min(1),
+    }),
+  }),
 ]);
 
 // .strict() rejects any extra keys in the PATCH body (e.g. {value: ..., injected: ...}).

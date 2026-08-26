@@ -30,11 +30,26 @@ import { requireCurrentTosAccepted } from "../middleware/require-tos";
 import { createError } from "../middleware/error";
 import { logger } from "../lib/logger";
 import { config } from "../lib/config";
-import { MIN_POOL_STROOPS } from "@brandblitz/stellar";
+import { generateDepositMemo, MIN_POOL_STROOPS } from "@brandblitz/stellar";
 import { query } from "../db/index";
 import { apiLimiter, questionPreviewLimiter } from "../middleware/rate-limit";
 import { decodeCursorSafe, encodeCursor } from "../db/pagination";
 import { sanitizeSvgText } from "../lib/svg-sanitize";
+import {
+  createBrandWebhook,
+  getBrandWebhooks,
+  getBrandWebhookDeliveries,
+} from "../services/brand-webhooks";
+import {
+  createChallengeTemplate,
+  getChallengeTemplatesByBrandId,
+  getChallengeTemplateById,
+  pauseChallengeTemplate,
+  resumeChallengeTemplate,
+  softDeleteChallengeTemplate,
+  getUpcomingChallengesFromTemplatesByBrandId,
+  type RecurrenceRule,
+} from "../db/queries/challenge-templates";
 
 const router = Router();
 const PublicBrandsQuerySchema = z.object({
@@ -115,9 +130,26 @@ const QuestionTemplateSchema = z
   .strict()
   .nullable();
 
-const PatchBrandSchema = z.object({
-  question_template: QuestionTemplateSchema.optional(),
-});
+const PatchBrandSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional(),
+    logo_url: z.string().url().nullable().optional(),
+    primary_color: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/)
+      .nullable()
+      .optional(),
+    secondary_color: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/)
+      .nullable()
+      .optional(),
+    tagline: z.string().max(100).nullable().optional(),
+    brand_story: z.string().max(500).nullable().optional(),
+    usp: z.string().max(200).nullable().optional(),
+    question_template: QuestionTemplateSchema.optional(),
+  })
+  .strict();
 
 function validateChallengeEndsAt(endsAt: string): void {
   const endsAtMs = new Date(endsAt).getTime();
@@ -248,6 +280,21 @@ router.get("/", authenticate, apiLimiter, async (req, res) => {
     total: totalResult.rows[0]?.total ?? 0,
   });
 });
+
+/**
+ * GET /brands/:id/distractors
+ * Return up to three public-safe alternate brands for a game round.
+ */
+router.get("/:id/distractors", authenticate, async (req, res) => {
+  const brand = await getBrandById(req.params.id);
+  if (!brand) throw createError("Brand not found", 404);
+
+  const distractors = (await getActiveDistractorBrands(brand.id))
+    .slice(0, 3)
+    .map(({ id, name, logo_url }) => ({ id, name, logo_url }));
+
+  res.json({ distractors });
+});
 /**
  * GET /brands/:id
  */
@@ -302,14 +349,15 @@ router.patch("/:id", authenticate, async (req, res) => {
     throw createError("Invalid request body", 422, "INVALID_QUESTION_TEMPLATE");
   }
 
-  const { question_template } = result.data;
-  if (question_template === undefined) {
+  const updates = result.data;
+  if (Object.keys(updates).length === 0) {
     res.json({ brand: toBrandApi(brand) });
     return;
   }
 
   const updated = await updateBrand(req.params.id, req.user!.sub, {
-    question_template: question_template as Record<string, unknown> | null,
+    ...updates,
+    question_template: updates.question_template as Record<string, unknown> | null | undefined,
   } as Parameters<typeof updateBrand>[2]);
 
   if (!updated) throw createError("Brand not found", 404);
@@ -323,12 +371,18 @@ router.patch("/:id", authenticate, async (req, res) => {
 router.delete("/:id", authenticate, async (req, res) => {
   const meta = await getBrandMetaById(req.params.id);
   if (!meta || meta.deleted_at) throw createError("Brand not found", 404);
-  if (meta.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
+  const isAdmin = req.user!.role === "admin" || req.user!.role === "super_admin";
+  if (meta.owner_user_id !== req.user!.sub && !isAdmin) {
+    throw createError("Forbidden", 403);
+  }
 
-  const deleted = await deleteBrand(req.params.id, req.user!.sub);
+  const deleted = await deleteBrand(req.params.id, isAdmin ? undefined : req.user!.sub);
   if (!deleted) throw createError("Brand not found", 404);
 
-  res.status(204).send();
+  res.status(200).json({
+    brand: { id: req.params.id, deleted_at: deleted.deletedAt },
+    cancelledChallenges: deleted.cancelledChallenges,
+  });
 });
 
 /**
@@ -378,23 +432,18 @@ const QuestionPreviewSchema = z.object({
  * persisting anything to challenge_questions. Lets a brand owner review AI
  * questions before committing to a challenge. Idempotent — no DB writes.
  */
-router.post(
-  "/:id/questions/preview",
-  authenticate,
-  questionPreviewLimiter,
-  async (req, res) => {
-    const brand = await getBrandById(req.params.id);
-    if (!brand) throw createError("Brand not found", 404);
-    if (brand.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
+router.post("/:id/questions/preview", authenticate, questionPreviewLimiter, async (req, res) => {
+  const brand = await getBrandById(req.params.id);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
 
-    const { count } = QuestionPreviewSchema.parse(req.body);
+  const { count } = QuestionPreviewSchema.parse(req.body);
 
-    const distractorBrands = await getActiveDistractorBrands(brand.id);
-    const questions = generateQuestionPreview(brand, distractorBrands, count);
+  const distractorBrands = await getActiveDistractorBrands(brand.id);
+  const questions = generateQuestionPreview(brand, distractorBrands, count);
 
-    res.json({ questions });
-  }
-);
+  res.json({ questions });
+});
 
 /**
  * POST /brands/:id/questions/:questionId/regenerate
@@ -515,10 +564,14 @@ router.post("/", authenticate, async (req, res) => {
 /**
  * POST /brands/challenges
  * Create a new challenge and generate questions from brand kit.
- * Returns the Stellar memo (challenge_id) for the deposit instructions.
+ * Returns a unique Stellar text memo for the deposit instructions.
  */
 router.post("/challenges", authenticate, requireCurrentTosAccepted, async (req, res) => {
-  const body = ChallengeSchema.parse(req.body);
+  const parsedBody = ChallengeSchema.safeParse(req.body);
+  if (!parsedBody.success) {
+    throw createError("Invalid challenge fields", 422, "VALIDATION_ERROR");
+  }
+  const body = parsedBody.data;
   validateChallengeEndsAt(body.endsAt);
 
   const brand = await getBrandById(body.brandId);
@@ -526,9 +579,11 @@ router.post("/challenges", authenticate, requireCurrentTosAccepted, async (req, 
   if (brand.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
 
   const challengeId = randomUUID();
+  const depositMemo = generateDepositMemo();
   const challenge = await createChallenge({
     brandId: body.brandId,
     challengeId,
+    depositMemo,
     poolAmountUsdc: body.poolAmountUsdc,
     maxPlayers: body.maxPlayers,
     endsAt: body.endsAt,
@@ -550,12 +605,258 @@ router.post("/challenges", authenticate, requireCurrentTosAccepted, async (req, 
     challenge,
     depositInstructions: {
       hotWalletAddress: config.HOT_WALLET_PUBLIC_KEY,
-      memo: challengeId,
+      memo: depositMemo,
       amount: body.poolAmountUsdc,
       asset: "USDC",
-      note: `Send exactly ${body.poolAmountUsdc} USDC to the hot wallet with memo: ${challengeId}`,
+      note: `Send exactly ${body.poolAmountUsdc} USDC to the hot wallet with memo: ${depositMemo}`,
     },
   });
+});
+
+const RecurrenceRuleSchema: z.ZodType<RecurrenceRule> = z.enum([
+  "daily",
+  "weekly",
+  "biweekly",
+  "monthly",
+  "custom",
+]);
+
+const ChallengeTemplateSchema = z.object({
+  poolAmountUsdc: z
+    .string()
+    .regex(/^\d+(\.\d{1,7})?$/)
+    .refine(
+      (val) => {
+        const stroops = Math.round(parseFloat(val) * 10_000_000);
+        return stroops >= MIN_POOL_STROOPS;
+      },
+      {
+        message: `Pool amount must be at least 100 USDC (${MIN_POOL_STROOPS.toLocaleString()} stroops)`,
+      }
+    ),
+  maxPlayers: z.number().int().positive().optional(),
+  durationHours: z.number().int().min(1),
+  recurrenceRule: RecurrenceRuleSchema,
+  recurrenceCron: z.string().optional(),
+  recurrenceTimezone: z.string().optional(),
+}).superRefine((val, ctx) => {
+  if (val.recurrenceRule === "custom" && !val.recurrenceCron) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "recurrenceCron is required for custom recurrence rule",
+      path: ["recurrenceCron"],
+    });
+  }
+});
+
+const WebhookSubscriptionSchema = z.object({
+  url: z.string().url("url must be a valid URL"),
+  secret: z.string().min(16).optional(),
+  eventTypes: z.array(z.string()).optional(),
+});
+
+/**
+ * POST /brands/:id/challenge-templates
+ * Create a recurring challenge template that auto-spawns challenges on a schedule.
+ */
+router.post(
+  "/:id/challenge-templates",
+  authenticate,
+  requireCurrentTosAccepted,
+  async (req, res) => {
+    const brand = await getBrandById(req.params.id);
+    if (!brand) throw createError("Brand not found", 404);
+    if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+      throw createError("Forbidden", 403);
+    }
+
+    const parsed = ChallengeTemplateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw createError(
+        parsed.error.issues
+          .map((i) => `${i.path.join(".") || "body"}: ${i.message}`)
+          .join("; "),
+        422,
+        "VALIDATION_ERROR"
+      );
+    }
+    const body = parsed.data;
+
+    const template = await createChallengeTemplate({
+      brandId: brand.id,
+      poolAmountUsdc: body.poolAmountUsdc,
+      maxPlayers: body.maxPlayers,
+      durationHours: body.durationHours,
+      recurrenceRule: body.recurrenceRule,
+      recurrenceCron: body.recurrenceCron,
+      recurrenceTimezone: body.recurrenceTimezone,
+    });
+
+    res.status(201).json({ template });
+  }
+);
+
+/**
+ * GET /brands/:id/challenge-templates
+ * List challenge templates for a brand (ordered by most recently created).
+ */
+router.get("/:id/challenge-templates", authenticate, async (req, res) => {
+  const brand = await getBrandById(req.params.id);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+    throw createError("Forbidden", 403);
+  }
+
+  const templates = await getChallengeTemplatesByBrandId(brand.id);
+  res.json({ templates });
+});
+
+/**
+ * GET /brands/:id/challenge-templates/upcoming
+ * Preview upcoming auto-generated challenges (start/end times and pools)
+ * derived from active templates.
+ */
+router.get(
+  "/:id/challenge-templates/upcoming",
+  authenticate,
+  async (req, res) => {
+    const brand = await getBrandById(req.params.id);
+    if (!brand) throw createError("Brand not found", 404);
+    if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+      throw createError("Forbidden", 403);
+    }
+
+    const limit = Math.min(
+      20,
+      Math.max(1, parseInt(String(req.query.limit ?? "5"), 10) || 5)
+    );
+    const upcoming = await getUpcomingChallengesFromTemplatesByBrandId(
+      brand.id,
+      limit
+    );
+    res.json({ upcoming });
+  }
+);
+
+/**
+ * PATCH /brands/challenge-templates/:templateId/pause
+ * Pause a template so it no longer spawns new challenges.
+ * Existing spawned challenges are unaffected.
+ */
+router.patch("/challenge-templates/:templateId/pause", authenticate, async (req, res) => {
+  const template = await getChallengeTemplateById(req.params.templateId);
+  if (!template) throw createError("Template not found", 404);
+
+  const brand = await getBrandById(template.brand_id);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+    throw createError("Forbidden", 403);
+  }
+
+  const updated = await pauseChallengeTemplate(template.id);
+  if (!updated) {
+    throw createError("Template is not active", 400, "INVALID_STATE");
+  }
+  res.json({ template: updated });
+});
+
+/**
+ * PATCH /brands/challenge-templates/:templateId/resume
+ * Resume a paused template so it continues spawning new challenges
+ * for future periods.
+ */
+router.patch("/challenge-templates/:templateId/resume", authenticate, async (req, res) => {
+  const template = await getChallengeTemplateById(req.params.templateId);
+  if (!template) throw createError("Template not found", 404);
+
+  const brand = await getBrandById(template.brand_id);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+    throw createError("Forbidden", 403);
+  }
+
+  const updated = await resumeChallengeTemplate(template.id);
+  if (!updated) {
+    throw createError("Template is not paused", 400, "INVALID_STATE");
+  }
+  res.json({ template: updated });
+});
+
+/**
+ * DELETE /brands/challenge-templates/:templateId
+ * Soft-delete a template. Previously spawned challenges remain unchanged.
+ */
+router.delete("/challenge-templates/:templateId", authenticate, async (req, res) => {
+  const template = await getChallengeTemplateById(req.params.templateId);
+  if (!template) throw createError("Template not found", 404);
+
+  const brand = await getBrandById(template.brand_id);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+    throw createError("Forbidden", 403);
+  }
+
+  await softDeleteChallengeTemplate(template.id);
+  res.status(204).send();
+});
+
+/**
+ * POST /brands/:id/webhooks
+ * Register an outbound webhook subscription for challenge lifecycle events.
+ */
+router.post("/:id/webhooks", authenticate, async (req, res) => {
+  const brandId = req.params.id;
+  const brand = await getBrandById(brandId);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+    throw createError("Forbidden", 403);
+  }
+
+  const parsed = WebhookSubscriptionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw createError("Invalid webhook subscription fields", 422, "VALIDATION_ERROR");
+  }
+
+  const subscription = await createBrandWebhook({
+    brandId,
+    url: parsed.data.url,
+    secret: parsed.data.secret,
+    eventTypes: parsed.data.eventTypes,
+  });
+
+  res.status(201).json({ webhook: subscription });
+});
+
+/**
+ * GET /brands/:id/webhooks
+ * List registered webhooks for a brand.
+ */
+router.get("/:id/webhooks", authenticate, async (req, res) => {
+  const brandId = req.params.id;
+  const brand = await getBrandById(brandId);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+    throw createError("Forbidden", 403);
+  }
+
+  const webhooks = await getBrandWebhooks(brandId);
+  res.json({ webhooks });
+});
+
+/**
+ * GET /brands/:id/webhooks/deliveries
+ * View delivery status and logs per brand.
+ */
+router.get("/:id/webhooks/deliveries", authenticate, async (req, res) => {
+  const brandId = req.params.id;
+  const brand = await getBrandById(brandId);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub && req.user!.role !== "admin") {
+    throw createError("Forbidden", 403);
+  }
+
+  const deliveries = await getBrandWebhookDeliveries(brandId);
+  res.json({ deliveries });
 });
 
 export default router;

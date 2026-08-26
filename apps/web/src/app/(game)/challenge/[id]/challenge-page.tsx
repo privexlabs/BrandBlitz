@@ -170,8 +170,11 @@ export function ChallengePage({ params }: Props) {
         if (cancelled) return;
         setChallenge(res.data.challenge);
         setQuestions(res.data.questions);
-      } catch {
-        if (!cancelled) setLoadError("Couldn't load the challenge. Check your connection and try again.");
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Failed to load challenge:", err);
+          setLoadError("Couldn't load the challenge. Check your connection and try again.");
+        }
         return;
       }
 
@@ -186,6 +189,7 @@ export function ChallengePage({ params }: Props) {
         }
       } catch (err: any) {
         if (err?.response?.status && err.response.status !== 404) {
+          console.error("Failed to check session status:", err);
           if (!cancelled) setLoadError("Couldn't check your session status. Please try again.");
           return;
         }
@@ -195,7 +199,8 @@ export function ChallengePage({ params }: Props) {
         const r = await api.post(`/sessions/${challengeId}/warmup-start`, { deviceId: visitorId });
         if (cancelled) return;
         setPhase("preview");
-      } catch {
+      } catch (err) {
+        console.error("Failed to start warmup:", err);
         if (!cancelled) setLoadError("Couldn't start the game session. Please try again.");
       }
     })();
@@ -474,13 +479,24 @@ export function ChallengePage({ params }: Props) {
 
     return (
       <div className="min-h-screen p-6 pt-16">
-        <button
-          onClick={() => setShowReportModal(true)}
-          className="fixed right-4 top-4 z-40 rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)] shadow-sm transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
-          aria-label="Report this challenge"
-        >
-          Report
-        </button>
+        <div className="fixed right-4 top-4 z-40 flex gap-2">
+          <a
+            href="/docs/guides/fair-play-for-players"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)] shadow-sm transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+            aria-label="Learn about fair play and payouts"
+          >
+            Fair Play
+          </a>
+          <button
+            onClick={() => setShowReportModal(true)}
+            className="rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)] shadow-sm transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+            aria-label="Report this challenge"
+          >
+            Report
+          </button>
+        </div>
         {showTooltip && (
           <div
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--background)] px-5 py-3 shadow-lg text-sm"

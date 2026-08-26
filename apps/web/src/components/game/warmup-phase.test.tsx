@@ -215,4 +215,36 @@ describe("WarmupPhase", () => {
     expect(screen.getByText(/Couldn't start the challenge\. Check your connection and try again\./i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
+
+  it("start button is disabled when countdown is paused due to visibility change", async () => {
+    // Mock warmup-start to return unlockAt
+    apiPostMock.mockResolvedValue({
+      data: { unlockAt: Date.now() + WARMUP_MIN_SECONDS * 1000 },
+    });
+
+    render(<WarmupPhase challenge={challenge} apiToken="test-token" onComplete={vi.fn()} />);
+
+    // Wait for warmup to complete
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WARMUP_MIN_SECONDS * 1000);
+    });
+
+    // Button should be enabled initially
+    const startButton = screen.getByRole("button", { name: "Start Challenge →" });
+    expect(startButton).toBeEnabled();
+
+    // Simulate tab hidden (visibilitychange)
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true, writable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    // Button should now be disabled and show paused text
+    expect(screen.getByRole("button", { name: "Paused — Wait to resume" })).toBeDisabled();
+
+    // Simulate tab visible again
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true, writable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    // Button should be enabled again
+    expect(screen.getByRole("button", { name: "Start Challenge →" })).toBeEnabled();
+  });
 });

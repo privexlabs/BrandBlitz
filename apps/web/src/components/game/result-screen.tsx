@@ -128,7 +128,6 @@ export function ResultScreen({
   useConfetti(isRankOne, primaryColor, secondaryColor);
 
   const shareText = `I just scored ${formatScore(totalScore)} in a BrandBlitz challenge${estimatedUsdc ? ` and earned ~${formatUsdc(estimatedUsdc)}` : ""}! 🏆`;
-  const leaderboardHref = `/challenge/${challengeId}`;
 
   async function handleShare(): Promise<void> {
     if (navigator.share) {
@@ -179,11 +178,18 @@ export function ResultScreen({
               Share Result
             </Button>
 
-            <Button asChild variant="secondary" className="w-full">
-              <Link href={leaderboardHref}>
-                View Leaderboard
-              </Link>
-            </Button>
+            <div className="flex gap-2">
+              <Button asChild variant="secondary" className="flex-1">
+                <Link href="/leaderboard">
+                  Global Leaderboard
+                </Link>
+              </Button>
+              <Button asChild variant="secondary" className="flex-1">
+                <Link href={`/leaderboard/${challengeId}`}>
+                  Challenge Leaderboard
+                </Link>
+              </Button>
+            </div>
 
             <Button asChild className="w-full">
               <Link href="/">Play Another Challenge</Link>

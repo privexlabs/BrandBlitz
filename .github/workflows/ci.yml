@@ -64,6 +64,9 @@ jobs:
   # ── Workspace dependency version consistency ───────────────────────────────
   dep-consistency:
     name: Workspace dependency consistency (syncpack)
+  # ── OpenAPI spec drift check ────────────────────────────────────────────────
+  openapi-check:
+    name: OpenAPI spec drift check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +81,8 @@ jobs:
         # syncpack lint fails the build if any dependency listed in
         # syncpack.config.json is declared at inconsistent versions across
         # the workspaces.
+      - name: Regenerate docs/openapi.yml and fail on drift
+        run: pnpm --filter @brandblitz/api gen:openapi:check
 
   # ── Unit tests ───────────────────────────────────────────────────────────────
   test-api:
@@ -115,9 +120,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Seed test database
-        run: psql -h localhost -U brandblitz -d brandblitz_test -f init.sql
+        run: psql -v ON_ERROR_STOP=1 -h localhost -U brandblitz -d brandblitz_test -f init.sql
         env:
           PGPASSWORD: brandblitz_dev
+
+      - name: Verify migrations are up-to-date (dry-run)
+        run: pnpm --filter @brandblitz/api migrate:dryrun
+        env:
+          DATABASE_URL: postgresql://brandblitz:brandblitz_dev@localhost:5432/brandblitz_test
       - run: pnpm --filter @brandblitz/api test
 
   test-web:

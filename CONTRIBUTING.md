@@ -102,6 +102,18 @@ Commits that do not follow Conventional Commits will fail the commit-message lin
 6. **No `console.log` in production code.** Use the structured logger (`apps/api/src/lib/logger.ts`) in the API, and `console.error` only for unrecoverable startup errors.
 7. **Keep `.env.example` in sync.** If you add a new environment variable, add it to `.env.example` with an inline comment and update the table in `README.md`.
 
+### Test Naming Convention
+
+Tests in `apps/api/src` must follow a consistent naming convention (see [RFC #1263](./docs/rfc/1263-test-naming-convention.md)):
+
+| Tier | Suffix | Dependencies | Speed | Examples |
+|------|--------|---|---|---|
+| **Unit** | `.unit.test.ts` | None (mocked) | <100ms | `fingerprint.unit.test.ts`, `scoring.engine.unit.test.ts` |
+| **Integration** | `.integration.test.ts` | DB, Redis, S3 | 100ms+ | `brands.create.integration.test.ts`, `session-timeout.integration.test.ts` |
+| **No suffix** | `.test.ts` | Deprecated | — | Only for small, isolated tests; new tests must use explicit suffix |
+
+**Guideline**: If your test needs the database, Redis, or file storage, use `.integration.test.ts`. Otherwise, use `.unit.test.ts`.
+
 ### PR Description Template
 
 ```markdown
@@ -120,6 +132,7 @@ Approach taken, notable design decisions, alternatives rejected.
 ## Test plan
 
 - [ ] Unit tests added / updated
+- [ ] Integration tests added / updated (if DB/Redis required)
 - [ ] Manual smoke test: describe what you clicked/ran
 
 ## Checklist
@@ -301,6 +314,8 @@ pnpm test
 pnpm type-check
 pnpm lint
 ```
+
+> Editor/IDE backup files (`*.bak`) should never be committed — they're covered by `.gitignore`, but double-check `git status` before committing if your editor creates them somewhere unusual.
 
 ### Common Issues
 

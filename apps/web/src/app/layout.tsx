@@ -6,6 +6,7 @@ import { Providers } from "@/components/providers";
 import { MaintenanceBanner } from "@/components/layout/maintenance-banner";
 import { getCspNonce } from "@/lib/csp";
 import { FingerprintProvider } from "@/components/providers/fingerprint-provider";
+import { GlobalErrorHandler } from "@/components/error/global-error-handler";
 import "./globals.css";
 
 const inter = Inter({
@@ -91,6 +92,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <FingerprintProvider>
           <AuthBoundary>
             <Providers>
+              <GlobalErrorHandler />
               <MaintenanceBanner />
               {children}
             </Providers>
