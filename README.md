@@ -213,6 +213,16 @@ BrandBlitz is open-source infrastructure for skill-validated brand attention on 
 
 All patterns are documented, tested, and running in Docker.
 
+### Public Brand Catalog API
+
+Third parties (e.g. Drips / Stellar ecosystem partners) can query the public brand listing without authentication:
+
+```bash
+curl https://api.brandblitz.io/brands/public
+```
+
+See [docs/api/public-brands.md](docs/api/public-brands.md) for the full response schema and usage.
+
 ---
 
 ## Architecture Overview
