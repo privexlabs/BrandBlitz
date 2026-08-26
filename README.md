@@ -20,6 +20,7 @@
 - [Prerequisites](#prerequisites)
 - [Quick Start (Docker)](#quick-start-docker)
 - [Quick Start (Local)](#quick-start-local)
+- [Docker Compose Files](#docker-compose-files)
 - [Running Tests](#running-tests)
 - [Environment Variables](#environment-variables)
 - [Services & Ports](#services--ports)
@@ -350,6 +351,34 @@ cp .env.example .env  # update DATABASE_URL, REDIS_URL to localhost
 
 pnpm dev  # Turborepo runs all packages in parallel
 ```
+
+---
+
+## Docker Compose Files
+
+The project uses three Compose files for different environments:
+
+| File | Purpose | When applied |
+|------|---------|--------------|
+| `docker-compose.yml` | Base configuration — all services, health checks, and volumes | Always loaded |
+| `docker-compose.override.yml` | Development overrides — hot-reload bind mounts, exposed ports | **Auto-loaded** by `docker compose up` |
+| `docker-compose.prod.yml` | Production overrides — no bind mounts, HTTPS, replicas, secrets | Explicitly with `-f` flag |
+
+**Development** (default):
+```bash
+docker compose up
+# Automatically merges docker-compose.yml + docker-compose.override.yml
+# Override adds: bind mounts for hot-reload, direct port access (3000, 3001, 5432, etc.)
+```
+
+**Production:**
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Skips the override file — uses prod config only
+# Adds: HTTPS, replicas, resource limits, secrets, restart policies
+```
+
+The override file is **not loaded** when you specify explicit `-f` files. This means production never picks up the dev bind mounts or exposed ports.
 
 ---
 
@@ -686,6 +715,7 @@ S3-compatible object storage with image optimisation. Imported by `apps/api`. Wo
 - [Users API](./docs/api/users.md) — Profiles, wallet, phone verification, notifications, badges, earnings, referrals
 - [Challenges API](./docs/api/challenges.md) — Challenge listing, details, stats, leaderboards, deposit info, reports
 - [Sessions API](./docs/api/sessions.md) — Gameplay flow: warmup, answer submission, session recovery
+- [Implementation Notes](./docs/implementation-notes/README.md) — Index of root-level implementation summary documents
 
 ---
 
