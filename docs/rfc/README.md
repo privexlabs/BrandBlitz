@@ -16,6 +16,16 @@ This directory contains Request for Comments documents that propose architectura
 
 - **[RFC 1267: Referral processor separation](./1267-referral-processor-separation.md)** — Proposes moving referral-bonus eligibility and payout rules from `apps/api/src/queues/processors/referral-bonus.processor.ts` into `services/referrals.ts`, leaving the processor as a thin BullMQ adapter.
 
+- **[RFC 1249: Standalone payout worker](./1249-standalone-payout-worker.md)** — Proposes moving Stellar payout execution out of the API process into a dedicated `apps/payout-worker` service, following the existing `apps/deposit-monitor` precedent of a webhook callback instead of a second direct Postgres connection pool.
+
+### Infrastructure
+
+- **[RFC 1255: Unified revalidation webhook](./1255-unified-revalidation-webhook.md)** — Proposes consolidating the two Next.js on-demand revalidation route handlers (which currently read two *different* secret env var names) into one signed endpoint accepting arbitrary tags/paths.
+
+- **[RFC 1250: Lightweight query builder](./1250-lightweight-query-builder.md)** — Proposes incremental adoption of Kysely for `apps/api/src/db/queries`, scoped away from escrow/payout SQL, distinguishing this from ADR 003's rejection of ORM auto-migrations (a different concern).
+
+- **[RFC 1256: Shared config package](./1256-shared-config-package.md)** — Proposes extending `packages/config` with a shared Zod schema fragment for the env vars `apps/api` and `apps/deposit-monitor` genuinely have in common, without forcing app-specific vars into a shared schema.
+
 ## RFC Process
 
 ### When to Write an RFC
@@ -62,4 +72,4 @@ Once an RFC is merged:
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — Contribution guidelines, includes references to RFCs
 - [docs/](../README.md) — Project documentation
-- GitHub issues: [#1263](../../issues/1263), [#1264](../../issues/1264), [#1266](../../issues/1266), [#1267](../../issues/1267)
+- GitHub issues: [#1263](../../issues/1263), [#1264](../../issues/1264), [#1266](../../issues/1266), [#1267](../../issues/1267), [#1249](../../issues/1249), [#1255](../../issues/1255), [#1250](../../issues/1250), [#1256](../../issues/1256)
