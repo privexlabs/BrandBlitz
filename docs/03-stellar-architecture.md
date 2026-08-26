@@ -191,6 +191,7 @@ This allows:
 
 - `docs/adr/002-escrow-usage.md` — Why non-custodial escrow (ADR)
 - `docs/adr/003-escrow-implementation.md` — Implementation details & deployment checklist
+- `docs/api/webhooks.md` — Webhook contract, signature verification, and retry semantics for integrators
 - `ESCROW_IMPLEMENTATION.md` — Executive summary of escrow integration
 - `packages/stellar/src/escrow.ts` — EscrowClient wrapper
 - `packages/stellar/src/payout.ts` — Batch payout builder
