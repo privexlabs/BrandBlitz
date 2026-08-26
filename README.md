@@ -181,6 +181,8 @@ Top scorers earn exclusive access: brand Discord roles, early product access, in
 
 The combination of warm-up → competition → instant USDC payout is unoccupied.
 
+> **How scoring works:** every round awards 100 base points plus a 0–50 speed bonus, and ties break by earliest finish. Full formula, worked examples, and payout math in [docs/guides/scoring-explained.md](docs/guides/scoring-explained.md).
+
 HQ Trivia proved the model: Warner Bros., Nike, and GM paid for branded challenge rounds in 2018. Warner Bros. alone paid ~$3M for three film promotions. Users engaged. Sponsors reported "strong impact on sales, not just engagement." BrandBlitz is HQ Trivia with USDC payouts, Stellar settlement, and a micro-learning warm-up that fixes the one documented weakness of gamified ads (cognitive recall drops without a learning component).
 
 ---
@@ -515,6 +517,8 @@ Payout share:  userScore / sumOfAllWinnerScores × prizePool
 ```
 
 Only users with at least one correct answer receive a payout share.
+
+See [docs/guides/scoring-explained.md](docs/guides/scoring-explained.md) for the exact formula, tie-breaking rules, and worked examples.
 
 ---
 
