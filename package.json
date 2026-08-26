@@ -2,13 +2,16 @@
   "name": "brandblitz",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22.11.0 <23"
+  },
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "turbo run dev --parallel",
     "build": "turbo run build",
     "test": "turbo run test",
     "e2e": "playwright test -c e2e/playwright.config.ts",
-    "test": "vitest run --config vitest.config.ts",
+    "test:root": "vitest run --config vitest.config.ts",
     "test:coverage": "vitest run --config vitest.config.ts --coverage",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
