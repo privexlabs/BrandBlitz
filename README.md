@@ -157,9 +157,9 @@ BrandBlitz is the only attention platform where the user actually gets better ov
 
 ### Status and on-chain credentials
 
-- Public global leaderboard rank
-- Weekly league tiers: Bronze → Silver → Gold (resets weekly — fresh start for everyone)
-- Challenge streaks and achievement badges
+- Public global leaderboard rank — see [Leaderboard API](docs/api/leaderboard.md) for the full endpoint reference and live SSE stream
+- Weekly league tiers: Bronze → Silver → Gold (resets weekly — fresh start for everyone) — see [Leagues API](docs/api/leagues.md)
+- Challenge streaks and achievement badges — see [Badges API](docs/api/badges.md) for the badge catalog and earning criteria
 - Non-transferable Stellar SBT credentials for tier milestones (verifiable on-chain proof of performance, embeddable in portfolio/LinkedIn)
 
 ### Brand perks for top performers
@@ -180,6 +180,8 @@ Top scorers earn exclusive access: brand Discord roles, early product access, in
 | **BrandBlitz** | **Warm-up + challenge** | **USDC instant** | **Yes — core mechanic** | **Yes — core mechanic** |
 
 The combination of warm-up → competition → instant USDC payout is unoccupied.
+
+> **How scoring works:** every round awards 100 base points plus a 0–50 speed bonus, and ties break by earliest finish. Full formula, worked examples, and payout math in [docs/guides/scoring-explained.md](docs/guides/scoring-explained.md).
 
 HQ Trivia proved the model: Warner Bros., Nike, and GM paid for branded challenge rounds in 2018. Warner Bros. alone paid ~$3M for three film promotions. Users engaged. Sponsors reported "strong impact on sales, not just engagement." BrandBlitz is HQ Trivia with USDC payouts, Stellar settlement, and a micro-learning warm-up that fixes the one documented weakness of gamified ads (cognitive recall drops without a learning component).
 
@@ -212,6 +214,16 @@ BrandBlitz is open-source infrastructure for skill-validated brand attention on 
 - Embedded wallet onboarding (no seed phrase, 30-second signup)
 
 All patterns are documented, tested, and running in Docker.
+
+### Public Brand Catalog API
+
+Third parties (e.g. Drips / Stellar ecosystem partners) can query the public brand listing without authentication:
+
+```bash
+curl https://api.brandblitz.io/brands/public
+```
+
+See [docs/api/public-brands.md](docs/api/public-brands.md) for the full response schema and usage.
 
 ---
 
@@ -505,6 +517,8 @@ Payout share:  userScore / sumOfAllWinnerScores × prizePool
 ```
 
 Only users with at least one correct answer receive a payout share.
+
+See [docs/guides/scoring-explained.md](docs/guides/scoring-explained.md) for the exact formula, tie-breaking rules, and worked examples.
 
 ---
 
