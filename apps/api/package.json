@@ -30,7 +30,6 @@
     "@brandblitz/config": "workspace:*",
     "@brandblitz/stellar": "workspace:*",
     "@brandblitz/storage": "workspace:*",
-    "@coinbase/coinbase-sdk": "0.25.0",
     "@fingerprintjs/fingerprintjs-pro": "3.12.9",
     "@napi-rs/canvas": "0.1.97",
     "@stellar/stellar-sdk": "14.6.1",
