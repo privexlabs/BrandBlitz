@@ -83,7 +83,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 var html = document.documentElement;
                 if (isDark) html.classList.add("dark"); else html.classList.remove("dark");
                 html.dataset.theme = mode;
-              } catch (e) {}
+              } catch (e) {
+                // Ignore storage/media-query failures; the server-rendered theme remains usable.
+              }
             })();
           `}
         </Script>
