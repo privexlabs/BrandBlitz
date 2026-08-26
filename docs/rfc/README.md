@@ -14,9 +14,13 @@ This directory contains Request for Comments documents that propose architectura
 
 - **[RFC 1264: Pure scoring engine extraction](./1264-scoring-engine-extraction.md)** — Proposes extracting scoring business logic into a pure, framework-independent module with explicit inputs/outputs, enabling reuse by batch re-scoring tools and offline dispute resolution.
 
+- **[RFC 1254: Anti-cheat service extraction](./1254-anti-cheat-service-extraction.md)** — Proposes extracting the fixed-threshold fraud-detection rules out of `apps/api/src/middleware/anti-cheat.ts` into a pure `services/anti-cheat.service.ts`, leaving the middleware as a thin adapter, enabling reuse by admin re-evaluation and batch re-scoring without a fabricated Express request. Answers RFC 1264's open question of whether anti-cheat should merge into the scoring engine (proposes: stay separate).
+
 - **[RFC 1267: Referral processor separation](./1267-referral-processor-separation.md)** — Proposes moving referral-bonus eligibility and payout rules from `apps/api/src/queues/processors/referral-bonus.processor.ts` into `services/referrals.ts`, leaving the processor as a thin BullMQ adapter.
 
-- **[RFC 1265: Domain-event pattern](./1265-domain-event-pattern.md)** — Proposes a minimal in-process `EventEmitter` for cross-cutting side effects of payout completion (referral bonus queueing) and session completion (streak updates), with an explicit list of what stays direct (Stellar submission, DB writes, integrity checks) and an honest debuggability trade-off assessment.
+### Infrastructure
+
+- **[RFC 1253: Redis connection presets](./1253-redis-connection-presets.md)** — Proposes splitting the single shared `redis` client in `apps/api/src/lib/redis.ts` into named `bullmqConnectionOptions`/`cacheConnectionOptions` presets, so the cache client stops inheriting BullMQ's retry-forever setting, and identifies observability gaps (no per-client error/retry attribution) this also closes.
 
 ## RFC Process
 

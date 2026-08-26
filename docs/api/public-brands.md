@@ -94,4 +94,5 @@ curl -s https://api.brandblitz.io/brands/public | jq .
 ### Related
 
 - [Authentication](./auth.md) — for authenticated endpoints
+- [Distractors](./distractors.md) — `GET /brands/:id/distractors`, the incorrect answer options used in challenge question generation
 - [OpenAPI Spec](../openapi.yml) — full API specification
