@@ -127,10 +127,19 @@ describe("loadConfig — process.exit on invalid env", () => {
       vi.stubEnv(k, v);
     }
 
+    // config.ts logs the validation failure via a local winston logger
+    // (not the shared ../lib/logger — see config.ts's comment on why that
+    // would be a circular import) whose Console transport writes through
+    // console.log by default.
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
     // Re-import the module so loadConfig() runs with the stubbed env
     await expect(import("./config?bust=" + Date.now())).rejects.toThrow(
       "process.exit called"
     );
     expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(logSpy).toHaveBeenCalled();
+    const loggedOutput = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(loggedOutput).toContain("Invalid or missing environment variables");
   });
 });
