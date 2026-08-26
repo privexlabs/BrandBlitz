@@ -674,6 +674,9 @@ S3-compatible object storage with image optimisation. Imported by `apps/api`. Wo
 - [`apps/web/README.md`](./apps/web/README.md) — Frontend pages, components, auth flow, game state machine, upload flow
 - [`contracts/README.md`](./contracts/README.md) — Soroban escrow contract: build, test, deploy, full function reference
 - [`docs/adr/`](./docs/adr/README.md) — Architecture Decision Records (the "why" behind load-bearing engineering choices)
+- [OpenAPI and Scalar UI guide](./docs/api/using-the-openapi-spec.md) — Browse `/docs`, fetch `/docs/openapi.json`, and generate typed clients from the API spec.
+- [Rate limits and API errors](./docs/api/rate-limits-and-errors.md) — Public reference for limiter buckets, 429 responses, and the common error envelope.
+- [Waitlist curl examples](./docs/examples/waitlist-curl.md) — Runnable signup and position lookup examples for landing-page integrations.
 - Interactive API reference — Scalar UI at `/docs` (local dev: <http://localhost:4000/docs>). Spec lives at [`docs/openapi.yml`](./docs/openapi.yml); regenerate via `pnpm --filter @brandblitz/api gen:openapi`.
 
 ---

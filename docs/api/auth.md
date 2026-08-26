@@ -28,6 +28,10 @@ WEB_URL=https://app.brandblitz.io   # must NOT be *
 ```
 
 The browser will refuse to send credentials to a wildcard origin, so `WEB_URL` must always be a specific origin.
+## Related API docs
+
+- [Rate limits and error codes](./rate-limits-and-errors.md)
+- [OpenAPI and Scalar UI guide](./using-the-openapi-spec.md)
 
 ---
 
