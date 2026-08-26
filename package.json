@@ -17,6 +17,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\" --ignore-path .gitignore",
     "docs:db": "GOBIN=$HOME/go/bin go install github.com/k1LoW/tbls@latest && PATH=$HOME/go/bin:$PATH mkdir -p /tmp/brandblitz-tbls-docs && rm -rf /tmp/brandblitz-tbls-docs && PATH=$HOME/go/bin:$PATH tbls doc \"${DATABASE_URL:-postgresql://brandblitz:brandblitz_dev@127.0.0.1:5432/brandblitz?sslmode=disable}\" /tmp/brandblitz-tbls-docs --er-format svg --force && mkdir -p docs/db && cp /tmp/brandblitz-tbls-docs/schema.svg docs/db/er.svg",
     "prepare": "husky",
+    "syncpack:check": "syncpack lint",
     "gitleaks": "node scripts/gitleaks.mjs",
     "gitleaks:pre-commit": "git diff --cached --no-color | node scripts/gitleaks.mjs detect --pipe --redact --config .gitleaks.toml"
   },
@@ -28,6 +29,7 @@
     "husky": "9.1.7",
     "prettier": "3.8.1",
     "prettier-plugin-tailwindcss": "0.6.12",
+    "syncpack": "15.3.3",
     "turbo": "2.8.21",
     "typescript": "6.0.2",
     "vitest": "4.1.2"

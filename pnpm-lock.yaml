@@ -29,6 +29,9 @@ importers:
       prettier-plugin-tailwindcss:
         specifier: 0.6.12
         version: 0.6.12(prettier@3.8.1)
+      syncpack:
+        specifier: 15.3.3
+        version: 15.3.3
       turbo:
         specifier: 2.8.21
         version: 2.8.21
@@ -303,13 +306,13 @@ importers:
         specifier: 4.2.2
         version: 4.2.2
       '@testing-library/dom':
-        specifier: ^10.4.1
+        specifier: 10.4.1
         version: 10.4.1
       '@testing-library/jest-dom':
         specifier: 6.9.1
         version: 6.9.1
       '@testing-library/react':
-        specifier: ^16.3.2
+        specifier: 16.3.2
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.1.6(@types/react@19.1.8))(@types/react@19.1.8)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@testing-library/user-event':
         specifier: 14.6.1
@@ -345,7 +348,7 @@ importers:
         specifier: ^29.0.2
         version: 29.0.2(@noble/hashes@1.8.0)
       knip:
-        specifier: ^5.70.1
+        specifier: 5.88.1
         version: 5.88.1(@types/node@25.5.0)(typescript@6.0.2)
       postcss:
         specifier: 8.5.8
@@ -384,7 +387,7 @@ importers:
         specifier: 14.6.1
         version: 14.6.1
       '@vitest/coverage-v8':
-        specifier: ^4.1.2
+        specifier: 4.1.2
         version: 4.1.2(vitest@4.1.2(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.2(@noble/hashes@1.8.0))(vite@8.0.3(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.7.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.9.0)))
     devDependencies:
       '@types/node':
@@ -780,9 +783,6 @@ packages:
 
   '@emnapi/runtime@1.10.0':
     resolution: {integrity: sha512-ewvYlk86xUoGI0zQRNq/mC+16R1QeDlKQy21Ki3oSYXNgLb45GV1P6A0M+/s6nyCuNDqe5VpaY84BzXGwVbwFA==}
-
-  '@emnapi/runtime@1.9.1':
-    resolution: {integrity: sha512-VYi5+ZVLhpgK4hQ0TAjiQiZ6ol0oe4mBx7mVv7IflsiEp0OWoVsp/+f9Vc1hOhE0TtkORVrI1GvzyreqpgWtkA==}
 
   '@emnapi/wasi-threads@1.2.1':
     resolution: {integrity: sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w==}
@@ -5554,6 +5554,51 @@ packages:
   symbol-tree@3.2.4:
     resolution: {integrity: sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==}
 
+  syncpack-darwin-arm64@15.3.3:
+    resolution: {integrity: sha512-sFnHOUT7ZYShxAXfzK8zIxNvY5ciW6c71fHYOJIgZ8Ry25IMWkaGfyLc894wxIPaYTbgEmeeZN6BV7G5Gu27mA==}
+    cpu: [arm64]
+    os: [darwin]
+
+  syncpack-darwin-x64@15.3.3:
+    resolution: {integrity: sha512-gtWysFMwG3W8ieF8+aLMy1qVkehdy40hc02LGEjckmejZxtjDbTKE9vDhBAaXcLbqIsvQ1ImEymHU5N2I4llWQ==}
+    cpu: [x64]
+    os: [darwin]
+
+  syncpack-linux-arm64-musl@15.3.3:
+    resolution: {integrity: sha512-mvj6TGhdwO5bHo1cM638esCx9+7ur0BA+RTdg+YiOD/CZJMP8iMj6ruF8htFNPEOKpAEOmfkOVKNs4yCbvkgyQ==}
+    cpu: [arm64]
+    os: [linux]
+
+  syncpack-linux-arm64@15.3.3:
+    resolution: {integrity: sha512-6hlHPrG+V457fpKEURqshNLaFQENkC416IZ4ngFY+2uBjFsmlA7ax4p4EJlFsxuHiQbx/4Yo27pVXmNJEs/bZQ==}
+    cpu: [arm64]
+    os: [linux]
+
+  syncpack-linux-x64-musl@15.3.3:
+    resolution: {integrity: sha512-7KHIb9b9VCSyQq2GwoshVU9Pt/2qCqhOPusuwkXadI+p1qW7fK5FukjZbG0Y4VRa6mszrD2W28OxWAswwrn1lQ==}
+    cpu: [x64]
+    os: [linux]
+
+  syncpack-linux-x64@15.3.3:
+    resolution: {integrity: sha512-DcnZPKFGEFoktzIrufGGwk2ARTEhlvII6yQsETCaO/Z1xagOjJquxiDvagKnb4GQsQQCuih2ouzQZFCiKImrXA==}
+    cpu: [x64]
+    os: [linux]
+
+  syncpack-windows-arm64@15.3.3:
+    resolution: {integrity: sha512-6pPWh3+uTO7g1FF8ugC+UqektaNXphdmDXqG3rWepFdCS+DrWj/7Gfbtlx/zISTdx//T7zoZZ2fvW4fzN/6ztQ==}
+    cpu: [arm64]
+    os: [win32]
+
+  syncpack-windows-x64@15.3.3:
+    resolution: {integrity: sha512-9CrrEzXE/MdWJuxyB7JvR1b6kiTNQPZh1dDJbWiRgtpNyCbEiddM1/viOsyaufftWDrQFV6RCGQzqCvWEas45g==}
+    cpu: [x64]
+    os: [win32]
+
+  syncpack@15.3.3:
+    resolution: {integrity: sha512-MC99meBhgc/E5xbB5mFUS99wj4bquTbKLKHLXYh3qPbmPZl2HD8KA4ls29a9Xv67oZ03isCaJaqSl+JIfXIfpA==}
+    engines: {node: '>=14.17.0'}
+    hasBin: true
+
   tailwind-merge@3.5.0:
     resolution: {integrity: sha512-I8K9wewnVDkL1NTGoqWmVEIlUcB9gFriAEkXkfCjX5ib8ezGxtR3xD7iZIxrfArjEsH7F1CHD4RFUtxefdqV/A==}
 
@@ -6812,11 +6857,6 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@emnapi/runtime@1.9.1':
-    dependencies:
-      tslib: 2.8.1
-    optional: true
-
   '@emnapi/wasi-threads@1.2.1':
     dependencies:
       tslib: 2.8.1
@@ -7041,7 +7081,7 @@ snapshots:
 
   '@img/sharp-wasm32@0.34.5':
     dependencies:
-      '@emnapi/runtime': 1.9.1
+      '@emnapi/runtime': 1.10.0
     optional: true
 
   '@img/sharp-win32-arm64@0.34.5':
@@ -10487,7 +10527,7 @@ snapshots:
       '@types/node': 25.5.0
       fast-glob: 3.3.3
       formatly: 0.3.0
-      jiti: 2.6.1
+      jiti: 2.7.0
       minimist: 1.2.8
       oxc-resolver: 11.20.0
       picocolors: 1.1.1
@@ -11685,6 +11725,41 @@ snapshots:
   supports-preserve-symlinks-flag@1.0.0: {}
 
   symbol-tree@3.2.4: {}
+
+  syncpack-darwin-arm64@15.3.3:
+    optional: true
+
+  syncpack-darwin-x64@15.3.3:
+    optional: true
+
+  syncpack-linux-arm64-musl@15.3.3:
+    optional: true
+
+  syncpack-linux-arm64@15.3.3:
+    optional: true
+
+  syncpack-linux-x64-musl@15.3.3:
+    optional: true
+
+  syncpack-linux-x64@15.3.3:
+    optional: true
+
+  syncpack-windows-arm64@15.3.3:
+    optional: true
+
+  syncpack-windows-x64@15.3.3:
+    optional: true
+
+  syncpack@15.3.3:
+    optionalDependencies:
+      syncpack-darwin-arm64: 15.3.3
+      syncpack-darwin-x64: 15.3.3
+      syncpack-linux-arm64: 15.3.3
+      syncpack-linux-arm64-musl: 15.3.3
+      syncpack-linux-x64: 15.3.3
+      syncpack-linux-x64-musl: 15.3.3
+      syncpack-windows-arm64: 15.3.3
+      syncpack-windows-x64: 15.3.3
 
   tailwind-merge@3.5.0: {}
 
