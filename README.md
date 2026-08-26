@@ -157,9 +157,9 @@ BrandBlitz is the only attention platform where the user actually gets better ov
 
 ### Status and on-chain credentials
 
-- Public global leaderboard rank
-- Weekly league tiers: Bronze → Silver → Gold (resets weekly — fresh start for everyone)
-- Challenge streaks and achievement badges
+- Public global leaderboard rank — see [Leaderboard API](docs/api/leaderboard.md) for the full endpoint reference and live SSE stream
+- Weekly league tiers: Bronze → Silver → Gold (resets weekly — fresh start for everyone) — see [Leagues API](docs/api/leagues.md)
+- Challenge streaks and achievement badges — see [Badges API](docs/api/badges.md) for the badge catalog and earning criteria
 - Non-transferable Stellar SBT credentials for tier milestones (verifiable on-chain proof of performance, embeddable in portfolio/LinkedIn)
 
 ### Brand perks for top performers
