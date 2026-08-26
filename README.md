@@ -119,8 +119,10 @@ After a challenge ends, brands get real data on **attention quality** — not va
 - Warm-up completion rate (% who stayed the full 20s+)
 - Challenge completion rate (% who finished all 3 rounds)
 - Round-by-round accuracy (which brand messages actually landed)
-- Score distribution histogram (were the messages clear or confusing?)
+- Score distribution histogram (were the messages clear or confusing)
 - Cost per verified attention session = pool ÷ completions
+
+See the [Brands API](docs/api/brands.md) for the full endpoint reference including dashboard, analytics, challenge creation, and question review workflows.
 
 ### Cost comparison
 
@@ -161,6 +163,8 @@ BrandBlitz is the only attention platform where the user actually gets better ov
 - Weekly league tiers: Bronze → Silver → Gold (resets weekly — fresh start for everyone) — see [Leagues API](docs/api/leagues.md)
 - Challenge streaks and achievement badges — see [Badges API](docs/api/badges.md) for the badge catalog and earning criteria
 - Non-transferable Stellar SBT credentials for tier milestones (verifiable on-chain proof of performance, embeddable in portfolio/LinkedIn)
+
+See the [Users API](docs/api/users.md) for profile, wallet, phone verification, notifications, earnings, referrals, and badge endpoints.
 
 ### Brand perks for top performers
 
@@ -678,6 +682,10 @@ S3-compatible object storage with image optimisation. Imported by `apps/api`. Wo
 - [Rate limits and API errors](./docs/api/rate-limits-and-errors.md) — Public reference for limiter buckets, 429 responses, and the common error envelope.
 - [Waitlist curl examples](./docs/examples/waitlist-curl.md) — Runnable signup and position lookup examples for landing-page integrations.
 - Interactive API reference — Scalar UI at `/docs` (local dev: <http://localhost:4000/docs>). Spec lives at [`docs/openapi.yml`](./docs/openapi.yml); regenerate via `pnpm --filter @brandblitz/api gen:openapi`.
+- [Brands API](./docs/api/brands.md) — Brand CRUD, challenge creation, question review, webhooks, analytics
+- [Users API](./docs/api/users.md) — Profiles, wallet, phone verification, notifications, badges, earnings, referrals
+- [Challenges API](./docs/api/challenges.md) — Challenge listing, details, stats, leaderboards, deposit info, reports
+- [Sessions API](./docs/api/sessions.md) — Gameplay flow: warmup, answer submission, session recovery
 
 ---
 

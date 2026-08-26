@@ -76,3 +76,9 @@ This prevents accidental scoring from silent defaults and preserves fair outcome
 | Vitest (unit) | `apps/web/src/components/game/warmup-phase.test.tsx` | Counts down from `WARMUP_MIN_SECONDS`; button disabled until zero; unlock enables button |
 | Playwright (e2e) | `e2e/tests/game.spec.ts` | Button disabled at page load; enabled within `WARMUP_MIN_SECONDS + 5 s` |
 | Playwright (e2e) | `e2e/tests/payout-settlement.spec.ts` | Full warmup → play → session complete → challenge settlement → payouts row created with correct status |
+
+---
+
+## API Reference
+
+The session and gameplay endpoints are documented in detail at [docs/api/sessions.md](api/sessions.md), including the full warmup → start → answer sequence, request/response payloads, and error codes.
