@@ -64,9 +64,6 @@ jobs:
   # ── Workspace dependency version consistency ───────────────────────────────
   dep-consistency:
     name: Workspace dependency consistency (syncpack)
-  # ── OpenAPI spec drift check ────────────────────────────────────────────────
-  openapi-check:
-    name: OpenAPI spec drift check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,6 +78,19 @@ jobs:
         # syncpack lint fails the build if any dependency listed in
         # syncpack.config.json is declared at inconsistent versions across
         # the workspaces.
+
+  # ── OpenAPI spec drift check ────────────────────────────────────────────────
+  openapi-check:
+    name: OpenAPI spec drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: Regenerate docs/openapi.yml and fail on drift
         run: pnpm --filter @brandblitz/api gen:openapi:check
 
