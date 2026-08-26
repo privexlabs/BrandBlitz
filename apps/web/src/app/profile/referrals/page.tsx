@@ -101,7 +101,15 @@ export default function ReferralsPage() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Referral Hub</h1>
         <p className="text-sm text-[var(--muted-foreground)]">
-          Invite friends and earn bonuses
+          Invite friends and earn bonuses{" "}
+          <a
+            href="/docs/guides/referral-program"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-[var(--foreground)]"
+          >
+            How the referral program works
+          </a>
         </p>
       </div>
 
