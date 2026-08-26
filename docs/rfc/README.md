@@ -68,4 +68,4 @@ Once an RFC is merged:
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — Contribution guidelines, includes references to RFCs
 - [docs/](../README.md) — Project documentation
-- GitHub issues: [#1263](../../issues/1263), [#1264](../../issues/1264), [#1266](../../issues/1266), [#1267](../../issues/1267), [#1254](../../issues/1254)
+- GitHub issues: [#1263](../../issues/1263), [#1264](../../issues/1264), [#1266](../../issues/1266), [#1267](../../issues/1267), [#1265](../../issues/1265)
