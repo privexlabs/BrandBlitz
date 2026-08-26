@@ -16,6 +16,8 @@ This directory contains Request for Comments documents that propose architectura
 
 - **[RFC 1267: Referral processor separation](./1267-referral-processor-separation.md)** — Proposes moving referral-bonus eligibility and payout rules from `apps/api/src/queues/processors/referral-bonus.processor.ts` into `services/referrals.ts`, leaving the processor as a thin BullMQ adapter.
 
+- **[RFC 1265: Domain-event pattern](./1265-domain-event-pattern.md)** — Proposes a minimal in-process `EventEmitter` for cross-cutting side effects of payout completion (referral bonus queueing) and session completion (streak updates), with an explicit list of what stays direct (Stellar submission, DB writes, integrity checks) and an honest debuggability trade-off assessment.
+
 ## RFC Process
 
 ### When to Write an RFC
@@ -62,4 +64,4 @@ Once an RFC is merged:
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — Contribution guidelines, includes references to RFCs
 - [docs/](../README.md) — Project documentation
-- GitHub issues: [#1263](../../issues/1263), [#1264](../../issues/1264), [#1266](../../issues/1266), [#1267](../../issues/1267)
+- GitHub issues: [#1263](../../issues/1263), [#1264](../../issues/1264), [#1266](../../issues/1266), [#1267](../../issues/1267), [#1265](../../issues/1265)
