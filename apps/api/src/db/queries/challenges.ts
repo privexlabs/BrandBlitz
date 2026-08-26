@@ -466,9 +466,10 @@ export async function updateChallengeStatus(
   }
 
   try {
-    const res = await query<{ brand_id: string }>("SELECT brand_id FROM challenges WHERE id = $1", [
-      id,
-    ]);
+    const res = await query<{ brand_id: string }>(
+      "SELECT brand_id FROM challenges WHERE id = $1 AND deleted_at IS NULL",
+      [id]
+    );
     if (res.rows[0]?.brand_id) {
       const { dispatchBrandWebhookEvent } = await import("../../services/brand-webhooks");
       void dispatchBrandWebhookEvent(res.rows[0].brand_id, id, status, extras);
@@ -581,7 +582,7 @@ export async function incrementDepositConfirmations(
  */
 export async function getDepositConfirmations(challengeId: string): Promise<number | null> {
   const result = await query<{ deposit_confirmations: number }>(
-    "SELECT deposit_confirmations FROM challenges WHERE id = $1 AND status IN ('pending_deposit', 'active')",
+    "SELECT deposit_confirmations FROM challenges WHERE id = $1 AND deleted_at IS NULL AND status IN ('pending_deposit', 'active')",
     [challengeId]
   );
   return result.rows[0]?.deposit_confirmations ?? null;

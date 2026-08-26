@@ -31,6 +31,7 @@ import { getSessionHistory, type HistoryStatusFilter } from "../db/queries/sessi
 import { CursorQuerySchema } from "../db/pagination";
 import { signAccessToken } from "../lib/tokens";
 import { tokenRevocationKey, tokenTtlSeconds } from "../middleware/authenticate";
+import { logger } from "../lib/logger";
 
 const router: Router = Router();
 
@@ -495,7 +496,10 @@ router.patch("/me/profile", authenticate, async (req, res) => {
     });
   } catch {
     // Non-critical — stale cache will eventually expire
-    console.warn("Failed to trigger cache revalidation for profile update");
+    logger.warn("Failed to trigger cache revalidation for profile update", {
+      oldUsername,
+      newUsername,
+    });
   }
 
   // Token rotation: revoke the old token and issue a new one

@@ -14,6 +14,8 @@ This directory contains Request for Comments documents that propose architectura
 
 - **[RFC 1264: Pure scoring engine extraction](./1264-scoring-engine-extraction.md)** — Proposes extracting scoring business logic into a pure, framework-independent module with explicit inputs/outputs, enabling reuse by batch re-scoring tools and offline dispute resolution.
 
+- **[RFC 1254: Anti-cheat service extraction](./1254-anti-cheat-service-extraction.md)** — Proposes extracting the fixed-threshold fraud-detection rules out of `apps/api/src/middleware/anti-cheat.ts` into a pure `services/anti-cheat.service.ts`, leaving the middleware as a thin adapter, enabling reuse by admin re-evaluation and batch re-scoring without a fabricated Express request. Answers RFC 1264's open question of whether anti-cheat should merge into the scoring engine (proposes: stay separate).
+
 - **[RFC 1267: Referral processor separation](./1267-referral-processor-separation.md)** — Proposes moving referral-bonus eligibility and payout rules from `apps/api/src/queues/processors/referral-bonus.processor.ts` into `services/referrals.ts`, leaving the processor as a thin BullMQ adapter.
 
 - **[RFC 1249: Standalone payout worker](./1249-standalone-payout-worker.md)** — Proposes moving Stellar payout execution out of the API process into a dedicated `apps/payout-worker` service, following the existing `apps/deposit-monitor` precedent of a webhook callback instead of a second direct Postgres connection pool.
@@ -25,6 +27,9 @@ This directory contains Request for Comments documents that propose architectura
 - **[RFC 1250: Lightweight query builder](./1250-lightweight-query-builder.md)** — Proposes incremental adoption of Kysely for `apps/api/src/db/queries`, scoped away from escrow/payout SQL, distinguishing this from ADR 003's rejection of ORM auto-migrations (a different concern).
 
 - **[RFC 1256: Shared config package](./1256-shared-config-package.md)** — Proposes extending `packages/config` with a shared Zod schema fragment for the env vars `apps/api` and `apps/deposit-monitor` genuinely have in common, without forcing app-specific vars into a shared schema.
+### Infrastructure
+
+- **[RFC 1253: Redis connection presets](./1253-redis-connection-presets.md)** — Proposes splitting the single shared `redis` client in `apps/api/src/lib/redis.ts` into named `bullmqConnectionOptions`/`cacheConnectionOptions` presets, so the cache client stops inheriting BullMQ's retry-forever setting, and identifies observability gaps (no per-client error/retry attribution) this also closes.
 
 ## RFC Process
 
@@ -73,3 +78,4 @@ Once an RFC is merged:
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — Contribution guidelines, includes references to RFCs
 - [docs/](../README.md) — Project documentation
 - GitHub issues: [#1263](../../issues/1263), [#1264](../../issues/1264), [#1266](../../issues/1266), [#1267](../../issues/1267), [#1249](../../issues/1249), [#1255](../../issues/1255), [#1250](../../issues/1250), [#1256](../../issues/1256)
+- GitHub issues: [#1263](../../issues/1263), [#1264](../../issues/1264), [#1266](../../issues/1266), [#1267](../../issues/1267), [#1265](../../issues/1265)

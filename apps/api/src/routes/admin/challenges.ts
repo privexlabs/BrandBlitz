@@ -125,7 +125,7 @@ router.get("/:id/fraud", async (req, res) => {
 
   // Verify challenge exists
   const challengeExists = await query(
-    "SELECT id FROM challenges WHERE id = $1",
+    "SELECT id FROM challenges WHERE id = $1 AND deleted_at IS NULL",
     [challengeId]
   );
 
