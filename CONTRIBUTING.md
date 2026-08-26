@@ -14,6 +14,7 @@ Thank you for contributing to BrandBlitz — the skill-validated attention marke
 - [Drips Wave 4 Rules](#drips-wave-4-rules)
 - [Issue Templates](#issue-templates)
 - [Operations Runbooks](#operations-runbooks)
+- [Dependency Version Consistency](#dependency-version-consistency)
 - [Getting Started](#getting-started)
 
 ---
@@ -239,6 +240,41 @@ When you introduce a new failure mode (new queue, new external dependency, new b
 
 Runbooks cover: symptom → impact → diagnosis → mitigation → remediation.
 Link your new runbook from the `docs/runbooks/README.md` index.
+
+---
+
+## Dependency Version Consistency
+
+The monorepo enforces that shared dependencies stay on a single, aligned version
+across every `packages/*` and `apps/*` workspace. Version drift is caught
+automatically in CI by **syncpack** — the `dep-consistency` job runs
+`pnpm syncpack:check` (`syncpack list-mismatches`) and fails the build on any
+mismatch among the dependencies listed in [`syncpack.config.json`](./syncpack.config.json)
+(typescript, vitest, tsup, `@vitest/coverage-v8`, zod, `@types/node`, the React /
+testing-library stack, and the shared Radix UI packages).
+
+**Policy**
+
+- Shared dependencies must use an identical version specifier everywhere they
+  appear. Do not introduce caret (`^`) ranges for these dependencies in one
+  workspace while another pins them exactly.
+- To change a shared dependency's version, update **every** workspace that uses
+  it in the same PR, then commit the regenerated `pnpm-lock.yaml`.
+- Run `pnpm syncpack:check` locally before pushing to catch drift early.
+
+### Pinned tooling review policy (knip)
+
+`apps/web` pins `knip` to an **exact** version (no caret range) on purpose.
+knip's unused-code detection rules change across minor releases and can start or
+stop flagging exports, which would otherwise fail CI unexpectedly on an
+unrelated PR when a caret-permitted upgrade lands.
+
+- Bumping `knip` is a **deliberate, manual** change. Review the upstream release
+  notes and run `pnpm --filter @brandblitz/web knip` locally to confirm the new
+  rules produce only expected findings before merging.
+- The same exact-pinning convention applies to the `@testing-library/*` packages
+  in `apps/web` (e.g. `@testing-library/react`, `@testing-library/dom`) so that
+  CI always resolves the same test-toolchain minor that was verified locally.
 
 ---
 

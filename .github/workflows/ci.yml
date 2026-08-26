@@ -61,6 +61,9 @@ jobs:
             exit 1
           fi
 
+  # ── Workspace dependency version consistency ───────────────────────────────
+  dep-consistency:
+    name: Workspace dependency consistency (syncpack)
   # ── OpenAPI spec drift check ────────────────────────────────────────────────
   openapi-check:
     name: OpenAPI spec drift check
@@ -73,6 +76,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Check for mismatched shared dependency versions
+        run: pnpm syncpack:check
+        # syncpack lint fails the build if any dependency listed in
+        # syncpack.config.json is declared at inconsistent versions across
+        # the workspaces.
       - name: Regenerate docs/openapi.yml and fail on drift
         run: pnpm --filter @brandblitz/api gen:openapi:check
 
