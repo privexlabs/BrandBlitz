@@ -540,8 +540,22 @@ pnpm --filter @brandblitz/web type-check
 # Production build
 pnpm --filter @brandblitz/web build
 
+# Bundle analysis (requires ANALYZE=true)
+pnpm --filter @brandblitz/web analyze
+
 # Start production server
 pnpm --filter @brandblitz/web start
+```
+
+### Dependency version alignment
+
+`@next/bundle-analyzer` must always be pinned to the **exact same version** as the `next` dependency. Both packages are published together from the Next.js monorepo, and a mismatch can cause build-time incompatibilities during `pnpm analyze`.
+
+When upgrading Next.js, update both in `package.json` atomically:
+
+```json
+"next": "X.Y.Z",
+"@next/bundle-analyzer": "X.Y.Z"
 ```
 
 ---
