@@ -8,6 +8,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { OfflineBanner } from "@/components/layout/offline-banner";
 
 export const metadata: Metadata = {
   title: "Global Leaderboard",
@@ -87,20 +88,33 @@ async function LeaderboardContent() {
 
 export default function LeaderboardPage() {
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="mb-2 text-3xl font-bold">Global Leaderboard</h1>
-      <p className="mb-8 text-[var(--muted-foreground)]">Top performers across all challenges</p>
+    <>
+      <OfflineBanner />
+      <main className="mx-auto max-w-3xl px-6 py-12">
+        <h1 className="mb-2 text-3xl font-bold">Global Leaderboard</h1>
+        <p className="mb-8 text-[var(--muted-foreground)]">
+          Top performers across all challenges{" "}
+          <Link
+            href="/docs/guides/scoring-explained"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-[var(--foreground)]"
+          >
+            How scoring works
+          </Link>
+        </p>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>All-Time Rankings</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Suspense fallback={<LeaderboardSkeleton />}>
-            <LeaderboardContent />
-          </Suspense>
-        </CardContent>
-      </Card>
-    </main>
+        <Card>
+          <CardHeader>
+            <CardTitle>All-Time Rankings</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Suspense fallback={<LeaderboardSkeleton />}>
+              <LeaderboardContent />
+            </Suspense>
+          </CardContent>
+        </Card>
+      </main>
+    </>
   );
 }

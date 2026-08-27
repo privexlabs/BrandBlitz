@@ -1,4 +1,4 @@
-import fetch from "node-fetch";
+import "dotenv/config";
 import crypto from "crypto";
 import { Redis } from "ioredis";
 import { fetchDepositEvents, type DepositEvent } from "@brandblitz/stellar";

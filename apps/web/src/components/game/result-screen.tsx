@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import confetti from "canvas-confetti";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatScore, formatUsdc } from "@/lib/format";
@@ -11,11 +12,13 @@ interface ResultScreenProps {
   rank?: number;
   estimatedUsdc?: string;
   challengeId: string;
+  primaryColor?: string;
+  secondaryColor?: string;
 }
 
 const COUNTER_DURATION_MS = 1200;
 
-const CONFETTI_COLORS = [
+const DEFAULT_CONFETTI_COLORS = [
   "#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#3b82f6",
   "#a855f7", "#06b6d4", "#ec4899", "#84cc16", "#f97316",
 ];
@@ -23,6 +26,7 @@ const CONFETTI_COLORS = [
 function useAnimatedValue(target: number, durationMs: number): number {
   const [value, setValue] = useState(0);
   const startTimeRef = useRef<number | null>(null);
+  const lastTimestampRef = useRef<number | null>(null);
   const rafRef = useRef<number>(0);
   const hasStartedRef = useRef(false);
 
@@ -35,12 +39,19 @@ function useAnimatedValue(target: number, durationMs: number): number {
     hasStartedRef.current = true;
     
     startTimeRef.current = null;
+    lastTimestampRef.current = null;
 
     function easeOutCubic(t: number): number {
       return 1 - Math.pow(1 - t, 3);
     }
 
-    function step(timestamp: number) {
+    function step(rawTimestamp: number) {
+      let timestamp = rawTimestamp;
+      if (lastTimestampRef.current !== null && timestamp <= lastTimestampRef.current) {
+        timestamp = lastTimestampRef.current + 16;
+      }
+      lastTimestampRef.current = timestamp;
+
       if (startTimeRef.current === null) {
         startTimeRef.current = timestamp;
       }
@@ -65,54 +76,58 @@ function useAnimatedValue(target: number, durationMs: number): number {
   return value;
 }
 
-function useConfetti(show: boolean) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
+function useConfetti(show: boolean, primaryColor?: string, secondaryColor?: string) {
   useEffect(() => {
     if (!show || typeof window === "undefined") return;
 
     const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (prefersReduced) return;
 
-    const container = document.createElement("div");
-    container.style.position = "fixed";
-    container.style.inset = "0";
-    container.style.pointerEvents = "none";
-    container.style.zIndex = "9999";
-    document.body.appendChild(container);
-    containerRef.current = container;
+    const colors = primaryColor && secondaryColor
+      ? [primaryColor, secondaryColor]
+      : DEFAULT_CONFETTI_COLORS;
 
-    const pieces = Array.from({ length: 60 }, (_, i) => {
-      const piece = document.createElement("div");
-      piece.className = "confetti-piece";
-      piece.style.left = `${Math.random() * 100}%`;
-      piece.style.top = "-10px";
-      piece.style.backgroundColor = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
-      piece.style.width = `${6 + Math.random() * 8}px`;
-      piece.style.height = `${6 + Math.random() * 8}px`;
-      piece.style.borderRadius = Math.random() > 0.5 ? "50%" : "2px";
-      piece.style.animationDelay = `${Math.random() * 1.5}s`;
-      piece.style.animationDuration = `${2 + Math.random() * 2}s`;
-      return piece;
-    });
+    const end = Date.now() + 3000;
 
-    pieces.forEach((p) => container.appendChild(p));
+    const frame = () => {
+      confetti({
+        particleCount: 3,
+        angle: 60,
+        spread: 55,
+        origin: { x: 0 },
+        colors,
+      });
+      confetti({
+        particleCount: 3,
+        angle: 120,
+        spread: 55,
+        origin: { x: 1 },
+        colors,
+      });
 
-    return () => {
-      container.remove();
-      containerRef.current = null;
+      if (Date.now() < end) {
+        requestAnimationFrame(frame);
+      }
     };
-  }, [show]);
+
+    requestAnimationFrame(frame);
+  }, [show, primaryColor, secondaryColor]);
 }
 
-export function ResultScreen({ totalScore, rank, estimatedUsdc, challengeId }: ResultScreenProps) {
+export function ResultScreen({
+  totalScore,
+  rank,
+  estimatedUsdc,
+  challengeId,
+  primaryColor,
+  secondaryColor,
+}: ResultScreenProps) {
   const [shareToast, setShareToast] = useState<string | null>(null);
   const animatedScore = useAnimatedValue(totalScore, COUNTER_DURATION_MS);
-  const showConfetti = rank !== undefined && rank <= 10;
-  useConfetti(showConfetti);
+  const isRankOne = rank === 1;
+  useConfetti(isRankOne, primaryColor, secondaryColor);
 
-  const shareText = `I just scored ${formatScore(totalScore)} in a BrandBlitz challenge${estimatedUsdc ? ` and earned ~${formatUsdc(estimatedUsdc)} USDC` : ""}! 🏆`;
-  const leaderboardHref = `/challenge/${challengeId}`;
+  const shareText = `I just scored ${formatScore(totalScore)} in a BrandBlitz challenge${estimatedUsdc ? ` and earned ~${formatUsdc(estimatedUsdc)}` : ""}! 🏆`;
 
   async function handleShare(): Promise<void> {
     if (navigator.share) {
@@ -128,7 +143,9 @@ export function ResultScreen({ totalScore, rank, estimatedUsdc, challengeId }: R
     <div className="min-h-screen flex items-center justify-center p-6">
       <Card className="max-w-sm w-full text-center">
         <CardHeader>
-          <CardTitle className="text-2xl">Challenge Complete!</CardTitle>
+          <CardTitle className="text-2xl">
+            {isRankOne ? "Congratulations #1!" : "Challenge Complete!"}
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
           <div>
@@ -145,7 +162,7 @@ export function ResultScreen({ totalScore, rank, estimatedUsdc, challengeId }: R
           {estimatedUsdc && (
             <div className="rounded-lg bg-green-50 border border-green-200 p-4 usdc-pulse">
               <p className="text-sm text-green-700">Estimated earnings</p>
-              <p className="text-2xl font-bold text-green-800">{formatUsdc(estimatedUsdc)} USDC</p>
+              <p className="text-2xl font-bold text-green-800">{formatUsdc(estimatedUsdc)}</p>
               <p className="text-xs text-green-600 mt-1">Paid out when challenge ends</p>
             </div>
           )}
@@ -161,11 +178,18 @@ export function ResultScreen({ totalScore, rank, estimatedUsdc, challengeId }: R
               Share Result
             </Button>
 
-            <Button asChild variant="secondary" className="w-full">
-              <Link href={leaderboardHref}>
-                View Leaderboard
-              </Link>
-            </Button>
+            <div className="flex gap-2">
+              <Button asChild variant="secondary" className="flex-1">
+                <Link href="/leaderboard">
+                  Global Leaderboard
+                </Link>
+              </Button>
+              <Button asChild variant="secondary" className="flex-1">
+                <Link href={`/leaderboard/${challengeId}`}>
+                  Challenge Leaderboard
+                </Link>
+              </Button>
+            </div>
 
             <Button asChild className="w-full">
               <Link href="/">Play Another Challenge</Link>

@@ -5,7 +5,12 @@ import {
   calculatePayoutShare,
   rankWinners,
   SessionSummary,
+  validateRoundScore,
+  validateTotalScore,
+  MAX_ROUND_SCORE,
+  MAX_TOTAL_SCORE,
 } from "./scoring";
+import { calculatePayoutShareStroops } from "../lib/usdc";
 
 describe("scoring service", () => {
   /**
@@ -41,6 +46,22 @@ describe("scoring service", () => {
       expect(
         calculateRoundScore({ ...base, reactionTimeMs: 30000 })
       ).toBe(100);
+    });
+
+    it("returns 100 (bonus 0) for 15001ms and does not throw", () => {
+      expect(() =>
+        calculateRoundScore({ ...base, reactionTimeMs: 15001 })
+      ).not.toThrow();
+      expect(
+        calculateRoundScore({ ...base, reactionTimeMs: 15001 })
+      ).toBe(100);
+    });
+
+    it("keeps median reaction time bonus strictly between 0 and max", () => {
+      const score = calculateRoundScore({ ...base, reactionTimeMs: 7500 });
+      const bonus = score - 100;
+      expect(bonus).toBeGreaterThan(0);
+      expect(bonus).toBeLessThan(MAX_ROUND_SCORE - 100);
     });
 
     it("returns 0 for wrong answer", () => {
@@ -182,6 +203,55 @@ describe("scoring service", () => {
 
   /**
    * ---------------------------
+   * calculatePayoutShareStroops — tie / proportional-share math
+   * ---------------------------
+   */
+  describe("calculatePayoutShareStroops", () => {
+    it("splits the pool exactly in half between two players tied on score", () => {
+      const pool = 1_000_000_000n;
+      const a = calculatePayoutShareStroops(100, 200, pool);
+      const b = calculatePayoutShareStroops(100, 200, pool);
+      expect(a).toBe(500_000_000n);
+      expect(b).toBe(500_000_000n);
+      expect(a + b).toBe(pool);
+    });
+
+    it("splits the pool by floor division among three tied players without exceeding the pool", () => {
+      const pool = 100n;
+      const shares = [calculatePayoutShareStroops(1, 3, pool), calculatePayoutShareStroops(1, 3, pool), calculatePayoutShareStroops(1, 3, pool)];
+      const total = shares.reduce((sum, s) => sum + s, 0n);
+
+      expect(shares.every((s) => s === 33n)).toBe(true);
+      expect(total).toBeLessThanOrEqual(pool);
+    });
+
+    it("never lets computed shares sum above the total pool across arbitrary score distributions", () => {
+      const pool = 999_999_937n;
+      const scores = [37, 41, 41, 5, 123, 1];
+      const total = scores.reduce((a, b) => a + b, 0);
+
+      const shares = scores.map((s) => calculatePayoutShareStroops(s, total, pool));
+      const sum = shares.reduce((a, b) => a + b, 0n);
+
+      expect(sum).toBeLessThanOrEqual(pool);
+    });
+
+    it("gives a single winner with no ties 100% of the pool", () => {
+      const pool = 250_000_000n;
+      expect(calculatePayoutShareStroops(300, 300, pool)).toBe(pool);
+    });
+
+    it("gives 0 to a participant with no score contribution", () => {
+      expect(calculatePayoutShareStroops(0, 300, 250_000_000n)).toBe(0n);
+    });
+
+    it("returns 0 for every participant when total points is 0 (no divide-by-zero)", () => {
+      expect(calculatePayoutShareStroops(0, 0, 250_000_000n)).toBe(0n);
+    });
+  });
+
+  /**
+   * ---------------------------
    * Fuzz test (VERY IMPORTANT)
    * ---------------------------
    */
@@ -198,6 +268,71 @@ describe("scoring service", () => {
 
         expect(Number.isNaN(score)).toBe(false);
         expect(score >= 0).toBe(true);
+      }
+    });
+  });
+
+  /**
+   * ---------------------------
+   * Score bounds validation
+   * ---------------------------
+   */
+  describe("validateRoundScore", () => {
+    it("accepts score = 0", () => {
+      expect(validateRoundScore(0)).toEqual({ valid: true });
+    });
+
+    it("accepts score = 150 (max per round)", () => {
+      expect(validateRoundScore(MAX_ROUND_SCORE)).toEqual({ valid: true });
+    });
+
+    it("rejects score = 151", () => {
+      const result = validateRoundScore(151);
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.code).toBe("ROUND_SCORE_OUT_OF_RANGE");
+      }
+    });
+
+    it("rejects score = -1", () => {
+      const result = validateRoundScore(-1);
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.code).toBe("ROUND_SCORE_OUT_OF_RANGE");
+      }
+    });
+
+    it("rejects NaN", () => {
+      expect(validateRoundScore(NaN).valid).toBe(false);
+    });
+
+    it("rejects Infinity", () => {
+      expect(validateRoundScore(Infinity).valid).toBe(false);
+    });
+  });
+
+  describe("validateTotalScore", () => {
+    it("accepts score = 0", () => {
+      expect(validateTotalScore(0)).toEqual({ valid: true });
+    });
+
+    it("accepts score = 450 (max total)", () => {
+      expect(validateTotalScore(MAX_TOTAL_SCORE)).toEqual({ valid: true });
+    });
+
+    it("rejects score = 451", () => {
+      const result = validateTotalScore(451);
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.code).toBe("TOTAL_SCORE_OUT_OF_RANGE");
+      }
+    });
+
+    it("rejects score = -1", () => {
+      const result = validateTotalScore(-1);
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.code).toBe("TOTAL_SCORE_OUT_OF_RANGE");
       }
     });
   });

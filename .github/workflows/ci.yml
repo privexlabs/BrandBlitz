@@ -61,20 +61,83 @@ jobs:
             exit 1
           fi
 
-  # ── Unit tests ───────────────────────────────────────────────────────────────
-  test-api:
-    name: API unit tests
+  # ── Workspace dependency version consistency ───────────────────────────────
+  dep-consistency:
+    name: Workspace dependency consistency (syncpack)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Check for mismatched shared dependency versions
+        run: pnpm syncpack:check
+        # syncpack lint fails the build if any dependency listed in
+        # syncpack.config.json is declared at inconsistent versions across
+        # the workspaces.
+
+  # ── OpenAPI spec drift check ────────────────────────────────────────────────
+  openapi-check:
+    name: OpenAPI spec drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Regenerate docs/openapi.yml and fail on drift
+        run: pnpm --filter @brandblitz/api gen:openapi:check
+
+  # ── Unit tests ───────────────────────────────────────────────────────────────
+  test-api:
+    name: API unit tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: brandblitz
+          POSTGRES_PASSWORD: brandblitz_dev
+          POSTGRES_DB: brandblitz_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Seed test database
+        run: psql -v ON_ERROR_STOP=1 -h localhost -U brandblitz -d brandblitz_test -f init.sql
+        env:
+          PGPASSWORD: brandblitz_dev
+
+      - name: Verify migrations are up-to-date (dry-run)
+        run: pnpm --filter @brandblitz/api migrate:dryrun
+        env:
+          DATABASE_URL: postgresql://brandblitz:brandblitz_dev@localhost:5432/brandblitz_test
       - run: pnpm --filter @brandblitz/api test
 
   test-web:
@@ -83,8 +146,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -98,8 +159,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -114,8 +173,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -141,8 +198,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22

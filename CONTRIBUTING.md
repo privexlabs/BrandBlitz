@@ -14,6 +14,7 @@ Thank you for contributing to BrandBlitz — the skill-validated attention marke
 - [Drips Wave 4 Rules](#drips-wave-4-rules)
 - [Issue Templates](#issue-templates)
 - [Operations Runbooks](#operations-runbooks)
+- [Dependency Version Consistency](#dependency-version-consistency)
 - [Getting Started](#getting-started)
 
 ---
@@ -101,6 +102,18 @@ Commits that do not follow Conventional Commits will fail the commit-message lin
 6. **No `console.log` in production code.** Use the structured logger (`apps/api/src/lib/logger.ts`) in the API, and `console.error` only for unrecoverable startup errors.
 7. **Keep `.env.example` in sync.** If you add a new environment variable, add it to `.env.example` with an inline comment and update the table in `README.md`.
 
+### Test Naming Convention
+
+Tests in `apps/api/src` must follow a consistent naming convention (see [RFC #1263](./docs/rfc/1263-test-naming-convention.md)):
+
+| Tier | Suffix | Dependencies | Speed | Examples |
+|------|--------|---|---|---|
+| **Unit** | `.unit.test.ts` | None (mocked) | <100ms | `fingerprint.unit.test.ts`, `scoring.engine.unit.test.ts` |
+| **Integration** | `.integration.test.ts` | DB, Redis, S3 | 100ms+ | `brands.create.integration.test.ts`, `session-timeout.integration.test.ts` |
+| **No suffix** | `.test.ts` | Deprecated | — | Only for small, isolated tests; new tests must use explicit suffix |
+
+**Guideline**: If your test needs the database, Redis, or file storage, use `.integration.test.ts`. Otherwise, use `.unit.test.ts`.
+
 ### PR Description Template
 
 ```markdown
@@ -119,6 +132,7 @@ Approach taken, notable design decisions, alternatives rejected.
 ## Test plan
 
 - [ ] Unit tests added / updated
+- [ ] Integration tests added / updated (if DB/Redis required)
 - [ ] Manual smoke test: describe what you clicked/ran
 
 ## Checklist
@@ -229,6 +243,98 @@ Link your new runbook from the `docs/runbooks/README.md` index.
 
 ---
 
+## Dependency Version Consistency
+
+The monorepo enforces that shared dependencies stay on a single, aligned version
+across every `packages/*` and `apps/*` workspace. Version drift is caught
+automatically in CI by **syncpack** — the `dep-consistency` job runs
+`pnpm syncpack:check` (`syncpack list-mismatches`) and fails the build on any
+mismatch among the dependencies listed in [`syncpack.config.json`](./syncpack.config.json)
+(typescript, vitest, tsup, `@vitest/coverage-v8`, zod, `@types/node`, the React /
+testing-library stack, and the shared Radix UI packages).
+
+**Policy**
+
+- Shared dependencies must use an identical version specifier everywhere they
+  appear. Do not introduce caret (`^`) ranges for these dependencies in one
+  workspace while another pins them exactly.
+- To change a shared dependency's version, update **every** workspace that uses
+  it in the same PR, then commit the regenerated `pnpm-lock.yaml`.
+- Run `pnpm syncpack:check` locally before pushing to catch drift early.
+
+### zod version policy
+
+`zod` is declared as a direct runtime dependency in `apps/api`, `apps/web`, and
+`apps/deposit-monitor`. All three workspaces **must always declare the same
+exact version** and it is currently `4.3.6`.
+
+**Why this matters more than other shared dependencies:**
+
+- `apps/api` uses zod schemas to define every API request/response contract and
+  feeds them through `@asteasolutions/zod-to-openapi` to generate the canonical
+  `docs/openapi.yml` (run via `pnpm gen:openapi`).
+- `apps/web` validates API responses against those same schemas at the boundary
+  layer.
+- `apps/deposit-monitor` validates Stellar event payloads using zod schemas that
+  must be compatible with the types the API emits.
+
+A zod version mismatch between these three apps does **not** produce a
+TypeScript error or a failed test — it silently diverges runtime validation
+behaviour. For example, a new coercion rule or a changed `.parse()` error shape
+in one workspace will not surface until a request hits the wrong consumer in
+production.
+
+**When bumping zod:**
+
+1. Update `zod` in `apps/api/package.json`, `apps/web/package.json`, and
+   `apps/deposit-monitor/package.json` in a **single PR**.
+2. Review the zod release notes for breaking changes in `.parse()`, `.safeParse()`,
+   error shapes, and coercion behaviour.
+3. Run `pnpm gen:openapi:check` (in `apps/api`) to confirm the generated OpenAPI
+   spec is unchanged or intentionally updated.
+4. Commit the regenerated `pnpm-lock.yaml`.
+5. `pnpm syncpack:check` will fail CI if you miss any of the three files.
+
+### Pinned tooling review policy (knip)
+
+`apps/web` pins `knip` to an **exact** version (no caret range) on purpose.
+knip's unused-code detection rules change across minor releases and can start or
+stop flagging exports, which would otherwise fail CI unexpectedly on an
+unrelated PR when a caret-permitted upgrade lands.
+
+- Bumping `knip` is a **deliberate, manual** change. Review the upstream release
+  notes and run `pnpm --filter @brandblitz/web knip` locally to confirm the new
+  rules produce only expected findings before merging.
+- The same exact-pinning convention applies to the `@testing-library/*` packages
+  in `apps/web` (e.g. `@testing-library/react`, `@testing-library/dom`) so that
+  CI always resolves the same test-toolchain minor that was verified locally.
+
+### Pre-1.0 native-binding packages (`@napi-rs/canvas`)
+
+`apps/api` depends on `@napi-rs/canvas` (currently `0.1.97`), an exact-pinned
+pre-1.0 native-binding (compiled Rust/N-API) package used for server-side
+image rendering. Because it's pre-1.0, npm/dependabot classify a
+`0.x.y -> 0.x+1.0` bump as "minor" even though — per SemVer's own spec — a
+pre-1.0 minor bump is allowed to be breaking. A silently-broken native
+binding (wrong prebuilt binary for the platform, a changed API surface, a
+corrupted encode) fails at runtime, not at typecheck.
+
+- Any `@napi-rs/canvas` version bump requires **manual review**, even patch
+  and minor updates. [`.github/workflows/dependabot-automerge.yml`](.github/workflows/dependabot-automerge.yml)
+  excludes it from auto-merge specifically for this reason — a Dependabot PR
+  bumping it will not be auto-approved or auto-merged like other
+  patch/minor updates.
+- [`apps/api/src/canvas-smoke.test.ts`](apps/api/src/canvas-smoke.test.ts) is
+  a regression guard that exercises the real native rendering pipeline
+  (canvas creation, 2D context drawing, PNG encoding, magic-byte
+  verification) as part of the normal `pnpm --filter @brandblitz/api test`
+  run, so CI fails if a bump breaks the native binding.
+- Before merging a bump: run `pnpm --filter @brandblitz/api test` locally on
+  the target platform/architecture and review the package's release notes
+  for API changes.
+
+---
+
 ## Getting Started
 
 ```bash
@@ -265,6 +371,8 @@ pnpm test
 pnpm type-check
 pnpm lint
 ```
+
+> Editor/IDE backup files (`*.bak`) should never be committed — they're covered by `.gitignore`, but double-check `git status` before committing if your editor creates them somewhere unusual.
 
 ### Common Issues
 

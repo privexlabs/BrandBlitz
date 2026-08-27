@@ -35,8 +35,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -50,7 +48,7 @@ jobs:
 
       - name: Seed test database
         run: |
-          psql -h localhost -U brandblitz -d brandblitz -f init.sql
+          psql -v ON_ERROR_STOP=1 -h localhost -U brandblitz -d brandblitz -f init.sql
         env:
           PGPASSWORD: brandblitz_dev
 

@@ -2,6 +2,9 @@
   "name": "@brandblitz/deposit-monitor",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22.11.0 <23"
+  },
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx --env-file-if-exists ../../.env watch src/index.ts",
@@ -15,13 +18,11 @@
     "@brandblitz/stellar": "workspace:*",
 
     "ioredis": "5.10.1",
-    "node-fetch": "2.7.0",
     "winston": "3.19.0",
     "zod": "4.3.6"
   },
   "devDependencies": {
     "@types/node": "25.5.0",
-    "@types/node-fetch": "2.6.11",
     "tsup": "8.5.1",
     "tsx": "4.21.0",
     "typescript": "6.0.2",

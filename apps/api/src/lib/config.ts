@@ -11,7 +11,28 @@
  */
 
 import { ZodError } from "zod";
+import winston from "winston";
 import { configSchema, type Config } from "./config-schema";
+
+// NOTE: this file intentionally does NOT import the shared logger from
+// ./logger — logger.ts itself reads `config.LOG_LEVEL` at module-eval time
+// (`winston.createLogger({ level: config.LOG_LEVEL, ... })`), so importing
+// it here would create a circular dependency: config.ts -> logger.ts ->
+// config.ts, resolving to `config` still being undefined during logger.ts's
+// own module evaluation and throwing before this file ever gets a chance to
+// report the *actual* validation error. A minimal, structurally-identical
+// winston logger is constructed locally instead, at a fixed "error" level
+// (appropriate here since this path only ever logs a fatal startup error).
+const bootstrapLogger = winston.createLogger({
+  level: "error",
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.errors({ stack: true }),
+    winston.format.json(),
+  ),
+  defaultMeta: { service: "brandblitz-api" },
+  transports: [new winston.transports.Console()],
+});
 
 // Keys whose values must never appear in logs.
 const SECRET_KEYS = new Set<keyof Config>([
@@ -60,7 +81,7 @@ function loadConfig(): Readonly<Config> {
           return `  • ${path}: ${issue.message}`;
         })
         .join("\n");
-      console.error(
+      bootstrapLogger.error(
         `❌ Invalid or missing environment variables:\n${details}\n` +
           `Check your .env file against .env.example for the expected format.`,
       );

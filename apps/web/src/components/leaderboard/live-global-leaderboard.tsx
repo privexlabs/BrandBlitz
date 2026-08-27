@@ -3,33 +3,56 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { api } from "@/lib/api";
+import { api, createApiClient } from "@/lib/api";
 import { formatScore, formatUsdc } from "@/lib/format";
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { LeaderboardEntry } from "@/lib/api";
 
 const MEDAL: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
 const PAGE_SIZE = 50;
 const STORAGE_KEY = "brandblitz:leaderboard:global";
 
-async function fetchLeaderboardPage(offset: number): Promise<{
+export type LeaderboardScope = "global" | "friends";
+
+async function fetchLeaderboardPage(
+  cursor?: string,
+  opts?: {
+    challengeId?: string;
+    scope?: LeaderboardScope;
+    apiToken?: string;
+  }
+): Promise<{
   entries: LeaderboardEntry[];
-  hasMore: boolean;
+  nextCursor: string | null;
 }> {
-  const res = await api.get(`/leaderboard/global?limit=${PAGE_SIZE}&offset=${offset}`);
-  const entries: LeaderboardEntry[] = res.data.leaderboard;
-  const hasMore = Boolean(res.data.pagination?.hasMore ?? entries.length === PAGE_SIZE);
-  return { entries, hasMore };
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  if (cursor) params.set("cursor", cursor);
+  if (opts?.scope) params.set("scope", opts.scope);
+
+  const client = opts?.apiToken ? createApiClient(opts.apiToken) : api;
+  const path = opts?.challengeId
+    ? `/leaderboard/${opts.challengeId}?${params.toString()}`
+    : `/leaderboard/global?${params.toString()}`;
+  const res = await client.get(path);
+  const entries: LeaderboardEntry[] = res.data.data || res.data.sessions || [];
+  const nextCursor: string | null = res.data.nextCursor ?? null;
+  return { entries, nextCursor };
 }
 
-function loadSavedState(): { scrollY: number; loadedCount: number } | null {
+function loadSavedState(
+  challengeId?: string,
+  scope: LeaderboardScope = "global"
+): { scrollY: number; loadedCount: number } | null {
   if (typeof window === "undefined") {
     return null;
   }
 
-  const raw = window.sessionStorage.getItem(STORAGE_KEY);
+  const key = `${STORAGE_KEY}:${challengeId ?? "global"}:${scope}`;
+  const raw = window.sessionStorage.getItem(key);
   if (!raw) {
     return null;
   }
@@ -51,12 +74,19 @@ function loadSavedState(): { scrollY: number; loadedCount: number } | null {
 export function LiveGlobalLeaderboard({
   initial,
   initialHasMore = initial.length === PAGE_SIZE,
+  challengeId,
+  scope = "global",
 }: {
   initial: LeaderboardEntry[];
   initialHasMore?: boolean;
+  challengeId?: string;
+  scope?: LeaderboardScope;
 }) {
+  const { data: session } = useSession();
+  const apiToken = (session as { apiToken?: string } | null)?.apiToken;
+
   const [entries, setEntries] = useState(initial);
-  const [hasMore, setHasMore] = useState(initialHasMore);
+  const [nextCursor, setNextCursor] = useState<string | null>(initialHasMore ? "first" : null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [isDisconnected, setIsDisconnected] = useState(false);
@@ -72,7 +102,15 @@ export function LiveGlobalLeaderboard({
   }, [entries]);
 
   useEffect(() => {
-    const saved = loadSavedState();
+    setEntries(initial);
+    setNextCursor(initialHasMore ? "first" : null);
+    restoreOnceRef.current = false;
+    prevRankByUserRef.current.clear();
+    setChangedUsers(new Set());
+  }, [initial, initialHasMore, challengeId, scope]);
+
+  useEffect(() => {
+    const saved = loadSavedState(challengeId, scope);
     if (restoreOnceRef.current || !saved) {
       return;
     }
@@ -83,20 +121,24 @@ export function LiveGlobalLeaderboard({
     const restore = async () => {
       setIsRestoring(true);
       let currentEntries = initial.slice();
-      let nextOffset = currentEntries.length;
+      let cursor: string | undefined = currentEntries.length > 0 ? undefined : "first";
 
       while (currentEntries.length < saved.loadedCount) {
-        const page = await fetchLeaderboardPage(nextOffset);
+        const page = await fetchLeaderboardPage(cursor === "first" ? undefined : cursor, {
+          challengeId,
+          scope,
+          apiToken,
+        });
         if (cancelled || page.entries.length === 0) {
           break;
         }
 
         currentEntries = currentEntries.concat(page.entries);
-        nextOffset = currentEntries.length;
+        cursor = page.nextCursor ?? undefined;
         setEntries(currentEntries);
-        setHasMore(page.hasMore);
+        setNextCursor(page.nextCursor);
 
-        if (!page.hasMore) {
+        if (!page.nextCursor) {
           break;
         }
       }
@@ -112,12 +154,13 @@ export function LiveGlobalLeaderboard({
     return () => {
       cancelled = true;
     };
-  }, [initial]);
+  }, [initial, challengeId, scope, apiToken]);
 
   useEffect(() => {
     const persistState = () => {
+      const key = `${STORAGE_KEY}:${challengeId ?? "global"}:${scope}`;
       window.sessionStorage.setItem(
-        STORAGE_KEY,
+        key,
         JSON.stringify({
           scrollY: window.scrollY,
           loadedCount: entries.length,
@@ -132,7 +175,7 @@ export function LiveGlobalLeaderboard({
       window.removeEventListener("beforeunload", persistState);
       persistState();
     };
-  }, [entries.length]);
+  }, [entries.length, challengeId, scope]);
 
   useEffect(() => {
     const prev = prevRankByUserRef.current;
@@ -156,24 +199,30 @@ export function LiveGlobalLeaderboard({
   }, [rows]);
 
   const loadMore = async () => {
-    if (isLoadingMore || !hasMore) {
-      return;
-    }
-
+    if (isLoadingMore || !nextCursor) return;
     setIsLoadingMore(true);
     try {
-      const page = await fetchLeaderboardPage(entries.length);
+      const page = await fetchLeaderboardPage(nextCursor === "first" ? undefined : nextCursor, {
+        challengeId,
+        scope,
+        apiToken,
+      });
       if (page.entries.length === 0) {
-        setHasMore(false);
+        setNextCursor(null);
         return;
       }
-
       setEntries((current) => current.concat(page.entries));
-      setHasMore(page.hasMore);
+      setNextCursor(page.nextCursor);
     } finally {
       setIsLoadingMore(false);
     }
   };
+
+  const sentinelRef = useInfiniteScroll({
+    hasNextPage: !!nextCursor,
+    isLoading: isLoadingMore,
+    onLoadMore: loadMore,
+  });
 
   if (isDisconnected) {
     return (
@@ -190,6 +239,21 @@ export function LiveGlobalLeaderboard({
   }
 
   if (rows.length === 0) {
+    if (scope === "friends") {
+      return (
+        <div className="p-6">
+          <EmptyState
+            title="No friends on the leaderboard yet"
+            description="Invite friends using your referral code or play a challenge to see them here."
+            action={
+              <Link href="/challenge">
+                <Button>Browse Challenges</Button>
+              </Link>
+            }
+          />
+        </div>
+      );
+    }
     return (
       <div className="p-6">
         <EmptyState
@@ -269,14 +333,19 @@ export function LiveGlobalLeaderboard({
         <p className="text-sm text-[var(--muted-foreground)]">
           Showing {rows.length} players
         </p>
-        {hasMore ? (
-          <Button variant="outline" onClick={() => void loadMore()} disabled={isLoadingMore}>
-            {isLoadingMore ? "Loading..." : "Load more"}
-          </Button>
-        ) : (
-          <p className="text-sm text-[var(--muted-foreground)]">You&apos;re at the end.</p>
-        )}
+        {!nextCursor && rows.length > 0 ? (
+          <p className="text-sm text-[var(--muted-foreground)]">You&apos;ve seen everything</p>
+        ) : null}
       </div>
+
+      {isLoadingMore && (
+        <div className="flex justify-center py-4">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--border)] border-t-[var(--primary)]" />
+        </div>
+      )}
+
+      {/* Sentinel element for IntersectionObserver */}
+      <div ref={sentinelRef} className="h-4" />
     </div>
   );
 }

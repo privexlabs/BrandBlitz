@@ -7,10 +7,13 @@ import cors from "cors";
 import compression from "compression";
 import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
+import healthRoutes from "./routes/health";
 import { errorHandler } from "./middleware/error";
 import { referralAttributionMiddleware } from "./middleware/referral-attribution";
 import { apiLimiter } from "./middleware/rate-limit";
 import { requireHttps } from "./middleware/require-https";
+import { requireJsonContentType } from "./middleware/require-json-content-type";
+import { requestId } from "./middleware/request-id";
 import { connectDb, closeDb, query } from "./db";
 import { connectRedis, redis } from "./lib/redis";
 import { payoutQueue } from "./queues/payout.queue";
@@ -18,6 +21,7 @@ import { leagueQueue } from "./queues/league.queue";
 import { leaderboardRefreshQueue } from "./queues/leaderboard-refresh.queue";
 import { logger } from "./lib/logger";
 import { config } from "./lib/config";
+import { PERMISSIONS_POLICY_HEADER } from "@brandblitz/config";
 
 const app = express();
 const PORT = config.PORT;
@@ -56,7 +60,7 @@ app.use(
           }
         : false,
     referrerPolicy: {
-      policy: "strict-origin-when-cross-origin",
+      policy: config.REFERRER_POLICY,
     },
     xFrameOptions: {
       action: "deny",
@@ -71,6 +75,11 @@ app.use(
     },
   }),
 );
+// Helmet 8 does not set Permissions-Policy; add it explicitly after Helmet.
+app.use((_req, res, next) => {
+  res.setHeader("Permissions-Policy", PERMISSIONS_POLICY_HEADER);
+  next();
+});
 // ── CORS — explicit, non-wildcard allow-list enforced at startup ────────────
 // `config.ALLOWED_ORIGINS` is validated by Zod (required, no wildcard) so the
 // process never starts with a permissive origin list. This defensive guard
@@ -122,7 +131,9 @@ app.use(
 );
 app.use(cookieParser());
 app.use(requireHttps);
+app.use(requestId);
 app.use(referralAttributionMiddleware);
+app.use(requireJsonContentType);
 app.use(
   compression({
     threshold: 1024,
@@ -147,17 +158,17 @@ app.use(express.urlencoded({ extended: true }));
 app.use(apiLimiter);
 
 // ── Health check (before auth middleware) ──────────────────────────────────
-app.get("/health", (_req, res) => {
-  if (isShuttingDown) {
-    res.status(503).json({ status: "shutting_down" });
-    return;
-  }
-  res.json({
-    status: "ok",
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-  });
-});
+app.use(
+  "/health",
+  (_req, res, next) => {
+    if (isShuttingDown) {
+      res.status(503).json({ status: "shutting_down" });
+      return;
+    }
+    next();
+  },
+  healthRoutes
+);
 
 // ── API Routes ─────────────────────────────────────────────────────────────
 registerRoutes(app);

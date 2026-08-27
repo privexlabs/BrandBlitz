@@ -20,6 +20,7 @@
 - [Prerequisites](#prerequisites)
 - [Quick Start (Docker)](#quick-start-docker)
 - [Quick Start (Local)](#quick-start-local)
+- [Docker Compose Files](#docker-compose-files)
 - [Running Tests](#running-tests)
 - [Environment Variables](#environment-variables)
 - [Services & Ports](#services--ports)
@@ -119,8 +120,10 @@ After a challenge ends, brands get real data on **attention quality** — not va
 - Warm-up completion rate (% who stayed the full 20s+)
 - Challenge completion rate (% who finished all 3 rounds)
 - Round-by-round accuracy (which brand messages actually landed)
-- Score distribution histogram (were the messages clear or confusing?)
+- Score distribution histogram (were the messages clear or confusing)
 - Cost per verified attention session = pool ÷ completions
+
+See the [Brands API](docs/api/brands.md) for the full endpoint reference including dashboard, analytics, challenge creation, and question review workflows.
 
 ### Cost comparison
 
@@ -157,10 +160,12 @@ BrandBlitz is the only attention platform where the user actually gets better ov
 
 ### Status and on-chain credentials
 
-- Public global leaderboard rank
-- Weekly league tiers: Bronze → Silver → Gold (resets weekly — fresh start for everyone)
-- Challenge streaks and achievement badges
+- Public global leaderboard rank — see [Leaderboard API](docs/api/leaderboard.md) for the full endpoint reference and live SSE stream
+- Weekly league tiers: Bronze → Silver → Gold (resets weekly — fresh start for everyone) — see [Leagues API](docs/api/leagues.md)
+- Challenge streaks and achievement badges — see [Badges API](docs/api/badges.md) for the badge catalog and earning criteria
 - Non-transferable Stellar SBT credentials for tier milestones (verifiable on-chain proof of performance, embeddable in portfolio/LinkedIn)
+
+See the [Users API](docs/api/users.md) for profile, wallet, phone verification, notifications, earnings, referrals, and badge endpoints.
 
 ### Brand perks for top performers
 
@@ -180,6 +185,8 @@ Top scorers earn exclusive access: brand Discord roles, early product access, in
 | **BrandBlitz** | **Warm-up + challenge** | **USDC instant** | **Yes — core mechanic** | **Yes — core mechanic** |
 
 The combination of warm-up → competition → instant USDC payout is unoccupied.
+
+> **How scoring works:** every round awards 100 base points plus a 0–50 speed bonus, and ties break by earliest finish. Full formula, worked examples, and payout math in [docs/guides/scoring-explained.md](docs/guides/scoring-explained.md).
 
 HQ Trivia proved the model: Warner Bros., Nike, and GM paid for branded challenge rounds in 2018. Warner Bros. alone paid ~$3M for three film promotions. Users engaged. Sponsors reported "strong impact on sales, not just engagement." BrandBlitz is HQ Trivia with USDC payouts, Stellar settlement, and a micro-learning warm-up that fixes the one documented weakness of gamified ads (cognitive recall drops without a learning component).
 
@@ -212,6 +219,16 @@ BrandBlitz is open-source infrastructure for skill-validated brand attention on 
 - Embedded wallet onboarding (no seed phrase, 30-second signup)
 
 All patterns are documented, tested, and running in Docker.
+
+### Public Brand Catalog API
+
+Third parties (e.g. Drips / Stellar ecosystem partners) can query the public brand listing without authentication:
+
+```bash
+curl https://api.brandblitz.io/brands/public
+```
+
+See [docs/api/public-brands.md](docs/api/public-brands.md) for the full response schema and usage.
 
 ---
 
@@ -334,6 +351,34 @@ cp .env.example .env  # update DATABASE_URL, REDIS_URL to localhost
 
 pnpm dev  # Turborepo runs all packages in parallel
 ```
+
+---
+
+## Docker Compose Files
+
+The project uses three Compose files for different environments:
+
+| File | Purpose | When applied |
+|------|---------|--------------|
+| `docker-compose.yml` | Base configuration — all services, health checks, and volumes | Always loaded |
+| `docker-compose.override.yml` | Development overrides — hot-reload bind mounts, exposed ports | **Auto-loaded** by `docker compose up` |
+| `docker-compose.prod.yml` | Production overrides — no bind mounts, HTTPS, replicas, secrets | Explicitly with `-f` flag |
+
+**Development** (default):
+```bash
+docker compose up
+# Automatically merges docker-compose.yml + docker-compose.override.yml
+# Override adds: bind mounts for hot-reload, direct port access (3000, 3001, 5432, etc.)
+```
+
+**Production:**
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Skips the override file — uses prod config only
+# Adds: HTTPS, replicas, resource limits, secrets, restart policies
+```
+
+The override file is **not loaded** when you specify explicit `-f` files. This means production never picks up the dev bind mounts or exposed ports.
 
 ---
 
@@ -506,6 +551,8 @@ Payout share:  userScore / sumOfAllWinnerScores × prizePool
 
 Only users with at least one correct answer receive a payout share.
 
+See [docs/guides/scoring-explained.md](docs/guides/scoring-explained.md) for the exact formula, tie-breaking rules, and worked examples.
+
 ---
 
 ## Deployment (Production)
@@ -660,7 +707,15 @@ S3-compatible object storage with image optimisation. Imported by `apps/api`. Wo
 - [`apps/web/README.md`](./apps/web/README.md) — Frontend pages, components, auth flow, game state machine, upload flow
 - [`contracts/README.md`](./contracts/README.md) — Soroban escrow contract: build, test, deploy, full function reference
 - [`docs/adr/`](./docs/adr/README.md) — Architecture Decision Records (the "why" behind load-bearing engineering choices)
+- [OpenAPI and Scalar UI guide](./docs/api/using-the-openapi-spec.md) — Browse `/docs`, fetch `/docs/openapi.json`, and generate typed clients from the API spec.
+- [Rate limits and API errors](./docs/api/rate-limits-and-errors.md) — Public reference for limiter buckets, 429 responses, and the common error envelope.
+- [Waitlist curl examples](./docs/examples/waitlist-curl.md) — Runnable signup and position lookup examples for landing-page integrations.
 - Interactive API reference — Scalar UI at `/docs` (local dev: <http://localhost:4000/docs>). Spec lives at [`docs/openapi.yml`](./docs/openapi.yml); regenerate via `pnpm --filter @brandblitz/api gen:openapi`.
+- [Brands API](./docs/api/brands.md) — Brand CRUD, challenge creation, question review, webhooks, analytics
+- [Users API](./docs/api/users.md) — Profiles, wallet, phone verification, notifications, badges, earnings, referrals
+- [Challenges API](./docs/api/challenges.md) — Challenge listing, details, stats, leaderboards, deposit info, reports
+- [Sessions API](./docs/api/sessions.md) — Gameplay flow: warmup, answer submission, session recovery
+- [Implementation Notes](./docs/implementation-notes/README.md) — Index of root-level implementation summary documents
 
 ---
 

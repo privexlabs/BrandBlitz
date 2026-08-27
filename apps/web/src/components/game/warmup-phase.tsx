@@ -13,28 +13,32 @@ interface WarmupPhaseProps {
   challenge: Challenge;
   apiToken: string;
   onComplete: (challengeToken: string) => void;
+  deviceId?: string;
 }
 
-export function WarmupPhase({ challenge, apiToken, onComplete }: WarmupPhaseProps) {
+export function WarmupPhase({ challenge, apiToken, onComplete, deviceId }: WarmupPhaseProps) {
   const [unlocked, setUnlocked] = useState(false);
   const { submitting, wrap } = useSubmitting();
-  // Stable reference so CountdownTimer's effect doesn't re-run when unlocked
-  // flips true and this component re-renders with a new inline arrow function.
   const handleTimerExpire = useCallback(() => setUnlocked(true), []);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [showRetry, setShowRetry] = useState(false);
+  const [deadlineAt, setDeadlineAt] = useState<number | undefined>(undefined);
+  const [isPaused, setIsPaused] = useState(false);
 
-  // Server enforces WARMUP_MIN_SECONDS; client enables button after same duration
   useEffect(() => {
-    // Signal to server that warmup has started to initialize timing & session
     const api = createApiClient(apiToken);
-    api.post(`/sessions/${challenge.id}/warmup-start`).catch(() => {
+    api.post(
+      `/sessions/${challenge.id}/warmup-start`,
+      {},
+      deviceId ? { headers: { "X-Device-Id": deviceId } } : undefined,
+    ).then((res) => {
+      if (res.data?.unlockAt) {
+        setDeadlineAt(res.data.unlockAt);
+      }
+    }).catch(() => {
       setStatusMessage("Failed to initialize warmup. Please refresh.");
     });
-
-    const timer = setTimeout(() => setUnlocked(true), WARMUP_MIN_SECONDS * 1000);
-    return () => clearTimeout(timer);
-  }, [apiToken, challenge.id]);
+  }, [apiToken, challenge.id, deviceId]);
 
   const handleStartChallenge = async () => {
     setStatusMessage(null);
@@ -107,7 +111,9 @@ export function WarmupPhase({ challenge, apiToken, onComplete }: WarmupPhaseProp
         <div className="py-4">
           <CountdownTimer
             durationSeconds={WARMUP_MIN_SECONDS}
+            deadlineAt={deadlineAt}
             onExpire={handleTimerExpire}
+            onPausedChange={setIsPaused}
           />
           {!unlocked && (
             <p className="text-center text-xs text-slate-500 mt-2">
@@ -116,15 +122,15 @@ export function WarmupPhase({ challenge, apiToken, onComplete }: WarmupPhaseProp
           )}
         </div>
 
-        {/* Start button — unlocked after minimum warmup */}
+        {/* Start button — unlocked after minimum warmup and not paused */}
         <Button
           onClick={handleStartChallenge}
-          disabled={!unlocked || submitting}
+          disabled={!unlocked || submitting || isPaused}
           size="lg"
           className="w-full text-lg"
           style={{ backgroundColor: challenge.primary_color ?? undefined }}
         >
-          {submitting ? "Starting..." : unlocked ? "Start Challenge →" : "Preparing..."}
+          {submitting ? "Starting..." : isPaused ? "Paused — Wait to resume" : unlocked ? "Start Challenge →" : "Preparing..."}
         </Button>
 
         {statusMessage ? (

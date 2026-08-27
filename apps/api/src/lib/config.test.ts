@@ -22,6 +22,7 @@ const VALID_ENV: Record<string, string> = {
   GOOGLE_CLIENT_ID: "google-client-id",
   GOOGLE_CLIENT_SECRET: "google-client-secret",
   WEB_URL: "http://localhost:3000",
+  ALLOWED_ORIGINS: "http://localhost:3000",
   STELLAR_NETWORK: "testnet",
   HOT_WALLET_SECRET: "SBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
   HOT_WALLET_PUBLIC_KEY: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
@@ -47,6 +48,8 @@ describe("configSchema — valid env", () => {
     expect(result.data.PORT).toBe(3001);
     expect(result.data.DB_POOL_MAX).toBe(10);
     expect(result.data.PAYOUT_WORKER_CONCURRENCY).toBe(2);
+    expect(result.data.GOOGLE_OAUTH_PKCE_TTL_SECONDS).toBe(300);
+    expect(result.data.REFERRER_POLICY).toBe("strict-origin-when-cross-origin");
   });
 
   it("coerces PORT from string to number", () => {
@@ -124,10 +127,19 @@ describe("loadConfig — process.exit on invalid env", () => {
       vi.stubEnv(k, v);
     }
 
+    // config.ts logs the validation failure via a local winston logger
+    // (not the shared ../lib/logger — see config.ts's comment on why that
+    // would be a circular import) whose Console transport writes through
+    // console.log by default.
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
     // Re-import the module so loadConfig() runs with the stubbed env
     await expect(import("./config?bust=" + Date.now())).rejects.toThrow(
       "process.exit called"
     );
     expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(logSpy).toHaveBeenCalled();
+    const loggedOutput = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(loggedOutput).toContain("Invalid or missing environment variables");
   });
 });

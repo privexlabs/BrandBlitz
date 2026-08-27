@@ -1,6 +1,6 @@
-import { Worker, type Job, type WorkerOptions } from "bullmq";
+import { Worker, UnrecoverableError, type Job, type WorkerOptions } from "bullmq";
 import { redis } from "../../lib/redis";
-import { processPayout } from "../../services/payout";
+import { processPayout, isFraudBlockError } from "../../services/payout";
 import { logger } from "../../lib/logger";
 import { failPayoutsForChallenge } from "../../db/queries/payouts";
 import { query } from "../../db";
@@ -9,15 +9,31 @@ import { config } from "../../lib/config";
 import { forwardToDlq, payoutDlqQueue } from "../dlq";
 
 export const PAYOUT_WORKER_CONCURRENCY = config.PAYOUT_WORKER_CONCURRENCY;
+const SHUTDOWN_TIMEOUT_MS = 30000; // 30 seconds
 
 export const payoutWorkerOptions = {
   connection: redis,
   concurrency: PAYOUT_WORKER_CONCURRENCY,
 } satisfies WorkerOptions;
 
-export async function processPayoutJob(job: Job<{ challengeId: string }>): Promise<void> {
-  logger.info("Processing payout job", { jobId: job.id, challengeId: job.data.challengeId });
-  await processPayout(job.data.challengeId);
+export async function processPayoutJob(job: Job<{ challengeId: string; requestId?: string }>): Promise<void> {
+  logger.info("Processing payout job", { jobId: job.id, challengeId: job.data.challengeId, requestId: job.data.requestId });
+  try {
+    await processPayout(job.data.challengeId);
+  } catch (err) {
+    // Fraud-blocked payouts must not be retried — re-running them won't change
+    // the DB trigger's decision and would hammer the audit log unnecessarily.
+    if (isFraudBlockError(err)) {
+      logger.warn("Payout job terminated by fraud block — not retrying", {
+        jobId: job.id,
+        challengeId: job.data.challengeId,
+      });
+      throw new UnrecoverableError(
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+    throw err;
+  }
 }
 
 export function createPayoutWorker(WorkerImpl: typeof Worker = Worker): Worker {
@@ -47,11 +63,13 @@ export function createPayoutWorker(WorkerImpl: typeof Worker = Worker): Worker {
     });
   });
 
+  setupGracefulShutdown(worker, "payout");
+
   return worker;
 }
 
 export async function handleExhaustedPayoutJob(
-  job: Job<{ challengeId: string }>,
+  job: Job<{ challengeId: string; requestId?: string }>,
   err: Error
 ): Promise<void> {
   await failPayoutsForChallenge(job.data.challengeId, err.message);
@@ -69,4 +87,36 @@ export async function handleExhaustedPayoutJob(
       }),
     ]
   );
+}
+
+function setupGracefulShutdown(worker: Worker, workerName: string): void {
+  let isShuttingDown = false;
+
+  const gracefulShutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    logger.info(`${signal} received, gracefully shutting down ${workerName} worker...`);
+
+    const shutdownTimer = setTimeout(() => {
+      logger.warn(`${workerName} worker shutdown timeout exceeded, forcing exit`);
+      process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS);
+
+    try {
+      await worker.close();
+      clearTimeout(shutdownTimer);
+      logger.info(`${workerName} worker closed gracefully`);
+      process.exit(0);
+    } catch (error) {
+      clearTimeout(shutdownTimer);
+      logger.error(`Error during ${workerName} worker shutdown`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      process.exit(1);
+    }
+  };
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 }

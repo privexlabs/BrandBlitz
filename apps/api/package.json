@@ -2,6 +2,9 @@
   "name": "@brandblitz/api",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22.11.0 <23"
+  },
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx --env-file-if-exists ../../.env watch src/index.ts",
@@ -24,9 +27,9 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1019.0",
     "@aws-sdk/s3-request-presigner": "3.1019.0",
+    "@brandblitz/config": "workspace:*",
     "@brandblitz/stellar": "workspace:*",
     "@brandblitz/storage": "workspace:*",
-    "@coinbase/coinbase-sdk": "0.25.0",
     "@fingerprintjs/fingerprintjs-pro": "3.12.9",
     "@napi-rs/canvas": "0.1.97",
     "@stellar/stellar-sdk": "14.6.1",
@@ -44,13 +47,13 @@
     "multer": "2.1.1",
     "pg": "8.20.0",
     "prom-client": "15.1.3",
-    "rate-limit-redis": "^4.3.1",
+    "rate-limit-redis": "4.3.1",
     "sharp": "0.34.5",
     "twilio": "5.13.1",
     "winston": "3.19.0",
     "zod": "4.3.6",
-    "@asteasolutions/zod-to-openapi": "^7.3.0",
-    "yaml": "^2.6.0"
+    "@asteasolutions/zod-to-openapi": "9.1.0",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "3.0.0",
@@ -62,12 +65,12 @@
     "@types/multer": "2.1.0",
     "@types/node": "25.5.0",
     "@types/pg": "8.20.0",
-    "@types/supertest": "^7.2.0",
-    "@typescript-eslint/eslint-plugin": "^8.60.0",
-    "@typescript-eslint/parser": "^8.60.0",
+    "@types/supertest": "7.2.0",
+    "@typescript-eslint/eslint-plugin": "8.60.0",
+    "@typescript-eslint/parser": "8.60.0",
     "@vitest/coverage-v8": "4.1.2",
     "eslint": "10.1.0",
-    "jiti": "^2.7.0",
+    "jiti": "2.7.0",
     "supertest": "7.2.2",
     "tsup": "8.5.1",
     "tsx": "4.21.0",

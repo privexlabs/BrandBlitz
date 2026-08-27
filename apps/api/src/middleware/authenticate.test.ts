@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../lib/config", () => ({
   config: {
     JWT_SECRET: "test_secret_test_secret_test_secret_123",
+    JWT_ISSUER: "brandblitz-api",
+    JWT_AUDIENCE: "brandblitz-client",
   },
 }));
 
@@ -41,7 +43,11 @@ function mockRes() {
 const next = vi.fn();
 
 function signToken(payload: any, options = {}) {
-  return jwt.sign(payload, SECRET, options);
+  return jwt.sign(
+    { iss: "brandblitz-api", aud: "brandblitz-client", ...payload },
+    SECRET,
+    options
+  );
 }
 
 describe("authenticate middleware", () => {
@@ -91,6 +97,51 @@ describe("authenticate middleware", () => {
 
     expect(res.status).toHaveBeenCalledWith(401);
   });
+
+  it("rejects a token with mismatched iss claim", async () => {
+    const token = jwt.sign(
+      { sub: "user1", email: "user@example.com", iss: "evil-service", aud: "brandblitz-client" },
+      SECRET,
+      { expiresIn: "1h" }
+    );
+    const req = mockReq(token);
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rejects a token with mismatched aud claim", async () => {
+    const token = jwt.sign(
+      { sub: "user1", email: "user@example.com", iss: "brandblitz-api", aud: "evil-client" },
+      SECRET,
+      { expiresIn: "1h" }
+    );
+    const req = mockReq(token);
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rejects a token with missing iss and aud claims", async () => {
+    const token = jwt.sign(
+      { sub: "user1", email: "user@example.com" },
+      SECRET,
+      { expiresIn: "1h" }
+    );
+    const req = mockReq(token);
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
 });
 
 describe("authenticateOptional middleware", () => {
@@ -120,5 +171,167 @@ describe("authenticateOptional middleware", () => {
 
     expect(req.user).toBeUndefined();
     expect(next).toHaveBeenCalled();
+  });
+
+  it("continues without user for optional token with mismatched iss", async () => {
+    const token = jwt.sign(
+      { sub: "user1", email: "user@example.com", iss: "wrong", aud: "brandblitz-client" },
+      SECRET,
+      { expiresIn: "1h" }
+    );
+    const req = mockReq(token);
+    const res = mockRes();
+
+    await authenticateOptional(req as any, res, next);
+
+    expect(req.user).toBeUndefined();
+    expect(next).toHaveBeenCalled();
+  });
+
+  it("continues without user for optional token with mismatched aud", async () => {
+    const token = jwt.sign(
+      { sub: "user1", email: "user@example.com", iss: "brandblitz-api", aud: "wrong" },
+      SECRET,
+      { expiresIn: "1h" }
+    );
+    const req = mockReq(token);
+    const res = mockRes();
+
+    await authenticateOptional(req as any, res, next);
+
+    expect(req.user).toBeUndefined();
+    expect(next).toHaveBeenCalled();
+  });
+});
+
+describe("authenticate middleware - additional edge cases", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.redisGet.mockResolvedValue(null);
+  });
+
+  it("rejects an expired JWT (past exp) with 401", async () => {
+    const token = signToken(
+      { sub: "user1", email: "user@example.com" },
+      { expiresIn: "-1h" } // Already expired
+    );
+    const req = mockReq(token);
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+    expect(req.user).toBeUndefined();
+  });
+
+  it("rejects JWT signed with wrong secret with 401", async () => {
+    const token = jwt.sign(
+      { sub: "user1", email: "user@example.com", iss: "brandblitz-api", aud: "brandblitz-client" },
+      "wrong_secret_entirely",
+      { expiresIn: "1h" }
+    );
+    const req = mockReq(token);
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+    expect(req.user).toBeUndefined();
+  });
+
+  it("rejects structurally malformed token (not three Base64 segments) with 401", async () => {
+    const malformedToken = "not.two.segments";
+    const req = mockReq(malformedToken);
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rejects completely malformed token string with 401", async () => {
+    const req = mockReq("completely-invalid-token-string");
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty Bearer value with 401", async () => {
+    const req = {
+      headers: { authorization: "Bearer " },
+      user: undefined as any,
+    };
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("does not populate req.user when expired JWT error fires", async () => {
+    const token = signToken(
+      { sub: "user1", email: "user@example.com" },
+      { expiresIn: "-1h" } // Already expired
+    );
+    const req = mockReq(token);
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(req.user).toBeUndefined();
+  });
+
+  it("does not populate req.user when wrong secret error fires", async () => {
+    const token = jwt.sign(
+      { sub: "user1", email: "user@example.com", iss: "brandblitz-api", aud: "brandblitz-client" },
+      "wrong_secret",
+      { expiresIn: "1h" }
+    );
+    const req = mockReq(token);
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(req.user).toBeUndefined();
+  });
+
+  it("does not populate req.user when malformed token error fires", async () => {
+    const req = mockReq("definitely-not-a-valid-jwt");
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(req.user).toBeUndefined();
+  });
+
+  it("sets req.user.id from sub claim for valid token", async () => {
+    const token = signToken(
+      { sub: "user-id-123", email: "user@example.com" },
+      { expiresIn: "1h" }
+    );
+    const req = mockReq(token);
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(req.user).toBeDefined();
+    expect(req.user.sub).toBe("user-id-123");
+    expect(next).toHaveBeenCalled();
+  });
+
+  it("returns proper JSON error response for all rejection cases", async () => {
+    const req = mockReq("invalid-token");
+    const res = mockRes();
+
+    await authenticate(req as any, res, next);
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
   });
 });

@@ -4,18 +4,24 @@ import { getChallengeById, getChallengeQuestions } from "../db/queries/challenge
 import {
   getSession,
   markWarmupStarted,
+  markWarmupCompleted,
   markChallengeStarted,
   recordRoundScore,
   finishSession,
   storeSessionHmac,
+  deleteOpenSession,
+  abandonSession,
 } from "../db/queries/sessions";
-import { calculateRoundScore, completeWarmupWithLock, validateAnswer } from "../services/scoring";
+import { calculateRoundScore, validateAnswer, validateRoundScore } from "../services/scoring";
 import { authenticate } from "../middleware/authenticate";
 import { requireActiveUser } from "../middleware/require-active-user";
 import {
   enforceOneSessionPerChallenge,
   validateReactionTime,
   validateDeviceFingerprint,
+  detectClockSkew,
+  assertValidTotalScore,
+  requireSessionStartAllowed,
 } from "../middleware/anti-cheat";
 import { createError } from "../middleware/error";
 import { challengeStartLimiter } from "../middleware/rate-limit";
@@ -26,6 +32,7 @@ import { checkAndAwardSessionBadges } from "../services/badges";
 import { WARMUP_MIN_SECONDS } from "@brandblitz/stellar";
 import { tokenRevocationKey, tokenTtlSeconds } from "../middleware/authenticate";
 import { revalidateLeaderboard } from "../lib/revalidate";
+import { query } from "../db/index";
 
 const router = Router();
 
@@ -50,6 +57,87 @@ const AnswerSchema = z.object({
   reactionTimeMs: z.number().int().min(0),
 });
 
+function lastAnsweredRound(session: {
+  round_1_answer?: string | null;
+  round_1_score?: number;
+  round_2_answer?: string | null;
+  round_2_score?: number;
+  round_3_answer?: string | null;
+  round_3_score?: number;
+}): 0 | 1 | 2 | 3 {
+  if (session.round_3_answer || (session.round_3_score ?? 0) > 0) return 3;
+  if (session.round_2_answer || (session.round_2_score ?? 0) > 0) return 2;
+  if (session.round_1_answer || (session.round_1_score ?? 0) > 0) return 1;
+  return 0;
+}
+
+function recoveryStatus(session: {
+  status?: string;
+  completed_at?: string | Date | null;
+  challenge_started_at?: string | Date | null;
+}): "warmup" | "in_progress" | "completed" | "expired" {
+  if (session.completed_at || session.status === "completed") return "completed";
+  if (session.status === "abandoned") return "expired";
+  if (session.challenge_started_at || session.status === "active") return "in_progress";
+  return "warmup";
+}
+
+function remainingTimeMs(session: { challenge_started_at?: string | Date | null }): number {
+  if (!session.challenge_started_at) return 45_000;
+  const startedAt = new Date(session.challenge_started_at).getTime();
+  if (!Number.isFinite(startedAt)) return 45_000;
+  return Math.max(0, 45_000 - (Date.now() - startedAt));
+}
+
+/**
+ * GET /sessions/:challengeId
+ * Return the authenticated user's current session progress for recovery UI.
+ */
+router.get("/:challengeId", authenticate, async (req, res) => {
+  const challengeId = String(req.params.challengeId);
+  const challenge = await getChallengeById(challengeId);
+  if (!challenge) throw createError("Challenge not found", 404);
+
+  const session = await getSession(req.user!.sub, challenge.id);
+  if (!session) throw createError("Session not found", 404);
+  if (session.user_id !== req.user!.sub) throw createError("Forbidden", 403);
+
+  const lastRound = lastAnsweredRound(session);
+  const totalScore =
+    session.total_score ||
+    (session.round_1_score ?? 0) + (session.round_2_score ?? 0) + (session.round_3_score ?? 0);
+
+  res.json({
+    session: {
+      id: session.id,
+      status: recoveryStatus(session),
+      last_answered_round: lastRound,
+      current_round: Math.min(lastRound + 1, 3),
+      remaining_time_ms: remainingTimeMs(session),
+      total_score: totalScore,
+      round_scores: [session.round_1_score, session.round_2_score, session.round_3_score],
+    },
+  });
+});
+
+/**
+ * DELETE /sessions/:challengeId
+ * Explicitly quit an active or warmup session, recording abandon_reason = 'explicit'.
+ * The row is soft-abandoned (not deleted) so the reason is preserved for analytics
+ * and fraud detection. A subsequent warmup-start call will detect the abandoned
+ * session and create a fresh one via enforceOneSessionPerChallenge.
+ */
+router.delete("/:challengeId", authenticate, async (req, res) => {
+  const challengeId = String(req.params.challengeId);
+  const challenge = await getChallengeById(challengeId);
+  if (!challenge) throw createError("Challenge not found", 404);
+
+  const abandoned = await abandonSession(req.user!.sub, challenge.id, "explicit");
+  if (!abandoned) throw createError("No open session to forfeit", 404);
+
+  res.status(204).send();
+});
+
 /**
  * POST /sessions/:challengeId/warmup-start
  * Begin the warm-up phase. Records start time server-side.
@@ -59,8 +147,8 @@ router.post(
   "/:challengeId/warmup-start",
   authenticate,
   requireActiveUser,
-  validateDeviceFingerprint,
   enforceOneSessionPerChallenge,
+  validateDeviceFingerprint,
   async (req, res) => {
     const challengeId = String(req.params.challengeId);
     const challenge = await getChallengeById(challengeId);
@@ -84,9 +172,9 @@ router.post(
 /**
  * POST /sessions/:challengeId/warmup-complete
  * Completes warm-up and issues a short-lived challenge token.
- * Server enforces that minimum exposure time has passed.
+ * Server enforces that minimum exposure time has passed using server-side timestamp.
  */
-router.post("/:challengeId/warmup-complete", authenticate, async (req, res) => {
+router.post("/:challengeId/warmup-complete", authenticate, detectClockSkew, async (req, res) => {
   const challengeId = String(req.params.challengeId);
   const challenge = await getChallengeById(challengeId);
   if (!challenge) throw createError("Challenge not found", 404);
@@ -94,7 +182,20 @@ router.post("/:challengeId/warmup-complete", authenticate, async (req, res) => {
   const session = await getSession(req.user!.sub, challenge.id);
   if (!session) throw createError("Session not found", 404);
   if (session.user_id !== req.user!.sub) throw createError("Forbidden", 403);
-  await completeWarmupWithLock({ userId: req.user!.sub, challengeId: challenge.id });
+
+  // Enforce server-side warmup minimum using server timestamp only
+  const unlockAt = await redis.get(`warmup:unlock:${session.id}`);
+  if (unlockAt) {
+    const serverNow = Date.now();
+    const remainingMs = parseInt(unlockAt) - serverNow;
+    if (remainingMs > 0) {
+      const error = createError("Warm-up minimum not yet elapsed", 400, "WARMUP_TOO_FAST");
+      (error as any).remainingMs = remainingMs;
+      throw error;
+    }
+  }
+
+  await markWarmupCompleted(session.id);
 
   // Issue a short-lived challenge token (10 min TTL)
   const challengeToken = `ct:${session.id}:${Date.now()}`;
@@ -112,6 +213,7 @@ router.post(
   authenticate,
   requireActiveUser,
   challengeStartLimiter,
+  requireSessionStartAllowed,
   async (req, res) => {
     const { challengeToken } = z.object({ challengeToken: z.string() }).parse(req.body);
     const challengeId = String(req.params.challengeId);
@@ -126,6 +228,7 @@ router.post(
     if (!session || session.id !== storedSessionId) throw createError("Session mismatch", 403);
 
     await markChallengeStarted(session.id);
+    await query("UPDATE users SET last_active_at = NOW() WHERE id = $1", [req.user!.sub]);
     await redis.del(`challenge-token:${challengeToken}`);
 
     // Store session start time for timing validation
@@ -199,11 +302,17 @@ router.post(
       reactionTimeMs: body.reactionTimeMs,
     });
 
+    const scoreCheck = validateRoundScore(score);
+    if (!scoreCheck.valid) {
+      throw createError(scoreCheck.message, 422, scoreCheck.code);
+    }
+
     await recordRoundScore(session.id, round, score, body.selectedOption, body.reactionTimeMs);
 
     if (round === 3) {
       const completed = await finishSession(session.id);
       if (completed) {
+        assertValidTotalScore(completed.total_score);
         const hmac = computeSessionHmac(completed.id, completed.total_score, completed.completed_at!);
         if (hmac) {
           await storeSessionHmac(session.id, hmac);
@@ -214,11 +323,22 @@ router.post(
             total_score: completed.total_score,
             is_practice: completed.is_practice,
           });
+          
+          // Invalidate Redis leaderboard cache
+          const keys = await redis.keys("leaderboard:*");
+          if (keys.length > 0) {
+            await redis.del(...keys);
+          }
+          await revalidateLeaderboard().catch(() => {});
         }
         const token = bearerToken(req);
         if (token) {
           await revokeSessionToken(session.id, token, req.user!.exp);
         }
+      }
+      const token = bearerToken(req);
+      if (token) {
+        await revokeSessionToken(session.id, token, req.user!.exp);
       }
     }
 
