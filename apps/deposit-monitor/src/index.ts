@@ -1,4 +1,3 @@
-import "dotenv/config";
 import fetch from "node-fetch";
 import crypto from "crypto";
 import { Redis } from "ioredis";

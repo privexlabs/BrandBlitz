@@ -1,4 +1,3 @@
-import "dotenv/config";
 // Sentry must be initialised before any other imports that use it.
 import { initSentry } from "./lib/sentry";
 void initSentry();

@@ -208,13 +208,13 @@ BrandBlitz is built as part of the [Drips programme](https://drips.network). The
 
 Use the appropriate issue template when opening a new issue (see issue [#60](../../issues/60)):
 
-| Template | When to use |
-|---|---|
-| **Bug report** | Something that was working and now isn't, or produces incorrect output |
-| **Feature request** | New functionality or a change to existing behaviour |
-| **Test coverage** | A module that lacks tests; specify the file and target coverage % |
-| **Documentation** | Incorrect, outdated, or missing docs |
-| **Chore / maintenance** | Dependency upgrades, tooling changes, CI fixes |
+| Template | When to use | File |
+|---|---|---|
+| **Bug report** | Something that was working and now isn't, or produces incorrect output | [`bug-report.yml`](.github/ISSUE_TEMPLATE/bug-report.yml) |
+| **Feature request** | New functionality or a change to existing behaviour | [`feature-request.yml`](.github/ISSUE_TEMPLATE/feature-request.yml) |
+| **Test coverage** | A module that lacks tests; specify the file and target coverage % | [`test-coverage.yml`](.github/ISSUE_TEMPLATE/test-coverage.yml) |
+| **Documentation** | Incorrect, outdated, or missing docs | [`documentation.yml`](.github/ISSUE_TEMPLATE/documentation.yml) |
+| **Chore / maintenance** | Dependency upgrades, tooling changes, CI fixes | [`chore.yml`](.github/ISSUE_TEMPLATE/chore.yml) |
 
 If no template fits, open a blank issue with at minimum: context, expected behaviour, and actual behaviour.
 

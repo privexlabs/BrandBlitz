@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { initSentry } from "./lib/sentry";
 void initSentry();
 import { connectDb, closeDb } from "./db";
