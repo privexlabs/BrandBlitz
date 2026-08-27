@@ -523,6 +523,8 @@ Single hot wallet + muxed accounts. No per-user Stellar accounts (no 2 XLM minim
 ### Soroban Escrow (on-chain alternative)
 For brands wanting full on-chain transparency, the escrow contract holds USDC trustlessly. `settle(recipients)` distributes to winners; `refund()` returns the pool to the brand. See [`contracts/README.md`](./contracts/README.md).
 
+To build the contract, deploy it to testnet, and set `SOROBAN_CONTRACT_ID` so payout code runs through the contract locally, follow [`docs/stellar/local-escrow-setup.md`](./docs/stellar/local-escrow-setup.md). If `SOROBAN_CONTRACT_ID` is unset, payouts fall back to direct hot-wallet transfers.
+
 ---
 
 ## Anti-Cheat
