@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatScore, formatUsdc, safeDivide } from "@/lib/format";
 import { StreakBadge } from "@/components/gamification/streak-badge";
-import { StreakHeatmap } from "@/components/gamification/StreakHeatmap";
+import { StreakHeatmap } from "@/components/gamification/streak-heatmap";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
