@@ -10,6 +10,8 @@ This directory contains Request for Comments documents that propose architectura
 
 - **[RFC 1266: Standardized web API client](./1266-standardized-web-api-client.md)** — Proposes extracting a single typed API client module (`apps/web/src/lib/api-client.ts`) from scattered fetch calls across routes and components, aligned with `docs/openapi.yml`.
 
+- **[RFC 1257: Stellar error-boundary contract](./1257-stellar-error-boundary-contract.md)** — Proposes a shared `StellarError` class with a machine-readable `code`/`retryable` contract between `packages/stellar` and `apps/api`, replacing brittle string-matching on error messages at queue/route call sites.
+
 ### Domain Refactoring
 
 - **[RFC 1264: Pure scoring engine extraction](./1264-scoring-engine-extraction.md)** — Proposes extracting scoring business logic into a pure, framework-independent module with explicit inputs/outputs, enabling reuse by batch re-scoring tools and offline dispute resolution.
