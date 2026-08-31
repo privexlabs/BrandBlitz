@@ -134,14 +134,19 @@ export function generateChallengeQuestions(
 }
 
 function pickDistractors(pool: string[], exclude: string, count: number): string[] {
-  const filtered = pool.filter((item) => item !== exclude);
+  const filtered = Array.from(
+    new Set(pool.map((item) => item.trim()).filter((item) => item && item !== exclude))
+  );
   const shuffled = shuffle(filtered);
   const result = shuffled.slice(0, count);
 
   // Pad with generic fallbacks if pool is too small
   const fallbacks = ["Option A", "Option B", "Option C", "Option D"];
   while (result.length < count) {
-    result.push(fallbacks[result.length] ?? `Option ${result.length + 1}`);
+    const fallback =
+      fallbacks.find((item) => item !== exclude && !result.includes(item)) ??
+      `Option ${result.length + 1}`;
+    result.push(fallback);
   }
 
   return result;
