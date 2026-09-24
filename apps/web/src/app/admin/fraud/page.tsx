@@ -56,9 +56,7 @@ type ActionType = "resolved" | "escalated";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function statusVariant(
-  status: string
-): "default" | "secondary" | "destructive" | "outline" {
+function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
   if (status === "open") return "destructive";
   if (status === "resolved") return "default";
   return "secondary";
@@ -94,6 +92,7 @@ export default function AdminFraudPage() {
   const [dialogReason, setDialogReason] = useState("");
   const [dialogTargetIds, setDialogTargetIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [copiedDetailsId, setCopiedDetailsId] = useState<string | null>(null);
 
   // ─── Auth guard ──────────────────────────────────────────────────────────
 
@@ -203,20 +202,18 @@ export default function AdminFraudPage() {
         <CardContent className="pt-4">
           <div className="flex flex-wrap items-center gap-3">
             <Label className="text-sm font-medium">Status:</Label>
-            {(["all", "open", "resolved", "escalated"] as StatusFilter[]).map(
-              (s) => (
-                <Button
-                  key={s}
-                  variant={statusFilter === s ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => {
-                    setStatusFilter(s);
-                  }}
-                >
-                  {s.charAt(0).toUpperCase() + s.slice(1)}
-                </Button>
-              )
-            )}
+            {(["all", "open", "resolved", "escalated"] as StatusFilter[]).map((s) => (
+              <Button
+                key={s}
+                variant={statusFilter === s ? "default" : "outline"}
+                size="sm"
+                onClick={() => {
+                  setStatusFilter(s);
+                }}
+              >
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </Button>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -239,11 +236,7 @@ export default function AdminFraudPage() {
           >
             Escalate Selected
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setSelectedIds(new Set())}
-          >
+          <Button size="sm" variant="outline" onClick={() => setSelectedIds(new Set())}>
             Clear
           </Button>
         </div>
@@ -258,9 +251,7 @@ export default function AdminFraudPage() {
           {loading ? (
             <div className="py-12 text-center text-sm text-gray-500">Loading…</div>
           ) : flags.length === 0 ? (
-            <div className="py-12 text-center text-sm text-gray-500">
-              No fraud flags found.
-            </div>
+            <div className="py-12 text-center text-sm text-gray-500">No fraud flags found.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -286,10 +277,7 @@ export default function AdminFraudPage() {
                 </thead>
                 <tbody>
                   {flags.map((flag) => (
-                    <tr
-                      key={flag.id}
-                      className="border-b hover:bg-gray-50"
-                    >
+                    <tr key={flag.id} className="border-b hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <input
                           type="checkbox"
@@ -298,9 +286,7 @@ export default function AdminFraudPage() {
                           aria-label={`Select flag ${flag.id}`}
                         />
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs">
-                        {flag.flagType}
-                      </td>
+                      <td className="px-4 py-3 font-mono text-xs">{flag.flagType}</td>
                       <td className="px-4 py-3">
                         <div className="font-medium">{flag.userDisplayName}</div>
                         <div className="text-xs text-gray-500">{flag.userEmail}</div>
@@ -319,20 +305,41 @@ export default function AdminFraudPage() {
                         <div>R2: {formatMs(flag.reactionTimes.round2Ms)}</div>
                         <div>R3: {formatMs(flag.reactionTimes.round3Ms)}</div>
                       </td>
-                      <td className="max-w-[200px] px-4 py-3">
-                        <pre className="truncate text-xs text-gray-600">
-                          {flag.details
-                            ? JSON.stringify(flag.details, null, 0).slice(0, 80)
-                            : "—"}
-                        </pre>
+                      <td className="max-w-[260px] px-4 py-3">
+                        {flag.details ? (
+                          <details className="text-xs">
+                            <summary className="max-w-[200px] cursor-pointer truncate text-gray-600">
+                              {JSON.stringify(flag.details).slice(0, 80)}
+                            </summary>
+                            <pre className="my-2 max-h-64 max-w-[min(32rem,70vw)] overflow-auto whitespace-pre-wrap break-all rounded border bg-gray-50 p-2">
+                              {JSON.stringify(flag.details, null, 2)}
+                            </pre>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(
+                                    JSON.stringify(flag.details, null, 2)
+                                  );
+                                  setCopiedDetailsId(flag.id);
+                                } catch {
+                                  setCopiedDetailsId(null);
+                                }
+                              }}
+                            >
+                              {copiedDetailsId === flag.id ? "Copied" : "Copy JSON"}
+                            </Button>
+                          </details>
+                        ) : (
+                          <span>—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">
                         {new Date(flag.createdAt).toLocaleDateString()}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant={statusVariant(flag.status)}>
-                          {flag.status}
-                        </Badge>
+                        <Badge variant={statusVariant(flag.status)}>{flag.status}</Badge>
                       </td>
                       <td className="px-4 py-3">
                         {flag.status === "open" && (
@@ -404,9 +411,7 @@ export default function AdminFraudPage() {
           <DialogHeader>
             <DialogTitle>
               {dialogAction === "resolved" ? "Resolve" : "Escalate"}{" "}
-              {dialogTargetIds.length > 1
-                ? `${dialogTargetIds.length} flags`
-                : "flag"}
+              {dialogTargetIds.length > 1 ? `${dialogTargetIds.length} flags` : "flag"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
@@ -425,22 +430,11 @@ export default function AdminFraudPage() {
             />
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDialogOpen(false)}
-              disabled={submitting}
-            >
+            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={submitting}>
               Cancel
             </Button>
-            <Button
-              onClick={handleSubmitAction}
-              disabled={!dialogReason.trim() || submitting}
-            >
-              {submitting
-                ? "Saving…"
-                : dialogAction === "resolved"
-                ? "Mark resolved"
-                : "Escalate"}
+            <Button onClick={handleSubmitAction} disabled={!dialogReason.trim() || submitting}>
+              {submitting ? "Saving…" : dialogAction === "resolved" ? "Mark resolved" : "Escalate"}
             </Button>
           </DialogFooter>
         </DialogContent>
