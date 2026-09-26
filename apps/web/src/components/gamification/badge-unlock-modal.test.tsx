@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { BadgeUnlockModal, type Badge } from "./badge-unlock-modal";
 
 // Mock sessionStorage
@@ -49,6 +49,29 @@ describe("BadgeUnlockModal", () => {
     fireEvent.click(closeBtn);
     vi.advanceTimersByTime(400);
     expect(onClose).toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("navigates between badges in multi-badge carousel with transition", () => {
+    vi.useFakeTimers();
+    render(<BadgeUnlockModal badges={[badge1, badge2]} onClose={() => {}} />);
+    expect(screen.getByText("First Win")).toBeTruthy();
+    
+    const nextBtn = screen.getByRole("button", { name: /next badge/i });
+    const prevBtn = screen.getByRole("button", { name: /previous badge/i });
+    
+    expect((prevBtn as HTMLButtonElement).disabled).toBe(true);
+    expect((nextBtn as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(nextBtn);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    expect(screen.getByText("Streak Master")).toBeTruthy();
+    expect((nextBtn as HTMLButtonElement).disabled).toBe(true);
+    expect((prevBtn as HTMLButtonElement).disabled).toBe(false);
+
     vi.useRealTimers();
   });
 });
