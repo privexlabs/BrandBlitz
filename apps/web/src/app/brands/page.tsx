@@ -22,10 +22,12 @@ interface PublicBrand {
 
 export const metadata: Metadata = {
   title: "Brand Directory",
-  description: "Browse all brands on BrandBlitz. Discover active challenges and compete for USDC rewards.",
+  description:
+    "Browse all brands on BrandBlitz. Discover active challenges and compete for USDC rewards.",
   openGraph: {
     title: "Brand Directory — BrandBlitz",
-    description: "Browse all brands on BrandBlitz. Discover active challenges and compete for USDC rewards.",
+    description:
+      "Browse all brands on BrandBlitz. Discover active challenges and compete for USDC rewards.",
   },
 };
 
@@ -108,9 +110,18 @@ function BrandDirectoryClient({ brands }: { brands: PublicBrand[] }) {
                 ? "bg-[var(--primary)] text-white"
                 : usedLetters.has(letter)
                   ? "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
-                  : "cursor-not-allowed text-[var(--muted-foreground)]/40"
+                  : "text-[var(--muted-foreground)]/40 cursor-not-allowed"
             }`}
-            aria-label={`Jump to brands starting with ${letter}`}
+            title={
+              usedLetters.has(letter)
+                ? `Jump to brands starting with ${letter}`
+                : `No brands start with ${letter}`
+            }
+            aria-label={
+              usedLetters.has(letter)
+                ? `Jump to brands starting with ${letter}`
+                : `No brands start with ${letter}`
+            }
           >
             {letter}
           </button>
@@ -130,7 +141,9 @@ function BrandDirectoryClient({ brands }: { brands: PublicBrand[] }) {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {letterBrands.map((brand) => (
                   <Link key={brand.id} href={`/brand/${brand.id}`}>
-                    <Card className={`transition-shadow hover:shadow-md ${brand.active_challenge_count === 0 ? "opacity-60" : ""}`}>
+                    <Card
+                      className={`transition-shadow hover:shadow-md ${brand.active_challenge_count === 0 ? "opacity-60" : ""}`}
+                    >
                       <CardContent className="flex items-center gap-4 py-4">
                         {brand.logo_url ? (
                           <Image

@@ -8,11 +8,7 @@ import type { Challenge } from "@/lib/api";
 const apiPostMock = vi.fn();
 
 vi.mock("next/image", () => ({
-  default: ({
-    alt,
-    src,
-    ...props
-  }: ImgHTMLAttributes<HTMLImageElement> & { src: string }) => (
+  default: ({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElement> & { src: string }) => (
     <img alt={alt} src={src} {...props} />
   ),
 }));
@@ -67,9 +63,7 @@ describe("WarmupPhase", () => {
     );
     expect(screen.getByRole("heading", { name: "Acme" })).toBeInTheDocument();
     expect(screen.getByText("Launch faster.")).toBeInTheDocument();
-    expect(
-      screen.getByText(/Study this brand carefully/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Study this brand carefully/i)).toBeInTheDocument();
   });
 
   it("omits optional brand assets when absent", () => {
@@ -110,6 +104,33 @@ describe("WarmupPhase", () => {
 
     expect(screen.getByText("0")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start Challenge →" })).toBeEnabled();
+  });
+
+  it("swaps the study caption for a Ready cue at the moment it unlocks (#1091)", async () => {
+    render(<WarmupPhase challenge={challenge} apiToken="test-token" onComplete={vi.fn()} />);
+
+    expect(screen.getByText(/study time remaining/i)).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WARMUP_MIN_SECONDS * 1000);
+    });
+
+    // The caption is replaced by a positive cue rather than simply vanishing.
+    expect(screen.queryByText(/study time remaining/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/ready/i);
+    // And it does not gate the button.
+    expect(screen.getByRole("button", { name: "Start Challenge →" })).toBeEnabled();
+  });
+
+  it("keeps the Ready cue animation opt-out for reduced-motion users (#1091)", async () => {
+    render(<WarmupPhase challenge={challenge} apiToken="test-token" onComplete={vi.fn()} />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WARMUP_MIN_SECONDS * 1000);
+    });
+
+    expect(screen.getByRole("status").className).toContain("motion-reduce:animate-none");
   });
 
   it("posts warmup completion and invokes onComplete with the challenge token", async () => {
@@ -153,7 +174,9 @@ describe("WarmupPhase", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText(/Not yet ready\. Please wait 2 more seconds and try again\./i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Not yet ready\. Please wait 2 more seconds and try again\./i)
+    ).toBeInTheDocument();
     expect(onComplete).not.toHaveBeenCalled();
   });
 
@@ -181,7 +204,9 @@ describe("WarmupPhase", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText(/Couldn't start the challenge\. Check your connection and try again\./i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Couldn't start the challenge\. Check your connection and try again\./i)
+    ).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -212,7 +237,9 @@ describe("WarmupPhase", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText(/Couldn't start the challenge\. Check your connection and try again\./i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Couldn't start the challenge\. Check your connection and try again\./i)
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
@@ -234,14 +261,22 @@ describe("WarmupPhase", () => {
     expect(startButton).toBeEnabled();
 
     // Simulate tab hidden (visibilitychange)
-    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true, writable: true });
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+      writable: true,
+    });
     document.dispatchEvent(new Event("visibilitychange"));
 
     // Button should now be disabled and show paused text
     expect(screen.getByRole("button", { name: "Paused — Wait to resume" })).toBeDisabled();
 
     // Simulate tab visible again
-    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true, writable: true });
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+      writable: true,
+    });
     document.dispatchEvent(new Event("visibilitychange"));
 
     // Button should be enabled again

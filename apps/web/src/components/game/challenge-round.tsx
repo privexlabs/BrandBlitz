@@ -178,7 +178,9 @@ export function ChallengeRound({
           role="alert"
           className="mt-4 rounded-md border border-red-500/50 bg-red-500/10 p-4 text-sm"
         >
-          <p className="text-red-500">Failed to submit answer: {answerError}</p>
+          {/* #1055 — the raw error string may be HTTP status text or an internal
+              code, so it is deliberately not rendered to the player mid-round. */}
+          <p className="text-red-500">Couldn&#39;t submit your answer. Please try again.</p>
           {onRetry && (
             <Button type="button" variant="outline" size="sm" className="mt-2" onClick={onRetry}>
               Retry

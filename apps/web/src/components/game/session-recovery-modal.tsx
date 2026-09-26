@@ -29,6 +29,15 @@ export function SessionRecoveryModal({
   onStartNew,
 }: SessionRecoveryModalProps) {
   const dialogRef = React.useRef<HTMLDivElement>(null);
+  const [confirmingForfeit, setConfirmingForfeit] = React.useState(false);
+  const cancelForfeitRef = React.useRef<HTMLButtonElement>(null);
+
+  // Forfeiting is irreversible, so land focus on the non-destructive option
+  // when the confirmation step appears. The Tab trap below reads the button
+  // list on each keypress, so it picks up the swapped buttons on its own.
+  React.useEffect(() => {
+    if (confirmingForfeit) cancelForfeitRef.current?.focus();
+  }, [confirmingForfeit]);
 
   React.useEffect(() => {
     const firstButton = dialogRef.current?.querySelector<HTMLButtonElement>("button");
@@ -38,7 +47,9 @@ export function SessionRecoveryModal({
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Tab") return;
 
-    const buttons = Array.from(dialogRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+    const buttons = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []
+    );
     if (buttons.length === 0) return;
 
     const first = buttons[0];
@@ -92,14 +103,35 @@ export function SessionRecoveryModal({
           </div>
         </dl>
 
+        {confirmingForfeit && !expired ? (
+          <p role="alert" className="mt-5 text-sm font-medium text-red-500">
+            Forfeiting ends this session for good. Your score of {session.totalScore} will be lost
+            and cannot be recovered.
+          </p>
+        ) : null}
+
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           {expired ? (
             <Button type="button" onClick={onStartNew}>
               Start New
             </Button>
+          ) : confirmingForfeit ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                ref={cancelForfeitRef}
+                onClick={() => setConfirmingForfeit(false)}
+              >
+                Keep playing
+              </Button>
+              <Button type="button" onClick={onForfeit}>
+                Yes, forfeit
+              </Button>
+            </>
           ) : (
             <>
-              <Button type="button" variant="outline" onClick={onForfeit}>
+              <Button type="button" variant="outline" onClick={() => setConfirmingForfeit(true)}>
                 Forfeit
               </Button>
               <Button type="button" onClick={onResume}>
