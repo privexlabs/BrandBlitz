@@ -9,6 +9,7 @@ import {
   updateUserProfile,
   getUserPublicProfileByUsername,
   searchUsersByUsername,
+  markOnboardingCompleted,
 } from "../db/queries/users";
 import { getReferralStats, ensureUserReferralCode } from "../services/referrals";
 import { stroopsToUsdc } from "../lib/usdc";
@@ -59,11 +60,22 @@ router.get("/me", authenticate, async (req, res) => {
     last_play_day: user.last_play_day,
     streak_repairs_this_month: user.streak_repairs_this_month,
     streak_repair_available: user.streak_repair_available,
+    onboarding_completed: user.onboarding_completed,
     created_at: user.created_at,
     updated_at: user.updated_at,
   };
 
   res.json({ user: safeUser });
+});
+
+/**
+ * POST /users/me/onboarding/complete
+ * Marks the first-run challenge tutorial as completed/dismissed for this
+ * user (issue #1040). Idempotent — safe to call on every dismissal path.
+ */
+router.post("/me/onboarding/complete", authenticate, async (req, res) => {
+  const completed = await markOnboardingCompleted(req.user!.sub);
+  res.json({ success: true, onboardingCompleted: completed });
 });
 
 router.get("/me/streak", authenticate, async (req, res) => {
@@ -146,7 +158,7 @@ router.get("/search", authenticate, async (req, res) => {
       username: u.username,
       avatar_url: u.avatar_url,
       total_earnings: u.total_earned_usdc,
-    })),
+    }))
   );
 });
 
@@ -479,10 +491,7 @@ router.patch("/me/profile", authenticate, async (req, res) => {
   }
 
   // Trigger Next.js cache revalidation so profile pages reflect the new data
-  const revalidatePaths = [
-    `/profile/${oldUsername}`,
-    `/profile/${newUsername}`,
-  ];
+  const revalidatePaths = [`/profile/${oldUsername}`, `/profile/${newUsername}`];
 
   try {
     await fetch(`${config.WEB_URL}/api/revalidate`, {
@@ -506,12 +515,7 @@ router.patch("/me/profile", authenticate, async (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
   if (token) {
-    await redis.set(
-      tokenRevocationKey(token),
-      "1",
-      "EX",
-      tokenTtlSeconds(req.user!)
-    );
+    await redis.set(tokenRevocationKey(token), "1", "EX", tokenTtlSeconds(req.user!));
   }
 
   const updatedUser = await findUserById(req.user!.sub);
@@ -621,10 +625,9 @@ router.patch("/me/notifications/:id/read", authenticate, async (req, res) => {
  * Marks all unread notifications as read.
  */
 router.patch("/me/notifications/read-all", authenticate, async (req, res) => {
-  await query(
-    `UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL`,
-    [req.user!.sub]
-  );
+  await query(`UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL`, [
+    req.user!.sub,
+  ]);
 
   res.json({ success: true });
 });
@@ -687,7 +690,6 @@ router.get("/me/badges", authenticate, async (req, res) => {
  * Cursor-based pagination with default limit 25, max 100.
  */
 router.get("/me/earnings", authenticate, requireActiveUser, async (req, res) => {
-
   const parsed = z
     .object({
       status: z.enum(["pending", "settled", "failed", "all"]).default("all"),
@@ -779,14 +781,15 @@ router.get("/me/earnings", authenticate, requireActiveUser, async (req, res) => 
     pending_usdc: "0",
   };
 
-  const nextCursor = hasMore && payouts.length > 0
-    ? Buffer.from(
-        JSON.stringify({
-          created_at: payouts[payouts.length - 1]!.created_at,
-          id: payouts[payouts.length - 1]!.payout_id,
-        })
-      ).toString("base64url")
-    : null;
+  const nextCursor =
+    hasMore && payouts.length > 0
+      ? Buffer.from(
+          JSON.stringify({
+            created_at: payouts[payouts.length - 1]!.created_at,
+            id: payouts[payouts.length - 1]!.payout_id,
+          })
+        ).toString("base64url")
+      : null;
 
   res.json({
     items: payouts.map((p) => ({

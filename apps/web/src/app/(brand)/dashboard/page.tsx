@@ -13,6 +13,8 @@ import { formatUsdc } from "@/lib/format";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/lib/toast";
+import { BenchmarkPanel } from "./benchmark-panel";
+import { EscrowPanel } from "./escrow-panel";
 
 interface ChallengeStats {
   total_sessions: number;
@@ -550,6 +552,16 @@ export default function DashboardPage() {
                   </div>
                 </CardContent>
               )}
+
+              <EscrowPanel
+                brandId={brand.id}
+                challenges={brand.challenges ?? []}
+                apiToken={apiToken}
+              />
+
+              <CardContent>
+                <BenchmarkPanel brandId={brand.id} apiToken={apiToken} />
+              </CardContent>
             </Card>
           ))}
         </div>

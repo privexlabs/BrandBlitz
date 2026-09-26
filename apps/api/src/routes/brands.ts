@@ -15,7 +15,7 @@ import {
   getBrandChallengeStats,
   getBrandsByOwner,
 } from "../db/queries/brands";
-import { getBrandAnalytics } from "../db/queries/analytics";
+import { getBrandAnalytics, getBrandBenchmark, BUCKET_LABELS } from "../db/queries/analytics";
 import {
   createChallenge,
   insertChallengeQuestions,
@@ -417,6 +417,36 @@ router.get("/:id/analytics", authenticate, async (req, res) => {
     getBrandAnalytics(brand.id, from, to)
   );
   res.json({ analytics });
+});
+
+/**
+ * GET /brands/:id/benchmark
+ * Anonymized benchmark comparison: the brand's completion rate and
+ * cost-per-session next to platform-wide medians for its size bucket.
+ *
+ * Only aggregate medians are returned — individual competitor brand data is
+ * never exposed. Brands with fewer than BENCHMARK_MIN_CHALLENGES challenges
+ * are excluded from the platform medians (statistical noise guard) and get
+ * `platform.sampleSize === 0` until they qualify.
+ */
+router.get("/:id/benchmark", authenticate, async (req, res) => {
+  const brand = await getBrandById(req.params.id);
+  if (!brand) throw createError("Brand not found", 404);
+  if (brand.owner_user_id !== req.user!.sub) throw createError("Forbidden", 403);
+
+  const benchmark = await withCoalescing(`brand_benchmark:${brand.id}`, 900, () =>
+    getBrandBenchmark(brand.id)
+  );
+
+  res.json({
+    benchmark: {
+      ...benchmark,
+      platform: {
+        ...benchmark.platform,
+        bucketLabel: BUCKET_LABELS[benchmark.platform.sizeBucket],
+      },
+    },
+  });
 });
 
 /**

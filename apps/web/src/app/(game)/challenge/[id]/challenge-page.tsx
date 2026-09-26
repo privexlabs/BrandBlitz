@@ -19,18 +19,34 @@ import {
 import { scoresForResume, shouldShowRecoveryModal } from "@/components/game/session-recovery";
 import { BrandKitPreview } from "@/components/brand/brand-kit-preview";
 import { ReportModal } from "@/components/game/report-modal";
+import { FirstRunTutorial } from "@/components/game/first-run-tutorial";
 
-const WarmupPhase = dynamic(() => import("@/components/game/warmup-phase").then((m) => m.WarmupPhase), {
-  loading: () => <div className="min-h-screen flex items-center justify-center">Loading warmup...</div>,
-});
+const WarmupPhase = dynamic(
+  () => import("@/components/game/warmup-phase").then((m) => m.WarmupPhase),
+  {
+    loading: () => (
+      <div className="flex min-h-screen items-center justify-center">Loading warmup...</div>
+    ),
+  }
+);
 
-const ChallengeRound = dynamic(() => import("@/components/game/challenge-round").then((m) => m.ChallengeRound), {
-  loading: () => <div className="min-h-screen flex items-center justify-center">Loading round...</div>,
-});
+const ChallengeRound = dynamic(
+  () => import("@/components/game/challenge-round").then((m) => m.ChallengeRound),
+  {
+    loading: () => (
+      <div className="flex min-h-screen items-center justify-center">Loading round...</div>
+    ),
+  }
+);
 
-const ResultScreen = dynamic(() => import("@/components/game/result-screen").then((m) => m.ResultScreen), {
-  loading: () => <div className="min-h-screen flex items-center justify-center">Preparing results...</div>,
-});
+const ResultScreen = dynamic(
+  () => import("@/components/game/result-screen").then((m) => m.ResultScreen),
+  {
+    loading: () => (
+      <div className="flex min-h-screen items-center justify-center">Preparing results...</div>
+    ),
+  }
+);
 
 type GamePhase = "loading" | "preview" | "warmup" | "challenge" | "result";
 
@@ -47,7 +63,7 @@ function challengeDetailStorageKey(challengeId: string): string {
 function getCachedChallengeDetail(challengeId: string): CachedChallengeDetail | null {
   try {
     const stored = window.sessionStorage.getItem(challengeDetailStorageKey(challengeId));
-    return stored ? JSON.parse(stored) as CachedChallengeDetail : null;
+    return stored ? (JSON.parse(stored) as CachedChallengeDetail) : null;
   } catch {
     return null;
   }
@@ -115,15 +131,21 @@ export function ChallengePage({ params }: Props) {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [answerError, setAnswerError] = React.useState<string | null>(null);
   const [answerState, setAnswerState] = React.useState<ChallengeAnswerState | null>(null);
-  const [recoverySession, setRecoverySession] = React.useState<RecoverySessionResponse | null>(null);
+  const [recoverySession, setRecoverySession] = React.useState<RecoverySessionResponse | null>(
+    null
+  );
   const [showTooltip, setShowTooltip] = React.useState(false);
   const [showReportModal, setShowReportModal] = React.useState(false);
+  const [showTutorial, setShowTutorial] = React.useState(false);
 
   const mountedRef = React.useRef(true);
   const currentRoundRef = React.useRef(currentRound);
   const answerStateRef = React.useRef(answerState);
   const abortControllerRef = React.useRef<AbortController | null>(null);
-  const lastAnswerRef = React.useRef<{ option: AnswerOptionKey | null; reactionTimeMs: number } | null>(null);
+  const lastAnswerRef = React.useRef<{
+    option: AnswerOptionKey | null;
+    reactionTimeMs: number;
+  } | null>(null);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -142,6 +164,37 @@ export function ChallengePage({ params }: Props) {
   }, [answerState]);
 
   const apiToken = (session as any)?.apiToken as string | undefined;
+
+  // Issue #1040 — show the first-run tutorial once per account until the
+  // player completes (or skips) it. Flag lives server-side on the user row.
+  React.useEffect(() => {
+    if (status !== "authenticated" || !apiToken) return;
+    const api = createApiClient(apiToken);
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const res = await api.get("/users/me", { skipErrorToast: true });
+        if (!cancelled && !res.data.user?.onboarding_completed) {
+          setShowTutorial(true);
+        }
+      } catch {
+        // Never block gameplay on a tutorial flag fetch failure.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [status, apiToken]);
+
+  const handleTutorialDismiss = React.useCallback(() => {
+    setShowTutorial(false);
+    if (!apiToken) return;
+    const api = createApiClient(apiToken);
+    // Fire-and-forget: dismissal is optimistic, the flag syncs in background.
+    void api.post("/users/me/onboarding/complete", {}, { skipErrorToast: true }).catch(() => {});
+  }, [apiToken]);
 
   const clearOpenSession = React.useCallback(async () => {
     if (!apiToken) return;
@@ -205,36 +258,36 @@ export function ChallengePage({ params }: Props) {
       }
     })();
 
-  // #557 — Preload first round images during preview/warmup
-  React.useEffect(() => {
-    if (phase !== "preview" || !challenge || questions.length === 0) return;
+    // #557 — Preload first round images during preview/warmup
+    React.useEffect(() => {
+      if (phase !== "preview" || !challenge || questions.length === 0) return;
 
-    const links: HTMLLinkElement[] = [];
-    const imageUrls: string[] = [];
+      const links: HTMLLinkElement[] = [];
+      const imageUrls: string[] = [];
 
-    const firstQuestion = questions[0];
-    if (firstQuestion) {
-      if (firstQuestion.prompt_type === "logo" && challenge.logo_url) {
-        imageUrls.push(challenge.logo_url);
+      const firstQuestion = questions[0];
+      if (firstQuestion) {
+        if (firstQuestion.prompt_type === "logo" && challenge.logo_url) {
+          imageUrls.push(challenge.logo_url);
+        }
       }
-    }
 
-    for (const url of imageUrls) {
-      const link = document.createElement("link");
-      link.rel = "preload";
-      link.as = "image";
-      link.href = url;
-      link.fetchPriority = "high";
-      document.head.appendChild(link);
-      links.push(link);
-    }
-
-    return () => {
-      for (const link of links) {
-        document.head.removeChild(link);
+      for (const url of imageUrls) {
+        const link = document.createElement("link");
+        link.rel = "preload";
+        link.as = "image";
+        link.href = url;
+        link.fetchPriority = "high";
+        document.head.appendChild(link);
+        links.push(link);
       }
-    };
-  }, [phase, challenge, questions]);
+
+      return () => {
+        for (const link of links) {
+          document.head.removeChild(link);
+        }
+      };
+    }, [phase, challenge, questions]);
 
     return () => {
       cancelled = true;
@@ -264,7 +317,9 @@ export function ChallengePage({ params }: Props) {
       if (e.key === "Escape") {
         e.preventDefault();
         setShowTooltip(false);
-        try { window.localStorage.setItem("brandblitz:keyboard-tooltip-dismissed", "1"); } catch {}
+        try {
+          window.localStorage.setItem("brandblitz:keyboard-tooltip-dismissed", "1");
+        } catch {}
       }
     };
     window.addEventListener("keydown", handler);
@@ -273,7 +328,9 @@ export function ChallengePage({ params }: Props) {
 
   const dismissTooltip = React.useCallback(() => {
     setShowTooltip(false);
-    try { window.localStorage.setItem("brandblitz:keyboard-tooltip-dismissed", "1"); } catch {}
+    try {
+      window.localStorage.setItem("brandblitz:keyboard-tooltip-dismissed", "1");
+    } catch {}
   }, []);
 
   const handleWarmupComplete = async (challengeToken: string) => {
@@ -295,7 +352,7 @@ export function ChallengePage({ params }: Props) {
   const submitAnswer = async (
     option: AnswerOptionKey | null,
     reactionTimeMs: number,
-    signal: AbortSignal,
+    signal: AbortSignal
   ): Promise<{ score: number; correct: boolean }> => {
     if (!apiToken) throw new Error("Missing API token");
     const api = createApiClient(apiToken);
@@ -307,7 +364,7 @@ export function ChallengePage({ params }: Props) {
         const res = await api.post(
           `/sessions/${challengeId}/answer/${currentRoundRef.current}`,
           { selectedOption: option, reactionTimeMs },
-          { signal, skipErrorToast: true },
+          { signal, skipErrorToast: true }
         );
         return { score: res.data.score as number, correct: Boolean(res.data.correct) };
       } catch (err: any) {
@@ -411,7 +468,7 @@ export function ChallengePage({ params }: Props) {
 
   if (loadError) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-8 text-center">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center">
         <p className="text-lg font-medium text-[var(--foreground)]">{loadError}</p>
         <button
           className="rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-medium text-[var(--primary-foreground)] hover:opacity-90"
@@ -426,7 +483,10 @@ export function ChallengePage({ params }: Props) {
     );
   }
 
-  if (recoverySession && (recoverySession.status === "expired" || recoverySession.last_answered_round > 0)) {
+  if (
+    recoverySession &&
+    (recoverySession.status === "expired" || recoverySession.last_answered_round > 0)
+  ) {
     return (
       <>
         <div className="min-h-screen bg-[var(--background)]" />
@@ -442,7 +502,7 @@ export function ChallengePage({ params }: Props) {
 
   if (phase === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center">
         <div className="animate-pulse text-[var(--muted-foreground)]">Loading challenge...</div>
       </div>
     );
@@ -450,26 +510,32 @@ export function ChallengePage({ params }: Props) {
 
   if (phase === "preview" && challenge) {
     return (
-      <BrandKitPreview
-        logoUrl={challenge.logo_url ?? null}
-        primaryColor={challenge.primary_color ?? null}
-        secondaryColor={challenge.secondary_color ?? null}
-        tagline={challenge.tagline ?? null}
-        brandName={challenge.brand_name ?? "Brand"}
-        onStart={handlePreviewStart}
-        onSkip={handlePreviewSkip}
-      />
+      <>
+        <BrandKitPreview
+          logoUrl={challenge.logo_url ?? null}
+          primaryColor={challenge.primary_color ?? null}
+          secondaryColor={challenge.secondary_color ?? null}
+          tagline={challenge.tagline ?? null}
+          brandName={challenge.brand_name ?? "Brand"}
+          onStart={handlePreviewStart}
+          onSkip={handlePreviewSkip}
+        />
+        <FirstRunTutorial open={showTutorial} onDismiss={handleTutorialDismiss} />
+      </>
     );
   }
 
   if (phase === "warmup" && challenge && apiToken) {
     return (
-      <WarmupPhase
-        challenge={challenge}
-        apiToken={apiToken}
-        deviceId={visitorId ?? "unknown-device"}
-        onComplete={handleWarmupComplete}
-      />
+      <>
+        <WarmupPhase
+          challenge={challenge}
+          apiToken={apiToken}
+          deviceId={visitorId ?? "unknown-device"}
+          onComplete={handleWarmupComplete}
+        />
+        <FirstRunTutorial open={showTutorial} onDismiss={handleTutorialDismiss} />
+      </>
     );
   }
 
@@ -486,6 +552,7 @@ export function ChallengePage({ params }: Props) {
             rel="noopener noreferrer"
             className="rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)] shadow-sm transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
             aria-label="Learn about fair play and payouts"
+            data-tutorial="payouts"
           >
             Fair Play
           </a>
@@ -499,18 +566,62 @@ export function ChallengePage({ params }: Props) {
         </div>
         {showTooltip && (
           <div
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--background)] px-5 py-3 shadow-lg text-sm"
+            className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--background)] px-5 py-3 text-sm shadow-lg"
             role="tooltip"
             aria-label="Keyboard shortcut hint"
           >
-            <kbd className="hidden md:inline-flex h-5 w-5 items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] text-xs font-bold text-[var(--muted-foreground)]" aria-hidden="true">⌨</kbd>
-            <span>Use <kbd className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] px-1 text-xs font-bold" aria-hidden="true">A</kbd>/<kbd className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] px-1 text-xs font-bold" aria-hidden="true">B</kbd>/<kbd className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] px-1 text-xs font-bold" aria-hidden="true">C</kbd>/<kbd className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] px-1 text-xs font-bold" aria-hidden="true">D</kbd> keys to answer faster</span>
+            <kbd
+              className="hidden h-5 w-5 items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] text-xs font-bold text-[var(--muted-foreground)] md:inline-flex"
+              aria-hidden="true"
+            >
+              ⌨
+            </kbd>
+            <span>
+              Use{" "}
+              <kbd
+                className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] px-1 text-xs font-bold"
+                aria-hidden="true"
+              >
+                A
+              </kbd>
+              /
+              <kbd
+                className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] px-1 text-xs font-bold"
+                aria-hidden="true"
+              >
+                B
+              </kbd>
+              /
+              <kbd
+                className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] px-1 text-xs font-bold"
+                aria-hidden="true"
+              >
+                C
+              </kbd>
+              /
+              <kbd
+                className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] px-1 text-xs font-bold"
+                aria-hidden="true"
+              >
+                D
+              </kbd>{" "}
+              keys to answer faster
+            </span>
             <button
               onClick={dismissTooltip}
-              className="ml-2 rounded-md p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)] transition-colors"
+              className="ml-2 rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
               aria-label="Dismiss"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
             </button>
           </div>
         )}
@@ -531,19 +642,23 @@ export function ChallengePage({ params }: Props) {
           disabled={!isOnline}
           pauseTimer={!isOnline}
         />
+        <FirstRunTutorial open={showTutorial} onDismiss={handleTutorialDismiss} />
       </div>
     );
   }
 
   if (phase === "result") {
     return (
-      <ResultScreen
-        totalScore={scores.reduce((a, b) => a + b, 0)}
-        challengeId={challengeId}
-        rank={finalRank ?? undefined}
-        primaryColor={challenge?.primary_color ?? undefined}
-        secondaryColor={challenge?.secondary_color ?? undefined}
-      />
+      <>
+        <ResultScreen
+          totalScore={scores.reduce((a, b) => a + b, 0)}
+          challengeId={challengeId}
+          rank={finalRank ?? undefined}
+          primaryColor={challenge?.primary_color ?? undefined}
+          secondaryColor={challenge?.secondary_color ?? undefined}
+        />
+        <FirstRunTutorial open={showTutorial} onDismiss={handleTutorialDismiss} />
+      </>
     );
   }
 
