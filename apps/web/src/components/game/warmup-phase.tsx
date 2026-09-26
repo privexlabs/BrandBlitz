@@ -134,7 +134,7 @@ export function WarmupPhase({ challenge, apiToken, onComplete, deviceId }: Warmu
           onClick={handleStartChallenge}
           disabled={!unlocked || submitting || isPaused}
           size="lg"
-          className="w-full text-lg"
+          className="w-full text-lg transition-all duration-500"
           style={{ backgroundColor: challenge.primary_color ?? undefined }}
         >
           {submitting ? "Starting..." : isPaused ? "Paused — Wait to resume" : unlocked ? "Start Challenge →" : "Preparing..."}
