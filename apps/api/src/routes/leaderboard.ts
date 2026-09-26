@@ -137,6 +137,8 @@ router.get("/global", async (req, res) => {
   const sortBy = parseLeaderboardSort(req.query);
   const { limit } = CursorQuerySchema.parse(req.query);
 
+  res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=60");
+
   const response = await withCoalescing(`leaderboard:global:${sortBy}:${limit}`, 300, async () => {
     const { challenges } = await getActiveChallenges(10);
     const challengeIds = challenges.map((c) => c.id);
