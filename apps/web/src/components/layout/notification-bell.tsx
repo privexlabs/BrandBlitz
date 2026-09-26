@@ -63,6 +63,8 @@ export function NotificationBell({ apiToken }: NotificationBellProps) {
   const seenIds = useRef<Set<string>>(new Set());
   const drawerRef = useRef<HTMLDivElement>(null);
 
+  const [statusFeedback, setStatusFeedback] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
   const fetchNotifications = useCallback(async () => {
     try {
       const api = createApiClient(apiToken);
@@ -132,8 +134,11 @@ export function NotificationBell({ apiToken }: NotificationBellProps) {
       await api.patch("/users/me/notifications/read-all", {}, { skipErrorToast: true });
       const now = new Date().toISOString();
       setNotifications((prev) => prev.map((n) => ({ ...n, read_at: n.read_at ?? now })));
+      setStatusFeedback({ message: "All notifications marked as read", type: "success" });
     } catch {
-      // best-effort
+      setStatusFeedback({ message: "Failed to mark notifications as read", type: "error" });
+    } finally {
+      setTimeout(() => setStatusFeedback(null), 3000);
     }
   }, [apiToken]);
 
@@ -198,6 +203,19 @@ export function NotificationBell({ apiToken }: NotificationBellProps) {
                 </button>
               )}
             </div>
+
+            {statusFeedback && (
+              <div
+                role="status"
+                className={`px-4 py-1.5 text-xs font-medium text-center border-b ${
+                  statusFeedback.type === "success"
+                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                    : "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
+                }`}
+              >
+                {statusFeedback.message}
+              </div>
+            )}
 
             <div className="max-h-96 overflow-y-auto">
               {notifications.length === 0 ? (
