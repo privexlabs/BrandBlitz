@@ -304,6 +304,15 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
               {fieldError("secondaryColor")}
             </div>
           </div>
+          <div className="space-y-2 mt-6">
+            <Label>Gradient Preview</Label>
+            <div
+              className="h-16 w-full rounded-md border border-[var(--border)] shadow-sm"
+              style={{
+                background: `linear-gradient(135deg, ${HEX_COLOR_PATTERN.test(fields.primaryColor) ? fields.primaryColor : "#6366f1"} 0%, ${HEX_COLOR_PATTERN.test(fields.secondaryColor) ? fields.secondaryColor : "#a5b4fc"} 100%)`,
+              }}
+            />
+          </div>
         </CardContent>
       </Card>
 
