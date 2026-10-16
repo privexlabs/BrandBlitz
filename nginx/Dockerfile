@@ -1,4 +1,4 @@
-FROM nginx:1.25-alpine AS builder
+FROM nginx:1.29-alpine AS builder
 
 RUN apk add --no-cache --virtual .build-deps \
     git \
@@ -31,6 +31,6 @@ RUN NGINX_VERSION=$(nginx -v 2>&1 | grep -oP '\d+\.\d+\.\d+') && \
     cp objs/ngx_http_brotli_filter_module.so /tmp/modules/ && \
     cp objs/ngx_http_brotli_static_module.so /tmp/modules/
 
-FROM nginx:1.25-alpine AS runner
+FROM nginx:1.29-alpine AS runner
 
 COPY --from=builder /tmp/modules/ /usr/lib/nginx/modules/
