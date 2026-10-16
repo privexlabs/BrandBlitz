@@ -259,11 +259,14 @@ export interface StreakState {
   last_play_day: string | null;
   streak_repairs_this_month: number;
   streak_repair_available: boolean;
+  streak_freeze_tokens?: number;
+  streak_frozen?: boolean;
 }
 
 export async function getUserStreak(userId: string): Promise<StreakState | null> {
   const result = await query<StreakState>(
-    `SELECT id, streak, last_play_day, streak_repairs_this_month, streak_repair_available
+    `SELECT id, streak, last_play_day, streak_repairs_this_month, streak_repair_available,
+            streak_freeze_tokens, FALSE AS streak_frozen
      FROM users
      WHERE id = $1 AND deleted_at IS NULL
      LIMIT 1`,
@@ -285,10 +288,31 @@ export async function setUserStreak(data: {
          streak_repair_available = $4,
          updated_at = NOW()
      WHERE id = $1
-     RETURNING id, streak, last_play_day, streak_repairs_this_month, streak_repair_available`,
+     RETURNING id, streak, last_play_day, streak_repairs_this_month, streak_repair_available,
+               streak_freeze_tokens, FALSE AS streak_frozen`,
     [data.userId, data.streak, data.lastPlayDay, data.repairAvailable]
   );
   return result.rows[0];
+}
+
+export async function consumeStreakFreeze(userId: string, activityDay: string): Promise<StreakState | null> {
+  const result = await query<StreakState>(
+    `WITH consumed AS (
+       UPDATE users
+       SET streak_freeze_tokens = streak_freeze_tokens - 1, updated_at = NOW()
+       WHERE id = $1 AND streak_freeze_tokens > 0
+       RETURNING *
+     ), logged AS (
+       INSERT INTO streak_freeze_log (user_id, activity_day)
+       SELECT id, $2::date FROM consumed
+       RETURNING user_id
+     )
+     SELECT id, streak, last_play_day, streak_repairs_this_month,
+            streak_repair_available, streak_freeze_tokens, TRUE AS streak_frozen
+     FROM consumed`,
+    [userId, activityDay]
+  );
+  return result.rows[0] ?? null;
 }
 
 export async function repairUserStreak(
@@ -304,7 +328,8 @@ export async function repairUserStreak(
          updated_at = NOW()
      WHERE id = $1
        AND streak_repairs_this_month < 1
-     RETURNING id, streak, last_play_day, streak_repairs_this_month, streak_repair_available`,
+     RETURNING id, streak, last_play_day, streak_repairs_this_month, streak_repair_available,
+               streak_freeze_tokens, FALSE AS streak_frozen`,
     [userId, playDay]
   );
   return result.rows[0] ?? null;

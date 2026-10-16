@@ -5,6 +5,7 @@ import {
   getUserStreak,
   repairUserStreak,
   setUserStreak,
+  consumeStreakFreeze,
   type StreakState,
 } from "../db/queries/users";
 
@@ -19,6 +20,8 @@ export interface StreakResponse {
   nextMilestone: number;
   progress: number;
   milestoneJustHit: boolean;
+  freezeTokens?: number;
+  frozenToday?: boolean;
 }
 
 export interface StreakDetailResponse {
@@ -32,6 +35,7 @@ export interface StreakDetailResponse {
     reward_badge_id: string;
   };
   streak_frozen: boolean;
+  freeze_tokens?: number;
 }
 
 export async function updateStreak(userId: string, now = new Date()): Promise<StreakState> {
@@ -45,7 +49,17 @@ export async function updateStreak(userId: string, now = new Date()): Promise<St
     return current;
   }
 
-  const newStreak = lastPlayDay && dayDiff(lastPlayDay, today) === 1 ? current.streak + 1 : 1;
+  let newStreak = 1;
+  let frozenToday = false;
+  if (lastPlayDay && dayDiff(lastPlayDay, today) === 1) {
+    newStreak = current.streak + 1;
+  } else if (lastPlayDay && dayDiff(lastPlayDay, today) > 1 && (current.streak_freeze_tokens ?? 0) > 0) {
+    const consumed = await consumeStreakFreeze(userId, today);
+    if (consumed) {
+      newStreak = current.streak + 1;
+      frozenToday = true;
+    }
+  }
 
   const updated = await setUserStreak({
     userId,
@@ -62,7 +76,7 @@ export async function updateStreak(userId: string, now = new Date()): Promise<St
     await insertStreakMilestoneNotification(userId, newStreak);
   }
 
-  return updated;
+  return { ...updated, streak_frozen: frozenToday };
 }
 
 export async function getStreak(userId: string, now = new Date()): Promise<StreakResponse> {
@@ -109,7 +123,8 @@ export async function getStreakDetail(userId: string, now = new Date()): Promise
       days_required: nextMilestoneValue,
       reward_badge_id: badgeMap[nextMilestoneValue] || "streak_badge",
     },
-    streak_frozen: false,
+    streak_frozen: current.streak_frozen ?? false,
+    freeze_tokens: current.streak_freeze_tokens ?? 0,
   };
 }
 
@@ -135,6 +150,8 @@ function formatStreak(streak: StreakState, now: Date): StreakResponse {
     progress: Math.min(1, normalizedStreak / Math.max(1, nextMilestone)),
     milestoneJustHit:
       STREAK_MILESTONES.includes(normalizedStreak as any) && lastPlayDay === toUtcDay(now),
+    freezeTokens: streak.streak_freeze_tokens ?? 0,
+    frozenToday: streak.streak_frozen ?? false,
   };
 }
 

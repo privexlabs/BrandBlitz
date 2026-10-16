@@ -105,6 +105,28 @@ export function NotificationBell({ apiToken }: NotificationBellProps) {
   }, [fetchNotifications]);
 
   useEffect(() => {
+    const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!vapidKey || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const registration = await navigator.serviceWorker.register("/sw.js");
+        const permission = await Notification.requestPermission();
+        if (cancelled || permission !== "granted") return;
+        const existing = await registration.pushManager.getSubscription();
+        const subscription = existing ?? await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: vapidKey,
+        });
+        await createApiClient(apiToken).post("/push/subscriptions", subscription.toJSON());
+      } catch {
+        // Push is optional; in-app notifications remain available.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [apiToken]);
+
+  useEffect(() => {
     if (!drawerOpen) return;
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") setDrawerOpen(false);

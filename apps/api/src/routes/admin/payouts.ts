@@ -4,7 +4,7 @@ import { authenticate } from "../../middleware/authenticate";
 import { requireAdmin } from "../../middleware/require-admin";
 import { createError } from "../../middleware/error";
 import { query, pool } from "../../db/index";
-import { getPayouts } from "../../db/queries/payouts";
+import { getPayouts, getPayoutsByIds } from "../../db/queries/payouts";
 import { enqueuePayoutJob } from "../../queues/payout.queue";
 import { logger } from "../../lib/logger";
 import { CursorQuerySchema } from "../../db/pagination";
@@ -99,6 +99,41 @@ router.post("/:id/retry", async (req, res) => {
   });
 
   res.json({ success: true });
+});
+
+// Approve/requeue selected pending payouts independently so one bad record does
+// not prevent the rest of the batch from entering the existing payout worker.
+router.post("/batch-approve", async (req, res) => {
+  const { payoutIds } = z.object({
+    payoutIds: z.array(z.string().uuid()).min(1).max(100),
+  }).parse(req.body);
+  const payouts = await getPayoutsByIds(payoutIds);
+  const byId = new Map(payouts.map((p) => [p.id, p]));
+  const results: Array<{ payoutId: string; approved: boolean; error?: string }> = [];
+  for (const payoutId of payoutIds) {
+    const payout = byId.get(payoutId);
+    if (!payout) {
+      results.push({ payoutId, approved: false, error: "Payout not found" });
+      continue;
+    }
+    if (payout.status !== "pending") {
+      results.push({ payoutId, approved: false, error: `Payout is ${payout.status}` });
+      continue;
+    }
+    try {
+      await query(
+        `INSERT INTO audit_log (actor_id, action, entity, entity_key, after)
+         VALUES ($1, 'payout_batch_approved', 'payout', $2, $3::jsonb)`,
+        [req.user!.sub, payout.id, JSON.stringify({ payoutId: payout.id, challengeId: payout.challenge_id })]
+      );
+      await enqueuePayoutJob(payout.challenge_id);
+      results.push({ payoutId, approved: true });
+    } catch (error) {
+      logger.error("Batch payout approval failed", { payoutId, error });
+      results.push({ payoutId, approved: false, error: "Approval failed" });
+    }
+  }
+  res.json({ results, approved: results.filter((r) => r.approved).length });
 });
 
 export default router;

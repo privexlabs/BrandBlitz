@@ -237,6 +237,51 @@ async function assertBrandRole(
   return { brand, role };
 }
 
+const QuestionBankSchema = z.object({
+  question_text: z.string().trim().min(1).max(500),
+  question_type: z.string().trim().min(1).max(64).default("which_brand"),
+  prompt_type: z.string().trim().min(1).max(64).default("logo"),
+  correct_answer: z.string().trim().min(1).max(500),
+  option_a: z.string().trim().min(1).max(500),
+  option_b: z.string().trim().min(1).max(500),
+  option_c: z.string().trim().min(1).max(500),
+  option_d: z.string().trim().min(1).max(500),
+  tags: z.array(z.string().trim().min(1).max(40)).max(20).default([]),
+});
+
+router.get("/:id/question-bank", authenticate, async (req, res) => {
+  await assertBrandRole(req.params.id, req.user!.sub, req.user?.email, "viewer");
+  const result = await query(
+    `SELECT id, question_text, question_type, prompt_type, correct_answer,
+            option_a, option_b, option_c, option_d, tags, created_at
+     FROM brand_question_bank WHERE brand_id = $1 ORDER BY created_at DESC`,
+    [req.params.id]
+  );
+  res.json({ questions: result.rows });
+});
+
+router.post("/:id/question-bank", authenticate, async (req, res) => {
+  await assertBrandRole(req.params.id, req.user!.sub, req.user?.email, "editor");
+  const body = QuestionBankSchema.parse(req.body);
+  const result = await query(
+    `INSERT INTO brand_question_bank
+       (brand_id, question_text, question_type, prompt_type, correct_answer,
+        option_a, option_b, option_c, option_d, tags, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     RETURNING *`,
+    [req.params.id, body.question_text, body.question_type, body.prompt_type,
+      body.correct_answer, body.option_a, body.option_b, body.option_c,
+      body.option_d, body.tags, req.user!.sub]
+  );
+  res.status(201).json({ question: result.rows[0] });
+});
+
+router.delete("/:id/question-bank/:questionId", authenticate, async (req, res) => {
+  await assertBrandRole(req.params.id, req.user!.sub, req.user?.email, "editor");
+  await query("DELETE FROM brand_question_bank WHERE id = $1 AND brand_id = $2", [req.params.questionId, req.params.id]);
+  res.status(204).end();
+});
+
 function validateChallengeEndsAt(endsAt: string): void {
   const endsAtMs = new Date(endsAt).getTime();
   const nowMs = Date.now();
