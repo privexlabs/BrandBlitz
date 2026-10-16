@@ -62,6 +62,7 @@ export default function AdminPayoutsPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -115,6 +116,21 @@ export default function AdminPayoutsPage() {
         next.delete(payoutId);
         return next;
       });
+    }
+  };
+
+  const handleBatchApprove = async () => {
+    if (!apiToken || selectedIds.size === 0) return;
+    try {
+      const result = await createApiClient(apiToken).post("/admin/payouts/batch-approve", {
+        payoutIds: [...selectedIds],
+      });
+      const failed = result.data.results.filter((item: { approved: boolean }) => !item.approved).length;
+      setSelectedIds(new Set());
+      await loadPayouts(pagination.page);
+      toast.success(failed ? `${failed} payout(s) could not be approved.` : "Payouts approved.");
+    } catch {
+      toast.error("Batch approval failed. Please try again.");
     }
   };
 
@@ -208,7 +224,12 @@ export default function AdminPayoutsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Payouts</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Payouts</CardTitle>
+            <Button size="sm" disabled={selectedIds.size === 0} onClick={() => void handleBatchApprove()}>
+              Approve selected ({selectedIds.size})
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
@@ -220,6 +241,7 @@ export default function AdminPayoutsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-gray-50 text-left text-xs font-medium text-gray-500">
+                    <th className="px-4 py-3">Select</th>
                     <th className="px-4 py-3">User</th>
                     <th className="px-4 py-3">Amount (USDC)</th>
                     <th className="px-4 py-3">Stellar TX</th>
@@ -232,6 +254,19 @@ export default function AdminPayoutsPage() {
                 <tbody>
                   {payouts.map((payout) => (
                     <tr key={payout.id} className="border-b hover:bg-gray-50">
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select payout for ${payout.username}`}
+                          disabled={payout.status !== "pending"}
+                          checked={selectedIds.has(payout.id)}
+                          onChange={(event) => setSelectedIds((previous) => {
+                            const next = new Set(previous);
+                            if (event.target.checked) next.add(payout.id); else next.delete(payout.id);
+                            return next;
+                          })}
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <div className="font-medium">{payout.username}</div>
                         <div className="max-w-[150px] truncate font-mono text-xs text-gray-500">

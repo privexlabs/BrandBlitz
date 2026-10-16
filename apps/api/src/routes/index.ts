@@ -29,6 +29,7 @@ import adminCacheRoutes from "./admin/cache";
 import adminTestRoutes from "./admin/test";
 import metricsRoutes from "./metrics";
 import waitlistRoutes from "./waitlist";
+import pushRoutes from "./push";
 
 export function registerRoutes(app: Express): void {
   // #143 — interactive OpenAPI 3.1 docs at /docs (Scalar UI) plus
@@ -67,4 +68,5 @@ export function registerRoutes(app: Express): void {
   app.use("/admin", adminRoutes);
   app.use("/me/delete-account", deleteAccountRoutes);
   app.use("/waitlist", waitlistRoutes);
+  app.use("/push", pushRoutes);
 }
