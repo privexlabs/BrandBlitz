@@ -9,7 +9,7 @@
 # ── Stage 1: Dependencies ───────────────────────────────────────────────────
 # Pinned to Node 22.11-alpine with specific SHA256 digest
 # To update: docker pull node:22.11-alpine && docker inspect node:22.11-alpine | grep -i digest
-FROM node:22.11-alpine@sha256:acfe48528d337d95603fbeaf249da67a07c4082e22f2c6ec85cf0fdffcfd63ff AS deps
+FROM node:26.11-alpine@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS deps
 RUN corepack enable pnpm
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -19,7 +19,7 @@ COPY packages/storage/package.json ./packages/storage/
 RUN pnpm install --frozen-lockfile
 
 # ── Stage 2: Dev (tsx hot reload) ────────────────────────────────────────────
-FROM node:22.11-alpine@sha256:acfe48528d337d95603fbeaf249da67a07c4082e22f2c6ec85cf0fdffcfd63ff AS dev
+FROM node:26.11-alpine@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS dev
 RUN corepack enable pnpm
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
@@ -30,7 +30,7 @@ EXPOSE 3000
 CMD ["pnpm", "dev"]
 
 # ── Stage 3: Builder (TypeScript → JavaScript) ──────────────────────────────
-FROM node:22.11-alpine@sha256:acfe48528d337d95603fbeaf249da67a07c4082e22f2c6ec85cf0fdffcfd63ff AS builder
+FROM node:26.11-alpine@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS builder
 RUN corepack enable pnpm
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
@@ -39,7 +39,7 @@ WORKDIR /app/apps/api
 RUN pnpm build
 
 # ── Stage 4: Production dependencies (pruned) ────────────────────────────────
-FROM node:22.11-alpine@sha256:acfe48528d337d95603fbeaf249da67a07c4082e22f2c6ec85cf0fdffcfd63ff AS prod-deps
+FROM node:26.11-alpine@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS prod-deps
 RUN corepack enable pnpm
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -50,7 +50,7 @@ RUN pnpm install --frozen-lockfile --prod
 
 # ── Stage 5: Runner (Production) ─────────────────────────────────────────────
 # Issue #227: Run as non-root user for security
-FROM node:22.11-alpine@sha256:acfe48528d337d95603fbeaf249da67a07c4082e22f2c6ec85cf0fdffcfd63ff AS runner
+FROM node:26.11-alpine@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS runner
 
 # Create non-root user and group
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
