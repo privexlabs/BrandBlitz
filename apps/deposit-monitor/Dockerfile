@@ -6,7 +6,7 @@
 #   docker pull node:22.14.0-alpine && docker inspect node:22.14.0-alpine --format '{{index .RepoDigests 0}}'
 
 # ── Stage 1: Dependencies ───────────────────────────────────────────────────
-FROM node:22.14.0-alpine@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 AS deps
+FROM node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS deps
 RUN corepack enable pnpm
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -15,7 +15,7 @@ COPY packages/stellar/package.json ./packages/stellar/
 RUN pnpm install --frozen-lockfile
 
 # ── Stage 2: Builder ────────────────────────────────────────────────────────
-FROM node:22.14.0-alpine@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 AS builder
+FROM node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS builder
 RUN corepack enable pnpm
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
@@ -24,7 +24,7 @@ WORKDIR /app/apps/deposit-monitor
 RUN pnpm build
 
 # ── Stage 3: Production dependencies ────────────────────────────────────────
-FROM node:22.14.0-alpine@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 AS prod-deps
+FROM node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS prod-deps
 RUN corepack enable pnpm
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -33,7 +33,7 @@ COPY packages/stellar/package.json ./packages/stellar/
 RUN pnpm install --frozen-lockfile --prod
 
 # ── Stage 4: Runner ─────────────────────────────────────────────────────────
-FROM node:22.14.0-alpine@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 AS runner
+FROM node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS runner
 
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 WORKDIR /app
