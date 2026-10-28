@@ -51,7 +51,9 @@ async function insertPayoutNotification(
   try {
     const enabled = await isNotificationCategoryEnabled(userId, "payout");
     if (!enabled) {
-      logger.debug("Payout notification skipped - user has disabled payout notifications", { userId });
+      logger.debug("Payout notification skipped - user has disabled payout notifications", {
+        userId,
+      });
       return;
     }
 

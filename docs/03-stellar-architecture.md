@@ -61,7 +61,7 @@ Deposit monitor detects Funded event ──→ challenge status = active
 - `packages/stellar/src/escrow.ts` — `EscrowClient.deposit()` calls the Soroban contract
 - `apps/deposit-monitor/src/index.ts` — polls Soroban RPC `getEvents` for deposit detection
 - `docs/adr/002-escrow-usage.md` — decision rationale for non-custodial escrow
-- `docs/adr/003-escrow-implementation.md` — detailed implementation ADR
+- `docs/adr/011-escrow-implementation.md` — detailed implementation ADR
 
 ### 2. Challenge Ends → Payout Settlement
 
@@ -197,7 +197,7 @@ This allows:
 ## References
 
 - `docs/adr/002-escrow-usage.md` — Why non-custodial escrow (ADR)
-- `docs/adr/003-escrow-implementation.md` — Implementation details & deployment checklist
+- `docs/adr/011-escrow-implementation.md` — Implementation details & deployment checklist
 - `docs/api/webhooks.md` — Webhook contract, signature verification, and retry semantics for integrators
 - `ESCROW_IMPLEMENTATION.md` — Executive summary of escrow integration
 - `packages/stellar/src/escrow.ts` — EscrowClient wrapper

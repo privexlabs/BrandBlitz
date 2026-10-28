@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { createApiClient } from "@/lib/api";
+import { formatWait } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import type { Metadata } from "next";
 import { RedeemInvite } from "./redeem-invite";
@@ -23,11 +24,20 @@ function generateShareText(position?: number): string {
 }
 
 const JOINED_STORAGE_KEY = "brandblitz:waitlist:joined";
+const POSITION_POLL_MS = 30_000;
 
 interface JoinedWaitlist {
   email: string;
+  /** Entry id from POST /waitlist; the only way to read your own position. */
+  id: string | null;
   position: number | null;
   ref: string;
+}
+
+interface WaitlistPosition {
+  activated: boolean;
+  position: number | null;
+  estimatedWaitSeconds: number | null;
 }
 
 function readJoinedWaitlist(): JoinedWaitlist | null {
@@ -38,6 +48,7 @@ function readJoinedWaitlist(): JoinedWaitlist | null {
     if (typeof parsed.email !== "string" || parsed.email.length === 0) return null;
     return {
       email: parsed.email,
+      id: typeof parsed.id === "string" ? parsed.id : null,
       position: typeof parsed.position === "number" ? parsed.position : null,
       ref: typeof parsed.ref === "string" ? parsed.ref : "",
     };
@@ -57,13 +68,18 @@ function persistJoinedWaitlist(joined: JoinedWaitlist): void {
 
 async function fetchWaitlistPosition(
   api: ReturnType<typeof createApiClient>,
-  email: string
-): Promise<number | null> {
+  id: string
+): Promise<WaitlistPosition | null> {
   try {
-    const res = await api.get(`/waitlist/position/${encodeURIComponent(email)}`, {
+    const res = await api.get(`/waitlist/${encodeURIComponent(id)}/position`, {
       skipErrorToast: true,
     });
-    return typeof res.data.position === "number" ? res.data.position : null;
+    return {
+      activated: res.data.activated === true,
+      position: typeof res.data.position === "number" ? res.data.position : null,
+      estimatedWaitSeconds:
+        typeof res.data.estimatedWaitSeconds === "number" ? res.data.estimatedWaitSeconds : null,
+    };
   } catch {
     return null;
   }
@@ -73,6 +89,9 @@ export default function WaitlistPage() {
   const [email, setEmail] = React.useState("");
   const [status, setStatus] = React.useState<"idle" | "submitting" | "success">("idle");
   const [position, setPosition] = React.useState<number | null>(null);
+  const [entryId, setEntryId] = React.useState<string | null>(null);
+  const [estimatedWaitSeconds, setEstimatedWaitSeconds] = React.useState<number | null>(null);
+  const [activated, setActivated] = React.useState(false);
   const [ref, setRef] = React.useState<string>("");
   const [hasAccess, setHasAccess] = React.useState(false);
   const handleActivated = React.useCallback(() => setHasAccess(true), []);
@@ -81,10 +100,33 @@ export default function WaitlistPage() {
     const joined = readJoinedWaitlist();
     if (!joined) return;
     setEmail(joined.email);
+    setEntryId(joined.id);
     setPosition(joined.position);
     setRef(joined.ref);
     setStatus("success");
   }, []);
+
+  // Live position: fetch now, then every 30s while the page is open.
+  React.useEffect(() => {
+    if (!entryId) return;
+    const api = createApiClient();
+    let cancelled = false;
+
+    async function refresh(id: string) {
+      const live = await fetchWaitlistPosition(api, id);
+      if (cancelled || !live) return;
+      setActivated(live.activated);
+      setPosition(live.position);
+      setEstimatedWaitSeconds(live.estimatedWaitSeconds);
+    }
+
+    void refresh(entryId);
+    const timer = window.setInterval(() => void refresh(entryId), POSITION_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [entryId]);
 
   const shareText = generateShareText(position ?? undefined);
   const shareUrl = typeof window !== "undefined" ? window.location.origin : "";
@@ -112,15 +154,17 @@ export default function WaitlistPage() {
     try {
       const api = createApiClient();
       const res = await api.post("/waitlist", { email });
-      const joinedPosition =
-        typeof res.data.position === "number"
-          ? res.data.position
-          : await fetchWaitlistPosition(api, normalizedEmail);
+      const joinedId = typeof res.data.id === "string" ? res.data.id : null;
       const joinedRef = typeof res.data.ref === "string" ? res.data.ref : "";
-      setPosition(joinedPosition);
+      setEntryId(joinedId);
       setRef(joinedRef);
       setStatus("success");
-      persistJoinedWaitlist({ email: normalizedEmail, position: joinedPosition, ref: joinedRef });
+      persistJoinedWaitlist({
+        email: normalizedEmail,
+        id: joinedId,
+        position: null,
+        ref: joinedRef,
+      });
       if (res.data.message === "You are already on the waitlist.") {
         toast.info("You are already on the waitlist!");
       } else {
@@ -162,8 +206,21 @@ export default function WaitlistPage() {
               <p className="mb-2 text-lg font-semibold text-[var(--foreground)]">
                 You&apos;re on the list!
               </p>
-              {position !== null && (
-                <p className="mb-6 text-3xl font-bold text-[var(--primary)]">#{position}</p>
+              {activated ? (
+                <p className="mb-6 text-sm font-semibold text-[var(--primary)]">
+                  You&apos;re off the waitlist. Early access is open for you.
+                </p>
+              ) : (
+                position !== null && (
+                  <div className="mb-6" aria-live="polite">
+                    <p className="text-3xl font-bold text-[var(--primary)]">#{position}</p>
+                    <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+                      {estimatedWaitSeconds !== null
+                        ? `Estimated wait: ${formatWait(estimatedWaitSeconds)}`
+                        : "Wait estimate available once invites start going out"}
+                    </p>
+                  </div>
+                )
               )}
               <p className="mb-6 text-sm text-[var(--muted-foreground)]">
                 Share with friends to move up the waitlist.

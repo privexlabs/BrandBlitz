@@ -1197,7 +1197,11 @@ router.patch("/me/notification-preferences/:category", authenticate, async (req,
 
   const validCategories = ["payout", "badge", "streak", "referral"];
   if (!validCategories.includes(category)) {
-    throw createError(`Invalid category. Must be one of: ${validCategories.join(", ")}`, 400, "INVALID_CATEGORY");
+    throw createError(
+      `Invalid category. Must be one of: ${validCategories.join(", ")}`,
+      400,
+      "INVALID_CATEGORY"
+    );
   }
 
   const updated = await updateNotificationPreference(req.user!.sub, category, parsed.data.enabled);

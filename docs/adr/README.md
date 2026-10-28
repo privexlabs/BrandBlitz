@@ -15,6 +15,14 @@ template.
 | [006](./006-unified-cache-tagging.md)           | Unified Cache Tagging Scheme for Redis and Next.js Cache Invalidation   | Proposed |
 | [007](./007-escrow-multisig-source-of-truth.md) | Escrow Multisig Threshold as Source-of-Truth from On-Chain Contract     | Proposed |
 | [008](./008-shared-dlq-policy.md)               | Shared Dead-Letter Queue Policy for Uniform Retry and Backoff Semantics | Proposed |
+| [009](./009-admin-routes-domain-ownership.md)   | Reorganize Admin Routes into Domain-Owned Modules                       | Proposed |
+| [010](./010-svg-sanitization-boundary.md)       | Isolate SVG Sanitization Behind a Package Boundary                      | Proposed |
+| [011](./011-escrow-implementation.md)           | Escrow Contract Implementation in Production Path                       | Accepted |
+
+Every ADR file in this directory must have a row above. Numbers are never
+reused: pick the next free number, and if two ADRs ever land with the same
+number, renumber the newer one to the next free slot. ADR 011 was originally
+committed as a second `003-*.md` and was renumbered in #945.
 
 ## When to write one
 

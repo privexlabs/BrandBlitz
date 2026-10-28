@@ -101,7 +101,7 @@ export default function NotificationPreferencesPage() {
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Notification Preferences</h1>
+        <h1 className="mb-2 text-3xl font-bold">Notification Preferences</h1>
         <p className="text-[var(--muted-foreground)]">
           Choose which types of notifications you'd like to receive
         </p>
@@ -118,7 +118,7 @@ export default function NotificationPreferencesPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-semibold">{label.label}</h3>
-                    <p className="text-sm text-[var(--muted-foreground)] mt-1">
+                    <p className="mt-1 text-sm text-[var(--muted-foreground)]">
                       {label.description}
                     </p>
                   </div>
@@ -137,11 +137,11 @@ export default function NotificationPreferencesPage() {
         })}
       </div>
 
-      <div className="mt-8 p-4 bg-[var(--muted)]/30 rounded-lg border border-[var(--border)]">
+      <div className="bg-[var(--muted)]/30 mt-8 rounded-lg border border-[var(--border)] p-4">
         <p className="text-sm text-[var(--muted-foreground)]">
-          <strong>Note:</strong> Your preferences are saved automatically when you toggle each option.
-          Disabling a notification type will prevent those messages from appearing in your notification
-          bell and as toasts.
+          <strong>Note:</strong> Your preferences are saved automatically when you toggle each
+          option. Disabling a notification type will prevent those messages from appearing in your
+          notification bell and as toasts.
         </p>
       </div>
     </main>

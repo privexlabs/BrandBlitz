@@ -1,4 +1,8 @@
-# ADR 003: Escrow Contract Implementation in Production Path
+# ADR 011: Escrow Contract Implementation in Production Path
+
+> Originally filed as `003-escrow-implementation.md`, colliding with
+> [ADR 003](./003-migrations-framework.md). Renumbered to 011 in #945; the
+> content is unchanged.
 
 ## Status
 

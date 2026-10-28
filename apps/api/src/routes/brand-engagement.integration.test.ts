@@ -192,10 +192,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Brand engagement against PostgreSQL"
         )
       ).rows[0].count
     ).toBe(1);
+    const otherEntry = await query<{ id: string }>("SELECT id FROM waitlist WHERE email = $1", [
+      `${other}@test.example`,
+    ]);
     await request(app)
-      .get(`/api/waitlist/position/${other}@test.example`)
+      .get(`/api/waitlist/${otherEntry.rows[0].id}/position`)
       .expect(200)
-      .expect((res) => expect(Number(res.body.position)).toBe(1));
+      .expect((res) => expect(res.body.position).toBe(1));
     await request(app)
       .get("/api/waitlist/access")
       .set("Authorization", auth(player))
