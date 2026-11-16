@@ -2,7 +2,7 @@
 # match apps/api/Dockerfile and apps/deposit-monitor/Dockerfile (issue #897).
 # To update the digest:
 #   docker pull node:22.14.0-alpine && docker inspect node:22.14.0-alpine --format '{{index .RepoDigests 0}}'
-FROM node:22.14.0-alpine@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 AS base
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS base
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # ── deps ──────────────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
 # ── runner ────────────────────────────────────────────────────────────────────
-FROM node:22.14.0-alpine@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 AS runner
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
