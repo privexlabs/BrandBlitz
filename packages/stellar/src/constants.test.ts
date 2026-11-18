@@ -159,6 +159,21 @@ describe("stroopsToUsdc()", () => {
     expect(() => stroopsToUsdc(undefined)).toThrow(TypeError);
   });
 
+  it("rejects fractional number stroops with TypeError instead of flooring", () => {
+    expect(() => stroopsToUsdc(1.9)).toThrow(TypeError);
+    expect(() => stroopsToUsdc(0.5)).toThrow(TypeError);
+    expect(() => stroopsToUsdc(10_000_000.1)).toThrow(TypeError);
+    expect(() => stroopsToUsdc(Number.NaN)).toThrow(TypeError);
+    expect(() => stroopsToUsdc(Number.POSITIVE_INFINITY)).toThrow(TypeError);
+  });
+
+  it("still accepts exact integer numbers and all bigint inputs", () => {
+    expect(stroopsToUsdc(2)).toBe("0.0000002");
+    expect(stroopsToUsdc(10_000_000.0)).toBe("1");
+    expect(stroopsToUsdc(2n)).toBe("0.0000002");
+    expect(stroopsToUsdc(123_456_789n)).toBe("12.3456789");
+  });
+
   it("throws RangeError when stroops exceed max supply", () => {
     expect(() => stroopsToUsdc(MAX_SUPPLY_STROOPS + 1n)).toThrow(RangeError);
   });
