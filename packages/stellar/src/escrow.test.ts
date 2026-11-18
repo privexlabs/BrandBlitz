@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { Account, Keypair, Networks, StrKey, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
 import { EscrowClient, type EscrowRecipient } from "./escrow";
 
 /**
@@ -73,6 +74,70 @@ describe("EscrowClient", () => {
   describe("refund", () => {
     it("should construct refund transaction", async () => {
       expect(typeof client.refund).toBe("function");
+    });
+  });
+
+  describe("generateAdminOperationXdr", () => {
+    const adminKeypair = Keypair.random();
+
+    beforeEach(() => {
+      (client as any).horizonServer = {
+        loadAccount: vi.fn().mockResolvedValue(new Account(adminKeypair.publicKey(), "1")),
+      };
+    });
+
+    async function buildOperations(operation: "withdraw" | "close_escrow" | "distribute") {
+      const { xdrUnsigned, operationHash } = await client.generateAdminOperationXdr(
+        operation,
+        {},
+        adminKeypair.secret()
+      );
+      const tx = TransactionBuilder.fromXDR(xdrUnsigned, Networks.TESTNET);
+      return { tx, operationHash, xdrUnsigned };
+    }
+
+    describe("close_escrow", () => {
+      it("never constructs a self-merge (destination === source) operation", async () => {
+        const { tx } = await buildOperations("close_escrow");
+
+        expect("operations" in tx).toBe(true);
+        const operations = (tx as any).operations as Array<Record<string, unknown>>;
+        for (const op of operations) {
+          expect(op.type).not.toBe("accountMerge");
+          const source = (op.source as string | undefined) ?? (tx as any).source;
+          if ("destination" in op) {
+            expect(op.destination).not.toBe(source);
+          }
+        }
+      });
+
+      it("invokes the escrow contract's refund entrypoint via invokeHostFunction", async () => {
+        const { tx, operationHash, xdrUnsigned } = await buildOperations("close_escrow");
+        const operations = (tx as any).operations as Array<{
+          type: string;
+          func: xdr.HostFunction;
+        }>;
+
+        expect(operations).toHaveLength(1);
+        expect(operations[0].type).toBe("invokeHostFunction");
+
+        const invocation = operations[0].func.invokeContract();
+        expect(invocation.functionName().toString()).toBe("refund");
+        expect(invocation.args()).toHaveLength(0);
+        expect(StrKey.encodeContract(invocation.contractAddress().contractId() as any)).toBe(
+          config.contractId
+        );
+
+        // Unsigned: produced for offline co-signing.
+        expect(tx.signatures).toHaveLength(0);
+        expect(operationHash).toMatch(/^[0-9a-f]{64}$/);
+        expect(xdrUnsigned.length).toBeGreaterThan(0);
+      });
+
+      it("builds the transaction from the admin signer's account", async () => {
+        const { tx } = await buildOperations("close_escrow");
+        expect((tx as any).source).toBe(adminKeypair.publicKey());
+      });
     });
   });
 
