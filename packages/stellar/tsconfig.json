@@ -8,7 +8,10 @@
     "types": ["node"],
     "outDir": "dist",
     "rootDir": "src",
-    "composite": true
+    "composite": true,
+    "paths": {
+      "@brandblitz/stellar": ["./src/index.ts"]
+    }
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]
