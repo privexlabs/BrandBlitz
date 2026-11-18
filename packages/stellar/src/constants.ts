@@ -82,9 +82,13 @@ export function usdcToStroops(usdc: string): bigint {
  * Convert stroops (integer) to USDC amount (decimal string).
  * Formats result with up to 7 decimal places, trimming trailing zeros.
  *
- * @param stroops - Amount in stroops as number or bigint
+ * Stroops are the smallest indivisible unit, so a fractional `number` stroop
+ * count (e.g. `1.9`) is rejected with a TypeError rather than floored. This
+ * surfaces upstream arithmetic bugs instead of silently masking them.
+ *
+ * @param stroops - Amount in stroops as an integer number or bigint
  * @returns Amount in USDC as string (e.g., "10.5")
- * @throws TypeError if stroops is not a number or bigint
+ * @throws TypeError if stroops is not a number or bigint, or is a non-integer number
  * @throws RangeError if stroops is negative or exceeds max supply
  */
 export function stroopsToUsdc(stroops: number | bigint): string {
@@ -92,7 +96,11 @@ export function stroopsToUsdc(stroops: number | bigint): string {
     throw new TypeError(`Expected number or bigint, got ${typeof stroops}`);
   }
 
-  const amount = typeof stroops === "number" ? BigInt(Math.floor(stroops)) : stroops;
+  if (typeof stroops === "number" && !Number.isInteger(stroops)) {
+    throw new TypeError(`Stroops must be an integer (smallest indivisible unit), got ${stroops}`);
+  }
+
+  const amount = typeof stroops === "number" ? BigInt(stroops) : stroops;
 
   if (amount < 0n) {
     throw new RangeError("Stroops cannot be negative");
