@@ -1,9 +1,12 @@
 #![cfg(test)]
+extern crate std;
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events},
-    token, vec, Address, Env, IntoVal, String, Val,
+    testutils::{
+        Address as _, AuthorizedFunction, AuthorizedInvocation, Events, MockAuth, MockAuthInvoke,
+    },
+    token, vec, Address, Env, IntoVal, String, Symbol, Val,
 };
 
 /// Minimal token double with a no-op transfer so repeated deposits can drive
@@ -110,6 +113,87 @@ fn test_initialize_twice_fails() {
     assert_eq!(
         client.try_initialize(&admin, &token, &memo),
         Err(Ok(ContractError::AlreadyInitialized))
+    );
+}
+
+#[test]
+fn test_initialize_requires_admin_auth() {
+    // Regression (#886): with no mocked auths, nobody can initialize on behalf
+    // of an arbitrary admin address, so a front-runner cannot seize control.
+    let (env, admin, _, token, _, client) = setup();
+    let memo = String::from_str(&env, "BLITZ-NOAUTH");
+
+    env.mock_auths(&[]);
+    let res = client.try_initialize(&admin, &token, &memo);
+    assert!(res.is_err());
+    assert!(!matches!(res, Ok(Err(_))));
+
+    // No state was written: the instance is still uninitialized.
+    assert_eq!(client.memo(), String::from_str(&env, ""));
+    assert!(!client.is_settled());
+}
+
+#[test]
+fn test_initialize_rejects_attacker_claiming_other_admin() {
+    // An attacker who only controls their own key cannot initialize the
+    // contract with the legitimate admin's address (or any address they do
+    // not control).
+    let (env, admin, _, token, _, client) = setup();
+    let attacker = Address::generate(&env);
+    let memo = String::from_str(&env, "BLITZ-FRONTRUN");
+
+    env.mock_auths(&[MockAuth {
+        address: &attacker,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "initialize",
+            args: (admin.clone(), token.clone(), memo.clone()).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(client.try_initialize(&admin, &token, &memo).is_err());
+    assert_eq!(client.memo(), String::from_str(&env, ""));
+}
+
+#[test]
+fn test_initialize_succeeds_with_admin_auth() {
+    let (env, admin, _, token, _, client) = setup();
+    let memo = String::from_str(&env, "BLITZ-ADMINAUTH");
+
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "initialize",
+            args: (admin.clone(), token.clone(), memo.clone()).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert_eq!(client.try_initialize(&admin, &token, &memo), Ok(Ok(())));
+    assert_eq!(client.memo(), memo);
+    assert!(!client.is_settled());
+    assert_eq!(client.balance(), 0);
+}
+
+#[test]
+fn test_initialize_records_admin_auth() {
+    let (env, admin, _, token, _, client) = setup();
+    let memo = String::from_str(&env, "BLITZ-AUTHREC");
+
+    client.initialize(&admin, &token, &memo);
+    assert_eq!(
+        env.auths(),
+        std::vec![(
+            admin.clone(),
+            AuthorizedInvocation {
+                function: AuthorizedFunction::Contract((
+                    client.address.clone(),
+                    Symbol::new(&env, "initialize"),
+                    (admin.clone(), token.clone(), memo.clone()).into_val(&env),
+                )),
+                sub_invocations: std::vec![],
+            }
+        )]
     );
 }
 
