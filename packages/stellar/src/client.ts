@@ -13,11 +13,22 @@ import { STELLAR_NETWORKS, type NetworkName } from "./constants";
 
 // ─── Retry Configuration ─────────────────────────────────────────────────────
 
+/** Minimal logger interface for retry diagnostics. Defaults to console.warn. */
+export interface RetryLogger {
+  warn(message: string, meta?: Record<string, unknown>): void;
+}
+
+const defaultRetryLogger: RetryLogger = {
+  warn: (message, meta) => console.warn(message, meta),
+};
+
 export interface RetryOptions {
   maxAttempts?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
   retryableStatusCodes?: number[];
+  /** Optional logger; defaults to console.warn. */
+  logger?: RetryLogger;
 }
 
 const DEFAULT_RETRY_OPTIONS: Required<RetryOptions> = {
@@ -73,9 +84,11 @@ function isRetryableError(err: unknown, retryableStatusCodes: number[]): boolean
  * @throws Original error with retryExhausted: true if all retries fail
  */
 export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
-  const config = { ...DEFAULT_RETRY_OPTIONS, ...options };
+  const { logger: optLogger, ...restOptions } = options;
+  const config = { ...DEFAULT_RETRY_OPTIONS, ...restOptions };
+  const log = optLogger ?? defaultRetryLogger;
 
-  let lastError: any;
+  let lastError: unknown;
 
   for (let attempt = 0; attempt < config.maxAttempts; attempt++) {
     try {
@@ -96,7 +109,7 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
       const delayMs = calculateBackoffDelay(attempt, config.baseDelayMs, config.maxDelayMs);
 
       const statusCode = (err as any)?.response?.status ?? (err as any)?.status;
-      console.warn(
+      log.warn(
         `[Stellar RPC Retry] Attempt ${attempt + 1}/${config.maxAttempts} failed, retrying in ${delayMs}ms`,
         {
           statusCode,
@@ -109,11 +122,14 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
     }
   }
 
-  // All retries exhausted
-  const error = lastError as any;
+  // All retries exhausted — normalise to an Error so we can safely attach retryExhausted
+  const error: Error & { retryExhausted: boolean; originalError?: unknown } =
+    lastError instanceof Error
+      ? (lastError as any)
+      : Object.assign(new Error(String(lastError)), { originalError: lastError });
   error.retryExhausted = true;
-  console.warn(`[Stellar RPC Retry] Exhausted all ${config.maxAttempts} retry attempts`, {
-    statusCode: error?.response?.status ?? error?.status,
+  log.warn(`[Stellar RPC Retry] Exhausted all ${config.maxAttempts} retry attempts`, {
+    statusCode: (error as any)?.response?.status ?? (error as any)?.status,
     errorMessage: error?.message ?? String(error),
   });
   throw error;

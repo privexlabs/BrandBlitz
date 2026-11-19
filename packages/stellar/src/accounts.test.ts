@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createMuxedAddress, sponsorNewAccount, accountHasUsdcTrustline } from "./accounts";
+import { createMuxedAddress, sponsorNewAccount, accountHasUsdcTrustline, getAccountUsdcBalance } from "./accounts";
 import * as client from "./client";
 import {
   MuxedAccount,
@@ -134,6 +134,59 @@ describe("accountHasUsdcTrustline", () => {
     await accountHasUsdcTrustline(publicKey, "public");
     expect(client.getHorizonServer).toHaveBeenCalledWith("public");
     expect(client.getUsdcAsset).toHaveBeenCalledWith("public");
+  });
+});
+
+// --- getAccountUsdcBalance ---
+describe("getAccountUsdcBalance", () => {
+  const publicKey = "GEXAMPLEACCOUNT";
+  const testnetIssuer = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+  const otherIssuer = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    (client.getUsdcAsset as any).mockReturnValue(new Asset("USDC", testnetIssuer));
+  });
+
+  it("returns 0n when account has no matching USDC trustline", async () => {
+    (client.getHorizonServer as any).mockReturnValue({
+      loadAccount: vi.fn().mockResolvedValue({ balances: [{ asset_type: "native" }] }),
+    });
+    expect(await getAccountUsdcBalance(publicKey, "testnet")).toBe(0n);
+  });
+
+  it("correctly converts a whole-number balance string with no decimal point", async () => {
+    (client.getHorizonServer as any).mockReturnValue({
+      loadAccount: vi.fn().mockResolvedValue({
+        balances: [
+          { asset_type: "credit_alphanum4", asset_code: "USDC", asset_issuer: testnetIssuer, balance: "100" },
+        ],
+      }),
+    });
+    expect(await getAccountUsdcBalance(publicKey, "testnet")).toBe(1000000000n);
+  });
+
+  it("truncates fractional digits beyond 7 decimal places", async () => {
+    (client.getHorizonServer as any).mockReturnValue({
+      loadAccount: vi.fn().mockResolvedValue({
+        balances: [
+          { asset_type: "credit_alphanum4", asset_code: "USDC", asset_issuer: testnetIssuer, balance: "1.123456789" },
+        ],
+      }),
+    });
+    // Only first 7 fractional digits are used: 1234567
+    expect(await getAccountUsdcBalance(publicKey, "testnet")).toBe(11234567n);
+  });
+
+  it("filters by both asset_code and asset_issuer (ignores same code, different issuer)", async () => {
+    (client.getHorizonServer as any).mockReturnValue({
+      loadAccount: vi.fn().mockResolvedValue({
+        balances: [
+          { asset_type: "credit_alphanum4", asset_code: "USDC", asset_issuer: otherIssuer, balance: "50" },
+        ],
+      }),
+    });
+    expect(await getAccountUsdcBalance(publicKey, "testnet")).toBe(0n);
   });
 });
 

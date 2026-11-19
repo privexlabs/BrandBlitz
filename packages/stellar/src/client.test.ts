@@ -225,7 +225,7 @@ describe("client", () => {
       expect(fn).toHaveBeenCalledTimes(2);
     });
 
-    it("should log retry attempts with delay info", async () => {
+    it("should log retry attempts with delay info (default console.warn)", async () => {
       const error = new Error("Rate limited");
       (error as any).response = { status: 429 };
 
@@ -244,7 +244,7 @@ describe("client", () => {
       );
     });
 
-    it("should log exhaustion message", async () => {
+    it("should log exhaustion message (default console.warn)", async () => {
       const error = new Error("Service unavailable");
       (error as any).response = { status: 503 };
 
@@ -305,6 +305,70 @@ describe("client", () => {
       ).rejects.toThrow("Service unavailable");
 
       expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it("handles non-object (string) rejection without throwing TypeError", async () => {
+      const fn = vi.fn().mockRejectedValue("boom");
+
+      const promise = withRetry(fn, {
+        maxAttempts: 3,
+        baseDelayMs: 10,
+        retryableStatusCodes: [503],
+      });
+      await vi.runAllTimersAsync();
+
+      await expect(promise).rejects.toMatchObject({
+        retryExhausted: true,
+        originalError: "boom",
+      });
+    });
+
+    it("preserves original error info when wrapping non-Error rejections", async () => {
+      const fn = vi.fn().mockRejectedValue(42);
+
+      const promise = withRetry(fn, { maxAttempts: 2, baseDelayMs: 10, retryableStatusCodes: [503] });
+      await vi.runAllTimersAsync();
+
+      const caught = await promise.catch((e) => e);
+      expect(caught).toBeInstanceOf(Error);
+      expect(caught.originalError).toBe(42);
+      expect(caught.retryExhausted).toBe(true);
+    });
+
+    it("routes retry logs through the injected logger instead of console.warn", async () => {
+      const error = new Error("Rate limited");
+      (error as any).response = { status: 429 };
+
+      const mockLogger = { warn: vi.fn() };
+      const fn = vi.fn().mockRejectedValueOnce(error).mockResolvedValueOnce("ok");
+
+      const promise = withRetry(fn, { maxAttempts: 2, baseDelayMs: 10, logger: mockLogger });
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Stellar RPC Retry"),
+        expect.objectContaining({ statusCode: 429 })
+      );
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+
+    it("routes exhaustion log through the injected logger instead of console.warn", async () => {
+      const error = new Error("Service unavailable");
+      (error as any).response = { status: 503 };
+
+      const mockLogger = { warn: vi.fn() };
+      const fn = vi.fn().mockRejectedValue(error);
+
+      const promise = withRetry(fn, { maxAttempts: 2, baseDelayMs: 10, logger: mockLogger });
+      await vi.runAllTimersAsync();
+      await promise.catch(() => {});
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Exhausted"),
+        expect.objectContaining({ statusCode: 503 })
+      );
+      expect(console.warn).not.toHaveBeenCalled();
     });
   });
 });

@@ -30,6 +30,27 @@ describe("deposit memo generation", () => {
   });
 });
 
+describe("validateDepositMemo", () => {
+  it("accepts a valid memo with leading/trailing whitespace and returns trimmed value", () => {
+    const uuid = "  abc123  ";
+    const result = validateDepositMemo(uuid);
+    expect(result).toEqual({ valid: true, memo: "abc123" });
+  });
+
+  it("rejects a memo that is only whitespace with reason 'missing'", () => {
+    expect(validateDepositMemo("   ")).toEqual({ valid: false, reason: "missing" });
+  });
+
+  it("rejects null memo with reason 'missing'", () => {
+    expect(validateDepositMemo(null)).toEqual({ valid: false, reason: "missing" });
+  });
+
+  it("rejects a non-UUID/invalid string with reason 'invalid_format'", () => {
+    const tooLong = "a".repeat(29);
+    expect(validateDepositMemo(tooLong)).toMatchObject({ valid: false, reason: "invalid_format" });
+  });
+});
+
 describe("fetchDepositEvents", () => {
   beforeEach(() => {
     vi.clearAllMocks();
