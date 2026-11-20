@@ -14,19 +14,53 @@ interface BadgeUnlockModalProps {
   onClose: () => void;
 }
 
+// In-memory fallback for when sessionStorage cannot be used (Safari private
+// browsing, sandboxed webviews, quota exhaustion). Module-level so dismissals
+// hold for the rest of the page load even when the component remounts. Only
+// cross-reload persistence is lost in that case.
+const memoryDismissed = new Set<string>();
+
+/** Test-only: clears the module-level fallback so tests do not leak dismissals. */
+export function resetInMemoryDismissalsForTests(): void {
+  memoryDismissed.clear();
+}
+
+function storageKey(badgeId: string): string {
+  return `dismissed_badges_${badgeId}`;
+}
+
+function describeStorageError(err: unknown): string {
+  const name =
+    typeof err === "object" && err !== null ? (err as { name?: unknown }).name : undefined;
+  if (name === "QuotaExceededError") return "quota exceeded";
+  if (name === "SecurityError") return "access denied";
+  return "storage unavailable";
+}
+
 function isAlreadyDismissed(badgeId: string): boolean {
+  if (memoryDismissed.has(badgeId)) return true;
   try {
-    return sessionStorage.getItem(`dismissed_badges_${badgeId}`) === "true";
-  } catch {
+    return sessionStorage.getItem(storageKey(badgeId)) === "true";
+  } catch (err: unknown) {
+    console.warn(
+      `[BadgeUnlockModal] sessionStorage read failed (${describeStorageError(err)}). ` +
+        "using in-memory dismissal tracking for this page load.",
+      err
+    );
     return false;
   }
 }
 
 function markDismissed(badgeId: string): void {
+  memoryDismissed.add(badgeId);
   try {
-    sessionStorage.setItem(`dismissed_badges_${badgeId}`, "true");
-  } catch {
-    // ignore
+    sessionStorage.setItem(storageKey(badgeId), "true");
+  } catch (err: unknown) {
+    console.warn(
+      `[BadgeUnlockModal] sessionStorage write failed (${describeStorageError(err)}). ` +
+        "dismissal will not persist across reloads.",
+      err
+    );
   }
 }
 

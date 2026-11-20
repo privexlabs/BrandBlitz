@@ -34,6 +34,7 @@ import {
   checkAndAwardLeagueDiamondBadges,
   checkAndAwardLeaguePromotionBadges,
   getBadgesForUser,
+  summarizeAwardedBadges,
 } from "./badges";
 
 const WEEK = "2026-05-26";
@@ -309,5 +310,19 @@ describe("getBadgesForUser", () => {
 
     expect(result).toHaveLength(8);
     expect(result.every((b) => !b.earned)).toBe(true);
+  });
+});
+
+describe("summarizeAwardedBadges", () => {
+  it("maps awarded slugs to id, name and description without an icon URL", () => {
+    expect(summarizeAwardedBadges(["first_win", "streak_3"])).toEqual([
+      { id: "first_win", name: "First Win", description: "You completed your first challenge." },
+      { id: "streak_3", name: "On a Roll", description: "You played 3 days in a row." },
+    ]);
+  });
+
+  it("drops unknown slugs and returns an empty list for no awards", () => {
+    expect(summarizeAwardedBadges(["not_a_badge"])).toEqual([]);
+    expect(summarizeAwardedBadges([])).toEqual([]);
   });
 });

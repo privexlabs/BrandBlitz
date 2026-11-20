@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import { BadgeUnlockModal, type Badge } from "./badge-unlock-modal";
+import {
+  BadgeUnlockModal,
+  resetInMemoryDismissalsForTests,
+  type Badge,
+} from "./badge-unlock-modal";
 
 // Mock sessionStorage
 const sessionStorageMock = (() => {
@@ -33,6 +37,8 @@ const badge2: Badge = {
 describe("BadgeUnlockModal", () => {
   beforeEach(() => {
     sessionStorageMock.clear();
+    resetInMemoryDismissalsForTests();
+    vi.restoreAllMocks();
   });
 
   it("does not render when badges is empty", () => {
@@ -87,5 +93,66 @@ describe("BadgeUnlockModal", () => {
     expect((prevBtn as HTMLButtonElement).disabled).toBe(false);
 
     vi.useRealTimers();
+  });
+
+  describe("dismissal persistence", () => {
+    const fallbackBadge: Badge = {
+      id: "fallback-b1",
+      name: "Fallback Badge",
+      description: "Earned while storage is blocked",
+    };
+
+    it("keeps cross-reload dismissal in sessionStorage when storage works", () => {
+      vi.useFakeTimers();
+      const onClose = vi.fn();
+      const { unmount } = render(<BadgeUnlockModal badges={[badge1]} onClose={onClose} />);
+      fireEvent.click(screen.getByRole("button", { name: /close/i }));
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(onClose).toHaveBeenCalled();
+      expect(sessionStorageMock.getItem("dismissed_badges_b1")).toBe("true");
+      unmount();
+
+      // A new page load reads from sessionStorage and does not show the badge again.
+      const { container } = render(<BadgeUnlockModal badges={[badge1]} onClose={() => {}} />);
+      expect(container.firstChild).toBeNull();
+      vi.useRealTimers();
+    });
+
+    it("does not reappear within the same lifetime when sessionStorage throws", () => {
+      vi.useFakeTimers();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const storageError = Object.assign(new Error("blocked"), { name: "SecurityError" });
+      vi.spyOn(sessionStorageMock, "getItem").mockImplementation(() => {
+        throw storageError;
+      });
+      vi.spyOn(sessionStorageMock, "setItem").mockImplementation(() => {
+        throw storageError;
+      });
+
+      const onClose = vi.fn();
+      const { rerender, container } = render(
+        <BadgeUnlockModal badges={[fallbackBadge]} onClose={onClose} />
+      );
+      expect(screen.getByText("Fallback Badge")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: /close/i }));
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(onClose).toHaveBeenCalled();
+
+      // Re-render with a new badges array so the dismissal filter runs again.
+      rerender(<BadgeUnlockModal badges={[{ ...fallbackBadge }]} onClose={onClose} />);
+      expect(container.firstChild).toBeNull();
+
+      // Both failure paths logged a diagnosable warning that names storage.
+      const messages = warn.mock.calls.map((call) => String(call[0]));
+      expect(messages.some((m) => m.includes("sessionStorage write failed"))).toBe(true);
+      expect(messages.some((m) => m.includes("sessionStorage read failed"))).toBe(true);
+      expect(messages.every((m) => m.includes("[BadgeUnlockModal]"))).toBe(true);
+      vi.useRealTimers();
+    });
   });
 });

@@ -12,6 +12,7 @@ import { TOTAL_ROUNDS } from "@/components/game/constants";
 import type { AnswerOptionKey } from "@/components/game/answer-option";
 import type { ChallengeAnswerState } from "@/components/game/challenge-round";
 import { OfflineBanner } from "@/components/layout/offline-banner";
+import { BadgeUnlockModal, type Badge } from "@/components/gamification/badge-unlock-modal";
 import {
   SessionRecoveryModal,
   type SessionRecoveryDetails,
@@ -101,13 +102,55 @@ const ANSWER_SETTLED_DELAY_MS = 450;
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
-function errorMessage(err: any): string {
+// Narrowing helpers for caught values. The API client throws axios-shaped errors
+// (`err.response.data`, `err.response.status`), but other code paths throw plain
+// Errors or strings, so every property read is guarded.
+function readStringField(source: unknown, key: string): string | undefined {
+  if (typeof source !== "object" || source === null) return undefined;
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function readResponseField(err: unknown, key: "data" | "status"): unknown {
+  if (typeof err !== "object" || err === null) return undefined;
+  const response = (err as Record<string, unknown>).response;
+  if (typeof response !== "object" || response === null) return undefined;
+  return (response as Record<string, unknown>)[key];
+}
+
+function responseStatus(err: unknown): number | undefined {
+  const status = readResponseField(err, "status");
+  return typeof status === "number" ? status : undefined;
+}
+
+function isAbortError(err: unknown): boolean {
   return (
-    err?.response?.data?.message ??
-    err?.response?.data?.error ??
-    err?.message ??
+    readStringField(err, "name") === "CanceledError" ||
+    readStringField(err, "message") === "Aborted"
+  );
+}
+
+function errorMessage(err: unknown): string {
+  const data = readResponseField(err, "data");
+  return (
+    readStringField(data, "message") ??
+    readStringField(data, "error") ??
+    readStringField(err, "message") ??
     "Failed to submit answer. Check your connection and try again."
   );
+}
+
+// Badges granted by the final answer. Entries missing required fields are dropped.
+function parseNewBadges(value: unknown): Badge[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry: unknown) => {
+    const id = readStringField(entry, "id");
+    const name = readStringField(entry, "name");
+    const description = readStringField(entry, "description");
+    return id !== undefined && name !== undefined && description !== undefined
+      ? [{ id, name, description }]
+      : [];
+  });
 }
 
 function toRecoveryDetails(session: RecoverySessionResponse): SessionRecoveryDetails {
@@ -129,6 +172,7 @@ export function ChallengePage({ params }: Props) {
   const [challenge, setChallenge] = React.useState<Challenge | null>(null);
   const [questions, setQuestions] = React.useState<ChallengeQuestion[]>([]);
   const [phase, setPhase] = React.useState<GamePhase>("loading");
+  const [newBadges, setNewBadges] = React.useState<Badge[]>([]);
   const [currentRound, setCurrentRound] = React.useState<1 | 2 | 3>(1);
   const [scores, setScores] = React.useState<number[]>([]);
   const [finalRank, setFinalRank] = React.useState<number | null>(null);
@@ -247,8 +291,9 @@ export function ChallengePage({ params }: Props) {
           setRecoverySession(existing);
           return;
         }
-      } catch (err: any) {
-        if (err?.response?.status && err.response.status !== 404) {
+      } catch (err: unknown) {
+        const status = responseStatus(err);
+        if (status && status !== 404) {
           console.error("Failed to check session status:", err);
           if (!cancelled) setLoadError("Couldn't check your session status. Please try again.");
           return;
@@ -360,7 +405,7 @@ export function ChallengePage({ params }: Props) {
     option: AnswerOptionKey | null,
     reactionTimeMs: number,
     signal: AbortSignal
-  ): Promise<{ score: number; correct: boolean; sessionId?: string }> => {
+  ): Promise<{ score: number; correct: boolean; sessionId?: string; newBadges: Badge[] }> => {
     if (!apiToken) throw new Error("Missing API token");
     const api = createApiClient(apiToken);
     let lastError: unknown;
@@ -377,9 +422,10 @@ export function ChallengePage({ params }: Props) {
           score: res.data.score as number,
           correct: Boolean(res.data.correct),
           sessionId: res.data.sessionId as string | undefined,
+          newBadges: parseNewBadges(res.data.newBadges),
         };
-      } catch (err: any) {
-        if (err.name === "CanceledError" || err.message === "Aborted") throw err;
+      } catch (err: unknown) {
+        if (isAbortError(err)) throw err;
         lastError = err;
         if (attempt < ANSWER_MAX_ATTEMPTS - 1) {
           await sleep(ANSWER_RETRY_DELAY_MS);
@@ -412,6 +458,7 @@ export function ChallengePage({ params }: Props) {
       setAnswerState({ selectedOption: option, status: "settled", correct: result.correct });
       setScores((prev) => [...prev, result.score]);
       if (result.sessionId) setFinalSessionId(result.sessionId);
+      if (result.newBadges.length > 0) setNewBadges(result.newBadges);
       await sleep(ANSWER_SETTLED_DELAY_MS);
       if (!mountedRef.current || abortController.signal.aborted) return;
 
@@ -421,8 +468,8 @@ export function ChallengePage({ params }: Props) {
       } else {
         setPhase("result");
       }
-    } catch (err: any) {
-      if (!mountedRef.current || err.name === "CanceledError" || err.message === "Aborted") return;
+    } catch (err: unknown) {
+      if (!mountedRef.current || isAbortError(err)) return;
       const message = errorMessage(err);
       setAnswerState(null);
       setAnswerError(message);
@@ -679,6 +726,9 @@ export function ChallengePage({ params }: Props) {
   if (phase === "result") {
     return (
       <div className="min-h-screen space-y-8 pb-12">
+        {newBadges.length > 0 && (
+          <BadgeUnlockModal badges={newBadges} onClose={() => setNewBadges([])} />
+        )}
         <ResultScreen
           totalScore={scores.reduce((a, b) => a + b, 0)}
           challengeId={challengeId}

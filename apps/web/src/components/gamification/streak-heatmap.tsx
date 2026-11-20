@@ -126,6 +126,7 @@ export function StreakHeatmap({ activity }: StreakHeatmapProps) {
             week.map((record, dayIndex) => (
               <div
                 key={`${weekIndex}-${dayIndex}`}
+                data-date={record.date || undefined}
                 onMouseEnter={(e) => handleCellHover(e, record.date)}
                 onMouseLeave={() => setHoveredDate(null)}
                 className={`h-3 w-3 rounded-sm border border-[var(--border)] transition-all ${
