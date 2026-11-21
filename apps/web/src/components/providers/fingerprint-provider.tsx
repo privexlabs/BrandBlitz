@@ -26,7 +26,7 @@ export function FingerprintProvider({ children }: { children: ReactNode }) {
           apiKey: publicKey,
         });
 
-        (window as any).fpPromise = fpPromise;
+        window.fpPromise = fpPromise;
       } catch (error) {
         console.warn("Failed to initialize FingerprintJS:", error);
         // Silently fail — device fingerprinting is optional

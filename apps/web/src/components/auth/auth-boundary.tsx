@@ -19,7 +19,9 @@ export class AuthBoundary extends React.Component<{ children: React.ReactNode },
     // Report to Sentry when installed — dynamic import so the app works without it
     import("@sentry/nextjs")
       .then(({ captureException }) => captureException(error))
-      .catch(() => {});
+      .catch((reportError: unknown) => {
+        console.error("[AuthBoundary] failed to report error to Sentry:", reportError);
+      });
   }
 
   render() {

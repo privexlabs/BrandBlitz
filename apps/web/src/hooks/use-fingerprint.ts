@@ -32,7 +32,7 @@ export function useFingerprint(): string | null {
         const FingerprintJS = await import("@fingerprintjs/fingerprintjs-pro-react");
         // Get the visitorId from the global FingerprintJS instance
         // This assumes the provider is already set up in the layout
-        const fpPromise = (window as any).fpPromise;
+        const fpPromise = window.fpPromise;
         if (fpPromise) {
           const fp = await fpPromise;
           const result = await fp.get();

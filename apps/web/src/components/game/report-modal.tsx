@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import axios from "axios";
 import {
   Dialog,
   DialogContent,
@@ -65,8 +66,8 @@ export function ReportModal({ challengeId, open, onOpenChange }: ReportModalProp
       lastSubmitRef.current = now;
       toast.success("Report submitted. Thank you for helping keep BrandBlitz safe.");
       onOpenChange(false);
-    } catch (err: any) {
-      if (err?.response?.status === 409) {
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err) && err.response?.status === 409) {
         toast.error("You have already reported this challenge.");
         onOpenChange(false);
       } else {

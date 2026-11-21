@@ -1,6 +1,7 @@
 "use client";
 
 import { z } from "zod";
+import axios from "axios";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -187,8 +188,12 @@ export function BrandKitForm({ apiToken }: BrandKitFormProps) {
         // Do NOT include secrets in URL query params
         router.push(`/brand/${brandId}`);
       });
-    } catch (err: any) {
-      setError(err?.response?.data?.message ?? "Failed to create brand. Please try again.");
+    } catch (err: unknown) {
+      const data = axios.isAxiosError(err) && err.response?.data;
+      const message = data && typeof data === "object" && "message" in data && typeof data.message === "string"
+        ? data.message
+        : "Failed to create brand. Please try again.";
+      setError(message);
     }
   };
 

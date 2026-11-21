@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import axios from "axios";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { CountdownTimer } from "./countdown-timer";
@@ -59,10 +60,14 @@ export function WarmupPhase({ challenge, apiToken, onComplete, deviceId }: Warmu
 
         onComplete(data.challengeToken);
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (
-        error?.response?.status === 400 &&
-        typeof error?.response?.data?.remainingMs === "number"
+        axios.isAxiosError(error) &&
+        error.response?.status === 400 &&
+        typeof error.response.data === "object" &&
+        error.response.data !== null &&
+        "remainingMs" in error.response.data &&
+        typeof error.response.data.remainingMs === "number"
       ) {
         setStatusMessage(
           `Not yet ready. Please wait ${Math.ceil(error.response.data.remainingMs / 1000)} more seconds and try again.`
