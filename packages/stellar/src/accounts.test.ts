@@ -180,6 +180,90 @@ describe("accountHasUsdcTrustline", () => {
   });
 });
 
+// --- getAccountUsdcBalance (issue #863) ---
+describe("getAccountUsdcBalance", () => {
+  const usdc = new Asset("USDC", "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5");
+  const publicKey = "GEXAMPLEACCOUNT";
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    (client.getUsdcAsset as any).mockReturnValue(usdc);
+  });
+
+  it("returns 0n when account has no USDC trustline balance", async () => {
+    (client.getHorizonServer as any).mockReturnValue({
+      loadAccount: vi.fn().mockResolvedValue({ balances: [{ asset_type: "native" }] }),
+    });
+    expect(await getAccountUsdcBalance(publicKey, "testnet")).toBe(0n);
+  });
+
+  it("filters by both asset_code and asset_issuer — same code different issuer returns 0n", async () => {
+    (client.getHorizonServer as any).mockReturnValue({
+      loadAccount: vi.fn().mockResolvedValue({
+        balances: [
+          {
+            asset_type: "credit_alphanum4",
+            asset_code: "USDC",
+            asset_issuer: "GDIFFERENTISSUER",
+            balance: "50.0000000",
+          },
+        ],
+      }),
+    });
+    expect(await getAccountUsdcBalance(publicKey, "testnet")).toBe(0n);
+  });
+
+  it("converts a decimal balance string correctly to stroops bigint", async () => {
+    (client.getHorizonServer as any).mockReturnValue({
+      loadAccount: vi.fn().mockResolvedValue({
+        balances: [
+          {
+            asset_type: "credit_alphanum4",
+            asset_code: "USDC",
+            asset_issuer: usdc.getIssuer(),
+            balance: "100.1234567",
+          },
+        ],
+      }),
+    });
+    expect(await getAccountUsdcBalance(publicKey, "testnet")).toBe(1001234567n);
+  });
+
+  it("converts a whole-number balance string with no decimal point", async () => {
+    (client.getHorizonServer as any).mockReturnValue({
+      loadAccount: vi.fn().mockResolvedValue({
+        balances: [
+          {
+            asset_type: "credit_alphanum4",
+            asset_code: "USDC",
+            asset_issuer: usdc.getIssuer(),
+            balance: "100",
+          },
+        ],
+      }),
+    });
+    // 100 USDC = 1_000_000_000 stroops
+    expect(await getAccountUsdcBalance(publicKey, "testnet")).toBe(1_000_000_000n);
+  });
+
+  it("truncates fractional digits beyond 7 decimal places", async () => {
+    (client.getHorizonServer as any).mockReturnValue({
+      loadAccount: vi.fn().mockResolvedValue({
+        balances: [
+          {
+            asset_type: "credit_alphanum4",
+            asset_code: "USDC",
+            asset_issuer: usdc.getIssuer(),
+            balance: "1.123456789",
+          },
+        ],
+      }),
+    });
+    // Only first 7 fractional digits are taken: 1234567
+    expect(await getAccountUsdcBalance(publicKey, "testnet")).toBe(11234567n);
+  });
+});
+
 // --- Slug generation determinism regression test ---
 describe("createMuxedAddress determinism", () => {
   it("same user ID always yields the same slug", () => {

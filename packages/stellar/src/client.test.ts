@@ -10,6 +10,7 @@ import {
   withRetry,
 } from "./client";
 import { STELLAR_NETWORKS } from "./constants";
+import { setLogger } from "./logger";
 
 describe("client", () => {
   describe("getNetwork", () => {
@@ -144,12 +145,17 @@ describe("client", () => {
   });
 
   describe("withRetry", () => {
+    const mockWarn = vi.fn();
+
     beforeEach(() => {
       vi.useFakeTimers();
-      vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockWarn.mockReset();
+      // issue #866: wire retries through the shared logger abstraction.
+      setLogger({ warn: mockWarn });
     });
 
     afterEach(() => {
+      setLogger(undefined);
       vi.useRealTimers();
       vi.restoreAllMocks();
     });
@@ -326,7 +332,7 @@ describe("client", () => {
       await vi.runAllTimersAsync();
       await promise;
 
-      expect(console.warn).toHaveBeenCalledWith(
+      expect(mockWarn).toHaveBeenCalledWith(
         expect.stringContaining("Stellar RPC Retry"),
         expect.objectContaining({
           statusCode: 429,
@@ -346,7 +352,7 @@ describe("client", () => {
       await vi.runAllTimersAsync();
       await rejection;
 
-      expect(console.warn).toHaveBeenCalledWith(
+      expect(mockWarn).toHaveBeenCalledWith(
         expect.stringContaining("Exhausted"),
         expect.objectContaining({
           statusCode: 503,
