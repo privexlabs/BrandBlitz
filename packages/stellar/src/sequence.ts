@@ -1,6 +1,6 @@
 /**
  * Store interface for sequence management.
- * 
+ *
  * IMPORTANT: For multi-instance deployments, setIfAbsent MUST be implemented
  * to ensure atomic base sequence writes. Without it, concurrent instances may
  * diverge on base sequence values, corrupting the sequence reservation system.
@@ -62,7 +62,7 @@ function getSequenceKeys(keyPrefix: string): SequenceKeys {
 /**
  * Ensures a base sequence is loaded and stored.
  * Uses generation tracking to prevent stale loads from overwriting fresh resets.
- * 
+ *
  * @param options - Store, key prefix, and base sequence loader
  * @returns The current base sequence for this keyPrefix
  */
@@ -89,10 +89,12 @@ async function ensureBaseSequence({
 
     // Validate this load is still current (not superseded by a reset)
     if (globalGeneration !== currentGeneration) {
-      // A reset occurred while we were loading; discard this result
+      // A reset occurred while we were loading; discard this stale result
       const fresh = await store.get(baseKey);
       if (fresh) return fresh;
-      // If still no value, fall through to write anyway
+      throw new Error(
+        `Sequence reservation race detected: reset occurred during base load for ${keyPrefix}. Retry required.`
+      );
     }
 
     if (store.setIfAbsent) {
@@ -125,11 +127,11 @@ export function buildSequenceKeyPrefix(network: string, publicKey: string): stri
 
 /**
  * Reserves a unique sequence number for a Stellar transaction.
- * 
+ *
  * Atomicity guarantee: baseSequence and offset are fetched in relation to the same
  * generation. If a reset occurs between the two fetches, the generation check will
  * detect it and the caller should retry.
- * 
+ *
  * @param options - Store, key prefix, and base sequence loader
  * @returns Reservation details including the account sequence to use
  */
@@ -168,7 +170,7 @@ export async function reserveSequence(options: SequenceOptions): Promise<Sequenc
 /**
  * Resets the sequence state by loading a fresh base sequence from the network.
  * Increments the generation counter to invalidate any in-flight loads.
- * 
+ *
  * @param options - Store, key prefix, base sequence loader, reason, and optional reset callback
  * @returns The newly loaded base sequence
  */

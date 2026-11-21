@@ -43,10 +43,11 @@ export async function sponsorNewAccount(
   const usdc = getUsdcAsset(network);
   const passphrase = getNetworkPassphrase(network);
   const sponsorKeypair = Keypair.fromSecret(sponsorSecret);
-  const sponsorAccount = await withRetry(
-    () => horizon.loadAccount(sponsorKeypair.publicKey()),
-    { maxAttempts: 5, baseDelayMs: 250, maxDelayMs: 30_000 }
-  );
+  const sponsorAccount = await withRetry(() => horizon.loadAccount(sponsorKeypair.publicKey()), {
+    maxAttempts: 5,
+    baseDelayMs: 250,
+    maxDelayMs: 30_000,
+  });
 
   const tx = new TransactionBuilder(sponsorAccount, {
     fee: BASE_FEE,
@@ -145,6 +146,20 @@ export async function setupMultisigThreshold(
   masterSignerSecret: string,
   network: NetworkName = "testnet"
 ): Promise<{ txEnvelopeXdr: string; txHash: string }> {
+  if (signers.length > 20) {
+    throw new Error("Stellar accounts support at most 20 signers");
+  }
+  if (!Number.isInteger(threshold) || threshold < 0 || threshold > 255) {
+    throw new Error(`Invalid threshold ${threshold}: must be an integer between 0 and 255`);
+  }
+  for (const signer of signers) {
+    if (!Number.isInteger(signer.weight) || signer.weight < 0 || signer.weight > 255) {
+      throw new Error(
+        `Invalid signer weight ${signer.weight} for ${signer.publicKey}: must be an integer between 0 and 255`
+      );
+    }
+  }
+
   const horizon = getHorizonServer(network);
   const passphrase = getNetworkPassphrase(network);
   const masterKeypair = Keypair.fromSecret(masterSignerSecret);
@@ -205,25 +220,52 @@ export async function combineSignatures(xdrEnvelopes: string[]): Promise<string>
 
   // Parse first envelope to get the base transaction
   const firstEnvelope = xdr.TransactionEnvelope.fromXDR(xdrEnvelopes[0], "base64");
+  const firstSwitch = firstEnvelope.switch();
+  const firstTxBodyXdr =
+    firstSwitch === xdr.EnvelopeType.envelopeTypeTxV0()
+      ? firstEnvelope.v0()?.tx().toXDR("base64")
+      : firstSwitch === xdr.EnvelopeType.envelopeTypeTx()
+        ? firstEnvelope.v1()?.tx().toXDR("base64")
+        : undefined;
+
+  if (!firstTxBodyXdr) {
+    throw new Error("Unsupported or invalid transaction envelope at index 0");
+  }
 
   // Collect all signatures from all envelopes
   const allSignatures = new Set<string>();
 
-  for (const xdrEnv of xdrEnvelopes) {
-    const envelope = xdr.TransactionEnvelope.fromXDR(xdrEnv, "base64");
+  for (let i = 0; i < xdrEnvelopes.length; i++) {
+    const envelope = xdr.TransactionEnvelope.fromXDR(xdrEnvelopes[i], "base64");
+    const envSwitch = envelope.switch();
+
+    if (envSwitch !== firstSwitch) {
+      throw new Error(`Envelope at index ${i} has a different envelope type than envelope 0`);
+    }
+
+    const txBodyXdr =
+      envSwitch === xdr.EnvelopeType.envelopeTypeTxV0()
+        ? envelope.v0()?.tx().toXDR("base64")
+        : envSwitch === xdr.EnvelopeType.envelopeTypeTx()
+          ? envelope.v1()?.tx().toXDR("base64")
+          : undefined;
+
+    if (txBodyXdr !== firstTxBodyXdr) {
+      throw new Error(`Envelope at index ${i} has a different transaction body than envelope 0`);
+    }
 
     // Extract signatures depending on envelope type
-    if (envelope.switch() === xdr.EnvelopeType.txTypeV0()) {
+    if (envSwitch === xdr.EnvelopeType.envelopeTypeTxV0()) {
       const v0 = envelope.v0();
       if (v0) {
         v0.signatures().forEach((sig) => {
           allSignatures.add(sig.toXDR("base64"));
         });
       }
-    } else if (envelope.switch() === xdr.EnvelopeType.txTypeTx()) {
-      const tx = envelope.tx();
-      if (tx) {
-        tx.signatures().forEach((sig) => {
+    } else if (envSwitch === xdr.EnvelopeType.envelopeTypeTx()) {
+      const v1 = envelope.v1();
+      if (v1) {
+        v1.signatures().forEach((sig) => {
           allSignatures.add(sig.toXDR("base64"));
         });
       }
@@ -233,7 +275,7 @@ export async function combineSignatures(xdrEnvelopes: string[]): Promise<string>
   // Build new envelope with combined signatures
   let newEnvelope: xdr.TransactionEnvelope;
 
-  if (firstEnvelope.switch() === xdr.EnvelopeType.txTypeV0()) {
+  if (firstSwitch === xdr.EnvelopeType.envelopeTypeTxV0()) {
     const v0 = firstEnvelope.v0();
     if (!v0) throw new Error("Invalid v0 envelope");
 
@@ -241,27 +283,25 @@ export async function combineSignatures(xdrEnvelopes: string[]): Promise<string>
       xdr.DecoratedSignature.fromXDR(sig, "base64")
     );
 
-    newEnvelope = xdr.TransactionEnvelope.txTypeV0(
+    newEnvelope = xdr.TransactionEnvelope.envelopeTypeTxV0(
       new xdr.TransactionV0Envelope({
         tx: v0.tx(),
         signatures,
       })
     );
   } else {
-    const tx = firstEnvelope.tx();
-    if (!tx) throw new Error("Invalid transaction envelope");
+    const v1 = firstEnvelope.v1();
+    if (!v1) throw new Error("Invalid transaction envelope");
 
     const signatures = Array.from(allSignatures).map((sig) =>
       xdr.DecoratedSignature.fromXDR(sig, "base64")
     );
 
-    newEnvelope = xdr.TransactionEnvelope.txTypeTx(
-      new xdr.TransactionEnvelope.txTypeTx(
-        new xdr.TransactionEnvelope({
-          tx: tx.tx(),
-          signatures,
-        })
-      )
+    newEnvelope = xdr.TransactionEnvelope.envelopeTypeTx(
+      new xdr.TransactionV1Envelope({
+        tx: v1.tx(),
+        signatures,
+      })
     );
   }
 
