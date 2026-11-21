@@ -83,10 +83,10 @@ export function CostPerSessionChart({ data, loading = false }: CostPerSessionCha
                     fontSize={7}
                     className="fill-[var(--muted-foreground)]"
                   >
-                    {new Date(d.date).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                    })}
+                    {new Date(d.date).toLocaleDateString(
+                      typeof navigator !== "undefined" ? navigator.language : undefined,
+                      { month: "short", day: "numeric" }
+                    )}
                   </text>
                 </g>
               );

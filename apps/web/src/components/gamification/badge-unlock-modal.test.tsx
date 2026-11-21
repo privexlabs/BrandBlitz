@@ -49,10 +49,15 @@ describe("BadgeUnlockModal", () => {
   it("share link uses correct badge name and product name", () => {
     render(<BadgeUnlockModal badges={[badge1]} onClose={() => {}} />);
     const link = screen.getByRole("link", { name: /Share on X/i });
-    expect(link.getAttribute("href")).toContain(encodeURIComponent("First Win"));
-    expect(link.getAttribute("href")).toContain("BrandBlitz!");
-    expect(link.getAttribute("href")).not.toContain("StreamFi!");
-    expect(link.getAttribute("href")).toContain("x.com/intent/tweet");
+    const href = link.getAttribute("href") ?? "";
+    expect(href).toContain(encodeURIComponent("First Win"));
+    expect(href).toContain("BrandBlitz!");
+    expect(href).not.toContain("StreamFi");
+    expect(href).toContain("x.com/intent/tweet");
+    // Opens in new tab with safe rel attributes
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toContain("noopener");
+    expect(link.getAttribute("rel")).toContain("noreferrer");
   });
 
   it("onClose called on close button click", () => {
