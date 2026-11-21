@@ -38,6 +38,8 @@ export function CostPerSessionChart({ data, loading = false }: CostPerSessionCha
 
   const maxCost = Math.max(...data.map((d) => d.costPerSession), 0.01);
   const maxSessions = Math.max(...data.map((d) => d.sessionCount), 1);
+  const totalCost = data.reduce((sum, d) => sum + d.totalCost, 0);
+  const totalSessions = data.reduce((sum, d) => sum + d.sessionCount, 0);
 
   return (
     <Card>
@@ -48,6 +50,8 @@ export function CostPerSessionChart({ data, loading = false }: CostPerSessionCha
         <div className="relative h-48">
           <svg
             className="h-full w-full"
+            role="img"
+            aria-label={`Cost per session for ${data.length} days; total spent $${totalCost.toFixed(2)} across ${totalSessions.toLocaleString()} sessions`}
             preserveAspectRatio="none"
             viewBox={`0 0 ${data.length * 40} 100`}
           >
@@ -93,9 +97,30 @@ export function CostPerSessionChart({ data, loading = false }: CostPerSessionCha
             })}
           </svg>
         </div>
+        <table className="sr-only">
+          <caption>Daily cost per session</caption>
+          <thead>
+            <tr>
+              <th scope="col">Date</th>
+              <th scope="col">Total cost</th>
+              <th scope="col">Sessions</th>
+              <th scope="col">Cost per session</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((d) => (
+              <tr key={d.date}>
+                <td>{d.date}</td>
+                <td>${d.totalCost.toFixed(2)}</td>
+                <td>{d.sessionCount}</td>
+                <td>${d.costPerSession.toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         <div className="mt-4 flex items-center justify-between text-xs text-[var(--muted-foreground)]">
-          <span>Total spent: ${data.reduce((sum, d) => sum + d.totalCost, 0).toFixed(2)}</span>
-          <span>{data.reduce((sum, d) => sum + d.sessionCount, 0).toLocaleString()} sessions</span>
+          <span>Total spent: ${totalCost.toFixed(2)}</span>
+          <span>{totalSessions.toLocaleString()} sessions</span>
         </div>
       </CardContent>
     </Card>

@@ -91,6 +91,11 @@ export function NotificationToast({ notification, onDismiss }: NotificationToast
     clearTimer();
   };
 
+  const dismiss = () => {
+    cancelTimer();
+    onDismiss(notification.id);
+  };
+
   useEffect(() => {
     remainingRef.current = AUTO_DISMISS_MS;
     interactedRef.current = false;
@@ -112,7 +117,7 @@ export function NotificationToast({ notification, onDismiss }: NotificationToast
       <p className="flex-1 text-[var(--foreground)]">{toastSummary(notification)}</p>
       <button
         aria-label="Dismiss notification"
-        onClick={() => onDismiss(notification.id)}
+        onClick={dismiss}
         className="leading-none text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
       >
         ✕

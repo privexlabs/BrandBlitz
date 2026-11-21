@@ -64,6 +64,11 @@ export function AccuracyBreakdownChart({ data, loading = false }: AccuracyBreakd
             </div>
             <div className="relative h-6 overflow-hidden rounded-full bg-[var(--muted)]">
               <div
+                role="progressbar"
+                aria-label={`Round ${q.round} ${q.questionType} accuracy`}
+                aria-valuenow={q.accuracy}
+                aria-valuemin={0}
+                aria-valuemax={100}
                 className={`absolute left-0 top-0 h-full rounded-full transition-all ${getBarColor(q.accuracy)}`}
                 style={{ width: `${q.accuracy}%` }}
               />
