@@ -73,6 +73,25 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
   },
 ];
 
+/** Shape returned to the client for badges awarded during a session. */
+export interface AwardedBadgeSummary {
+  id: string;
+  name: string;
+  description: string;
+}
+
+/**
+ * Maps awarded badge slugs to the public summary shown in the unlock modal.
+ * iconUrl is intentionally omitted: the web app does not serve these icon paths yet,
+ * so the client falls back to its built-in badge placeholder.
+ */
+export function summarizeAwardedBadges(slugs: string[]): AwardedBadgeSummary[] {
+  return slugs.flatMap((slug) => {
+    const def = BADGE_DEFINITIONS.find((d) => d.slug === slug);
+    return def ? [{ id: def.slug, name: def.name, description: def.description }] : [];
+  });
+}
+
 export interface BadgeWithStatus extends BadgeDefinition {
   id: string;
   earned: boolean;

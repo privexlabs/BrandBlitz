@@ -29,7 +29,7 @@ import { challengeStartLimiter } from "../middleware/rate-limit";
 import { redis } from "../lib/redis";
 import { computeSessionHmac } from "../lib/integrity";
 import { updateStreak } from "../services/streaks";
-import { checkAndAwardSessionBadges } from "../services/badges";
+import { checkAndAwardSessionBadges, summarizeAwardedBadges } from "../services/badges";
 import { notifyOvertakenParticipants } from "../services/rank-overtaken";
 import { WARMUP_MIN_SECONDS } from "@brandblitz/stellar";
 import { tokenRevocationKey, tokenTtlSeconds } from "../middleware/authenticate";
@@ -346,6 +346,8 @@ router.post("/:challengeId/answer/:round", authenticate, validateReactionTime, a
   // Set when round 3 finishes the session, so the client can build a
   // shareable result-card link (#1011) without a separate round trip.
   let sessionIdForShareCard: string | undefined;
+  // Badges granted by the round-3 completion, returned so the client can show the unlock modal.
+  let awardedSlugs: string[] = [];
 
   if (round === 3) {
     const completed = await finishSession(session.id);
@@ -358,7 +360,7 @@ router.post("/:challengeId/answer/:round", authenticate, validateReactionTime, a
       }
       if (!completed.is_practice) {
         await updateStreak(completed.user_id);
-        await checkAndAwardSessionBadges(completed.user_id, {
+        awardedSlugs = await checkAndAwardSessionBadges(completed.user_id, {
           total_score: completed.total_score,
           is_practice: completed.is_practice,
         });
@@ -390,6 +392,7 @@ router.post("/:challengeId/answer/:round", authenticate, validateReactionTime, a
     score,
     round,
     sessionId: sessionIdForShareCard,
+    newBadges: summarizeAwardedBadges(awardedSlugs),
   });
 });
 

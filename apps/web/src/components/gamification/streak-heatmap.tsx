@@ -137,35 +137,19 @@ export function StreakHeatmap({ activity }: StreakHeatmapProps) {
           style={{ gridTemplateColumns: `repeat(${displayWeeks.length}, 1fr)` }}
         >
           {displayWeeks.map((week, weekIndex) =>
-            week.map((record, dayIndex) => {
-              if (!record.date) {
-                return (
-                  <div
-                    key={`${weekIndex}-${dayIndex}`}
-                    aria-hidden="true"
-                    className="h-3 w-3 rounded-sm border border-[var(--border)] bg-slate-50 transition-all dark:bg-slate-800"
-                  />
-                );
-              }
-
-              return (
-                <div
-                  key={`${weekIndex}-${dayIndex}`}
-                  tabIndex={0}
-                  role="img"
-                  aria-label={formatCellAriaLabel(record.date, record.session_count)}
-                  onMouseEnter={(e) => handleCellHover(e, record.date)}
-                  onMouseLeave={() => setHoveredDate(null)}
-                  onFocus={(e) => handleCellFocus(e, record.date)}
-                  onBlur={() => setHoveredDate(null)}
-                  className={`h-3 w-3 cursor-pointer rounded-sm border border-[var(--border)] transition-all hover:ring-2 hover:ring-[var(--primary)] hover:ring-offset-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-1 ${getColorClass(
-                    record.session_count
-                  )} ${getDarkColorClass(record.session_count)} ${
-                    hoveredDate === record.date ? "ring-2 ring-[var(--primary)] ring-offset-1" : ""
-                  }`}
-                />
-              );
-            })
+            week.map((record, dayIndex) => (
+              <div
+                key={`${weekIndex}-${dayIndex}`}
+                data-date={record.date || undefined}
+                onMouseEnter={(e) => handleCellHover(e, record.date)}
+                onMouseLeave={() => setHoveredDate(null)}
+                className={`h-3 w-3 rounded-sm border border-[var(--border)] transition-all ${
+                  record.date
+                    ? `${getColorClass(record.session_count)} ${getDarkColorClass(record.session_count)} cursor-pointer hover:ring-2 hover:ring-[var(--primary)] hover:ring-offset-1`
+                    : "bg-slate-50 dark:bg-slate-800"
+                } ${hoveredDate === record.date ? "ring-2 ring-[var(--primary)] ring-offset-1" : ""}`}
+              />
+            ))
           )}
         </div>
 
