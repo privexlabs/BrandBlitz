@@ -169,5 +169,5 @@ specifically want to exercise the on-chain escrow settlement path.
 
 See [`docs/03-stellar-architecture.md`](../03-stellar-architecture.md#fallback-behavior)
 for how the runtime switch works, and
-[`docs/adr/003-escrow-implementation.md`](../adr/003-escrow-implementation.md) for
+[`docs/adr/011-escrow-implementation.md`](../adr/011-escrow-implementation.md) for
 the rationale.

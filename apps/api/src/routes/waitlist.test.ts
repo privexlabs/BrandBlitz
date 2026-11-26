@@ -109,3 +109,99 @@ describe("POST /waitlist", () => {
     expect(res.status).toBe(429);
   });
 });
+
+describe("POST /waitlist entry id", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns the new entry id so the client can poll its position", async () => {
+    const id = "6f1c2c1e-2f5b-4d1a-9b7e-0d3c2b1a0f9e";
+    mocks.dbQuery.mockResolvedValueOnce({ rows: [{ id }] });
+
+    const res = await request(app).post("/waitlist").send({ email: "new@example.com" });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ message: "You're on the list!", id });
+  });
+
+  it("never returns an id for an email that is already on the list", async () => {
+    mocks.dbQuery.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app).post("/waitlist").send({ email: "dupe@example.com" });
+
+    expect(res.body).not.toHaveProperty("id");
+  });
+});
+
+describe("GET /waitlist/:id/position", () => {
+  const id = "6f1c2c1e-2f5b-4d1a-9b7e-0d3c2b1a0f9e";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns position and a wait estimate from recent throughput", async () => {
+    // 41 pending ahead -> position 42; 14 activations over 7 days -> 2/day -> 21 days
+    mocks.dbQuery.mockResolvedValueOnce({
+      rows: [{ activated: false, ahead: 41, recent_activations: 14 }],
+    });
+
+    const res = await request(app).get(`/waitlist/${id}/position`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      activated: false,
+      position: 42,
+      estimatedWaitSeconds: 21 * 86_400,
+      throughputPerDay: 2,
+    });
+    expect(mocks.dbQuery).toHaveBeenCalledWith(expect.stringContaining("WHERE w.id = $1"), [id, 7]);
+  });
+
+  it("returns a null estimate when nobody was activated in the window", async () => {
+    mocks.dbQuery.mockResolvedValueOnce({
+      rows: [{ activated: false, ahead: 0, recent_activations: 0 }],
+    });
+
+    const res = await request(app).get(`/waitlist/${id}/position`);
+
+    expect(res.body).toMatchObject({
+      position: 1,
+      estimatedWaitSeconds: null,
+      throughputPerDay: 0,
+    });
+  });
+
+  it("reports an activated entry as no longer queued", async () => {
+    mocks.dbQuery.mockResolvedValueOnce({
+      rows: [{ activated: true, ahead: 0, recent_activations: 7 }],
+    });
+
+    const res = await request(app).get(`/waitlist/${id}/position`);
+
+    expect(res.body).toMatchObject({ activated: true, position: null, estimatedWaitSeconds: 0 });
+  });
+
+  it("returns 404 for an unknown id", async () => {
+    mocks.dbQuery.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app).get(`/waitlist/${id}/position`);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 without querying for a non-UUID id", async () => {
+    const res = await request(app).get("/waitlist/alex@example.com/position");
+
+    expect(res.status).toBe(404);
+    expect(mocks.dbQuery).not.toHaveBeenCalled();
+  });
+
+  it("no longer exposes position lookup by email", async () => {
+    const res = await request(app).get("/waitlist/position/alex@example.com");
+
+    expect(res.status).toBe(404);
+    expect(mocks.dbQuery).not.toHaveBeenCalled();
+  });
+});

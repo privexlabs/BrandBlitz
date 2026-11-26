@@ -165,7 +165,10 @@ async function insertStreakMilestoneNotification(userId: string, milestone: numb
   try {
     const enabled = await isNotificationCategoryEnabled(userId, "streak");
     if (!enabled) {
-      logger.debug("Streak milestone notification skipped - user has disabled streak notifications", { userId });
+      logger.debug(
+        "Streak milestone notification skipped - user has disabled streak notifications",
+        { userId }
+      );
       return;
     }
 

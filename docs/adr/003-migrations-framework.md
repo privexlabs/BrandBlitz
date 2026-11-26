@@ -79,10 +79,31 @@ Considered alternatives:
 - New contributors learn one tool (`pnpm migrate`) instead of two
   (an ORM model API + an ORM CLI).
 
+## Addendum: duplicate prefixes (#951)
+
+Two directories hold migrations. `apps/api/migrations/` is canonical: it's
+what `migrate.ts` reads. The root `migrations/` is historical and frozen (see
+`migrations/README.md`). The `NNNN_<slug>.sql` pattern above describes the
+root directory; new files use `<NNNNN>-<kebab-slug>.sql` per
+`docs/database/migrations.md`.
+
+Both directories already contain numeric prefixes shared by more than one
+file, compared as integers:
+
+- `apps/api/migrations/`: 12 (`00012-*`, `0012-*`), 27 (two `00027-*`, two
+  `0027-*`), 30 (`00030-*`, two `0030-*`).
+- `migrations/`: 007, 011, 012, 014, 015, 018, 019.
+
+Applied migrations can't be renamed without rewriting `schema_migrations`
+everywhere, so these exact groups are grandfathered in
+`apps/api/src/db/migration-lint.ts`. `migrate:lint` runs in CI and rejects
+any new collision or any file added to an existing group.
+
 ## References
 
 - `apps/api/scripts/migrate.ts`
-- `apps/api/migrations/` — canonical migration directory read by the migration runner
+- `apps/api/migrations/` (canonical), `migrations/` (historical)
+- `apps/api/src/db/migration-lint.ts`
 - Closes #68.
 
 ## Migration Directory Clarification

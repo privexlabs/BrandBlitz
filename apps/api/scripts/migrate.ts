@@ -3,6 +3,11 @@ import { readFile, readdir } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Pool, type PoolClient } from "pg";
+import {
+  GRANDFATHERED_API_DUPLICATES,
+  GRANDFATHERED_ROOT_DUPLICATES,
+  checkDuplicatePrefixes,
+} from "../src/db/migration-lint";
 
 const command = process.argv[2] ?? "up";
 const rollbackCount = Number.parseInt(process.argv[3] ?? "1", 10);
@@ -17,6 +22,8 @@ if (!databaseUrl && command !== "lint") {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const migrationsDir = path.resolve(__dirname, "../migrations");
+// Frozen pre-runner migrations at the repo root; see migrations/README.md.
+const rootMigrationsDir = path.resolve(__dirname, "../../../migrations");
 
 type MigrationFile = {
   file: string;
@@ -238,8 +245,10 @@ const LEGACY_EXEMPT_FILES = new Set([
   "0027-drop-correct-answer.sql",
   "0028-challenge-gallery.down.sql",
   "0028-challenge-gallery.sql",
+  "0028-notification-preferences.sql",
   "0029-scheduled-config-changes.down.sql",
   "0029-scheduled-config-changes.sql",
+  "0030-accessibility-timezone-refund-policy.sql",
   "0030-brand-digest-preferences.down.sql",
   "0030-brand-digest-preferences.sql",
   "0030-challenge-ratings.down.sql",
@@ -267,7 +276,29 @@ async function runLint(): Promise<void> {
     process.exit(1);
   }
 
-  console.log(`All ${sqlFiles.length} migration filenames are valid (canonical or grandfathered).`);
+  // Two migrations sharing a numeric prefix (e.g. 0027-* and 00027-*) make
+  // apply order depend on string padding. Only the grandfathered groups may
+  // collide; see src/db/migration-lint.ts.
+  const rootEntries = await readdir(rootMigrationsDir);
+  const duplicateErrors = [
+    ...checkDuplicatePrefixes(sqlFiles, GRANDFATHERED_API_DUPLICATES).map(
+      (e) => `apps/api/migrations: ${e}`
+    ),
+    ...checkDuplicatePrefixes(rootEntries, GRANDFATHERED_ROOT_DUPLICATES).map(
+      (e) => `migrations/: ${e}`
+    ),
+  ];
+  if (duplicateErrors.length > 0) {
+    console.error("Each migration needs its own numeric prefix. Use the next free number:");
+    for (const error of duplicateErrors) {
+      console.error(`  - ${error}`);
+    }
+    process.exit(1);
+  }
+
+  console.log(
+    `All ${sqlFiles.length} migration filenames are valid (canonical or grandfathered, no new duplicate prefixes).`
+  );
 }
 
 async function main(): Promise<void> {

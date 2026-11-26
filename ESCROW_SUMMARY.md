@@ -64,7 +64,7 @@ Added:
 
 ### 5. ADR Documentation
 
-**File**: `docs/adr/003-escrow-implementation.md`
+**File**: `docs/adr/011-escrow-implementation.md`
 
 Documents decision, rationale, deployment, monitoring
 
@@ -146,7 +146,7 @@ If contract has issues:
 
 ## Acceptance Criteria Met
 
-✅ ADR docs/adr/003-escrow-implementation.md  
+✅ ADR docs/adr/011-escrow-implementation.md  
 ✅ packages/stellar/src/escrow.ts wrapper  
 ✅ Payout worker uses settle()  
 ✅ Deployment script: make deploy-testnet/mainnet  
@@ -159,7 +159,7 @@ If contract has issues:
 - ✅ `packages/stellar/src/escrow.test.ts` — NEW
 - ✅ `apps/api/src/services/payout.ts` — Modified
 - ✅ `contracts/contracts/escrow/Makefile` — Modified
-- ✅ `docs/adr/003-escrow-implementation.md` — NEW
+- ✅ `docs/adr/011-escrow-implementation.md` — NEW
 - ✅ `.env.example` — Modified
 
 ## Next Steps

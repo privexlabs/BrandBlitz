@@ -551,21 +551,23 @@ export interface NotificationPreference {
   updated_at: string;
 }
 
-export async function getNotificationPreferences(userId: string): Promise<NotificationPreference[]> {
+export async function getNotificationPreferences(
+  userId: string
+): Promise<NotificationPreference[]> {
   const result = await query<NotificationPreference>(
     `SELECT * FROM notification_preferences WHERE user_id = $1 ORDER BY category ASC`,
-    [userId],
+    [userId]
   );
   return result.rows;
 }
 
 export async function isNotificationCategoryEnabled(
   userId: string,
-  category: string,
+  category: string
 ): Promise<boolean> {
   const result = await query<{ enabled: boolean }>(
     `SELECT enabled FROM notification_preferences WHERE user_id = $1 AND category = $2`,
-    [userId, category],
+    [userId, category]
   );
   return result.rows[0]?.enabled ?? true;
 }
@@ -573,7 +575,7 @@ export async function isNotificationCategoryEnabled(
 export async function updateNotificationPreference(
   userId: string,
   category: string,
-  enabled: boolean,
+  enabled: boolean
 ): Promise<NotificationPreference | null> {
   const result = await query<NotificationPreference>(
     `INSERT INTO notification_preferences (user_id, category, enabled)
@@ -581,7 +583,7 @@ export async function updateNotificationPreference(
      ON CONFLICT (user_id, category)
      DO UPDATE SET enabled = $3, updated_at = NOW()
      RETURNING *`,
-    [userId, category, enabled],
+    [userId, category, enabled]
   );
   return result.rows[0] ?? null;
 }

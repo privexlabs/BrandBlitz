@@ -85,7 +85,7 @@ Added:
 
 ### 5. ADR Documentation
 
-**File**: `docs/adr/003-escrow-implementation.md`
+**File**: `docs/adr/011-escrow-implementation.md`
 
 Documents:
 
@@ -195,7 +195,7 @@ If contract has issues:
 
 ## Acceptance Criteria Met
 
-✅ ADR docs/adr/003-escrow-implementation.md  
+✅ ADR docs/adr/011-escrow-implementation.md  
 ✅ packages/stellar/src/escrow.ts wrapper  
 ✅ Payout worker uses settle() for contract-backed challenges  
 ✅ Deployment script: make deploy-testnet / deploy-mainnet  
@@ -208,7 +208,7 @@ If contract has issues:
 - ✅ `packages/stellar/src/escrow.test.ts` — NEW: Integration tests
 - ✅ `apps/api/src/services/payout.ts` — Use escrow settlement
 - ✅ `contracts/contracts/escrow/Makefile` — Deploy targets
-- ✅ `docs/adr/003-escrow-implementation.md` — NEW: ADR
+- ✅ `docs/adr/011-escrow-implementation.md` — NEW: ADR
 - ✅ `.env.example` — Document SOROBAN_CONTRACT_ID
 
 ## Next Steps

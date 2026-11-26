@@ -71,3 +71,10 @@ COMMIT;
 
 The unchanged `001` through `007_audit_log.sql` filenames need no
 reconciliation.
+
+## No new files
+
+This directory is frozen. New schema changes go in
+[`apps/api/migrations/`](../apps/api/migrations/README.md) with the next free
+5-digit prefix. `pnpm --filter @brandblitz/api migrate:lint` (run in CI) fails
+if two files here, or in `apps/api/migrations/`, share a numeric prefix.
