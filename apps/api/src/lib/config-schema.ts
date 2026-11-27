@@ -84,8 +84,8 @@ export const configSchema = z.object({
   // Error monitoring — absent by default in local dev; set in staging/prod
   SENTRY_DSN: z.string().url().optional(),
 
-  // Session integrity — rotated independently of JWT_SECRET; optional for backwards compat
-  SESSION_INTEGRITY_KEY: z.string().min(32).optional(),
+  // Session integrity — rotated independently of JWT_SECRET
+  SESSION_INTEGRITY_KEY: z.string().min(32),
 
   // Phone verification — HMAC salt for hashing phone numbers at rest
   PHONE_HASH_SALT: z.string().min(16).optional(),

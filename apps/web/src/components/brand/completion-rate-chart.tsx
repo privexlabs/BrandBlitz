@@ -40,7 +40,12 @@ export function CompletionRateChart({
       <CardContent>
         <div className="flex items-end gap-6">
           <div className="relative h-24 w-24">
-            <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
+            <svg
+              viewBox="0 0 36 36"
+              className="h-full w-full -rotate-90"
+              role="img"
+              aria-label={`Completion rate: ${completionRate}%`}
+            >
               <circle
                 cx="18"
                 cy="18"
@@ -48,6 +53,7 @@ export function CompletionRateChart({
                 fill="none"
                 stroke="var(--muted)"
                 strokeWidth="3"
+                aria-hidden="true"
               />
               <circle
                 cx="18"
@@ -58,9 +64,10 @@ export function CompletionRateChart({
                 strokeWidth="3"
                 strokeDasharray={`${completionRate} ${100 - completionRate}`}
                 strokeLinecap="round"
+                aria-hidden="true"
               />
             </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
+            <div className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
               <span className="text-xl font-bold">{completionRate}%</span>
             </div>
           </div>

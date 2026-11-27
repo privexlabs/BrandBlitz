@@ -56,4 +56,57 @@ describe("requestId middleware", () => {
 
     expect(res.setHeader).toHaveBeenCalledWith("X-Request-ID", res.locals.requestId);
   });
+
+  it("replaces oversized X-Request-ID with a generated UUID", () => {
+    const oversizedId = "a".repeat(1000);
+    const req = mockReq(oversizedId);
+    const res = mockRes();
+    const next = vi.fn();
+
+    requestId(req, res, next);
+
+    expect(res.locals.requestId).not.toBe(oversizedId);
+    expect(res.locals.requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+    expect(res.setHeader).toHaveBeenCalledWith("X-Request-ID", res.locals.requestId);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it("replaces malformed X-Request-ID with a generated UUID", () => {
+    const malformedIds = [
+      "not-a-uuid",
+      "123",
+      "injection<script>alert(1)</script>",
+      "550e8400-XXXX-41d4-a716-446655440000",
+    ];
+
+    for (const malformedId of malformedIds) {
+      const req = mockReq(malformedId);
+      const res = mockRes();
+      const next = vi.fn();
+
+      requestId(req, res, next);
+
+      expect(res.locals.requestId).not.toBe(malformedId);
+      expect(res.locals.requestId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      );
+      expect(res.setHeader).toHaveBeenCalledWith("X-Request-ID", res.locals.requestId);
+      expect(next).toHaveBeenCalled();
+    }
+  });
+
+  it("honors well-formed client-supplied request id for trace correlation", () => {
+    const validId = "b0a8d1e2-3c4f-5a6b-7c8d-9e0f1a2b3c4d";
+    const req = mockReq(validId);
+    const res = mockRes();
+    const next = vi.fn();
+
+    requestId(req, res, next);
+
+    expect(res.locals.requestId).toBe(validId);
+    expect(res.setHeader).toHaveBeenCalledWith("X-Request-ID", validId);
+    expect(next).toHaveBeenCalled();
+  });
 });
