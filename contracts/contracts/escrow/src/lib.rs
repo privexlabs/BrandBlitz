@@ -62,12 +62,29 @@ impl EscrowContract {
     /// - `admin`    : the BrandBlitz hot-wallet address authorised to settle/refund
     /// - `token`    : the USDC SAC contract address on this network
     /// - `memo`     : unique challenge memo so Horizon events can be correlated
+    ///
+    /// Security: `admin.require_auth()` is the very first check, before any
+    /// storage read or write. An `Address` argument carries no authorization by
+    /// itself, so without this check anyone could front-run the legitimate
+    /// initialize transaction with their own address and seize permanent
+    /// control of `settle`/`refund`. Requiring the admin's signature means only
+    /// the holder of the intended admin key can complete initialization; a
+    /// front-runner can at most pass an admin address they control, which the
+    /// backend detects because its own initialize then fails with
+    /// `AlreadyInitialized` and the instance is discarded before any deposit.
+    ///
+    /// A constructor-based binding (`__constructor`, set atomically at deploy
+    /// time) would remove the window entirely; it is not used here because the
+    /// existing deployment flow deploys first and initializes in a separate
+    /// transaction, and changing that is a deployment-pipeline change.
     pub fn initialize(
         env: Env,
         admin: Address,
         token: Address,
         memo: String,
     ) -> Result<(), ContractError> {
+        admin.require_auth();
+
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
         }

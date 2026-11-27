@@ -7,6 +7,12 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const sharedSetupFile = path.resolve(projectRoot, "../../tests/setup.ts");
 
 export default defineProject({
+  resolve: {
+    alias: {
+      // Lets tests import from the package root exactly like consumers do.
+      "@brandblitz/stellar": path.resolve(projectRoot, "./src/index.ts"),
+    },
+  },
   test: {
     name: "@brandblitz/stellar",
     root: projectRoot,

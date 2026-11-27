@@ -8,12 +8,12 @@ import {
   SorobanDataBuilder,
   Transaction,
   TransactionBuilder,
+  Horizon,
+  rpc,
   nativeToScVal,
   scValToNative,
   xdr,
 } from "@stellar/stellar-sdk";
-import { Server as HorizonServer } from "@stellar/stellar-sdk/lib/horizon";
-import { Server as SorobanServer } from "@stellar/stellar-sdk/lib/soroban";
 import { withRetry, type RetryOptions } from "./client";
 
 /** How many ledgers a signed Soroban address authorization stays valid for. */
@@ -59,14 +59,14 @@ function explainSimulationError(operation: string, error: unknown): Error {
  */
 export class EscrowClient {
   private contract: Contract;
-  private horizonServer: HorizonServer;
-  private sorobanServer: SorobanServer;
+  private horizonServer: Horizon.Server;
+  private sorobanServer: rpc.Server;
   private networkPassphrase: string;
 
   constructor(config: EscrowConfig) {
     this.contract = new Contract(config.contractId);
-    this.horizonServer = new HorizonServer(config.horizonUrl);
-    this.sorobanServer = new SorobanServer(config.sorobanUrl);
+    this.horizonServer = new Horizon.Server(config.horizonUrl);
+    this.sorobanServer = new rpc.Server(config.sorobanUrl);
     this.networkPassphrase = config.networkPassphrase;
   }
 
@@ -265,7 +265,11 @@ export class EscrowClient {
    * auth entries, sign the signer's authorizations, then sign the transaction.
    * Soroban rejects invocations that skip this step.
    */
-  private async prepareAndSign(tx: Transaction, signer: Keypair, operation: string): Promise<Transaction> {
+  private async prepareAndSign(
+    tx: Transaction,
+    signer: Keypair,
+    operation: string
+  ): Promise<Transaction> {
     // Not retried: a simulation failure is deterministic. Authorization failures get a readable error.
     const prepared = (await this.sorobanServer.prepareTransaction(tx).catch((e: unknown) => {
       throw explainSimulationError(operation, e);
@@ -397,6 +401,8 @@ export class EscrowClient {
    * External signers review and co-sign offline before submission.
    *
    * @param operation - "withdraw" | "close_escrow" | "distribute"
+   *   - `close_escrow` finalizes the Soroban escrow by invoking the contract's
+   *     `refund` entrypoint (remaining balance → depositor, escrow marked settled).
    * @param operationData - Operation-specific parameters
    * @param adminSecret - Admin/hot-wallet secret for signing
    * @returns { xdrUnsigned, operationHash } for external co-signing
@@ -422,12 +428,16 @@ export class EscrowClient {
       // network. Fail closed until the contract gains a real withdraw entrypoint.
       throw new Error("withdraw is not supported: the escrow contract has no withdraw entrypoint");
     } else if (operation === "close_escrow") {
-      // Close escrow account and return reserves
-      tx.addOperation(
-        Operation.accountMerge({
-          destination: signer.publicKey(),
-        })
-      );
+      // Close (finalize) the Soroban escrow contract instance.
+      //
+      // The escrow lives in a Soroban contract, not a dedicated classic account,
+      // so a classic `accountMerge` is the wrong primitive: merging the admin
+      // signer's account into itself is rejected on-chain (ACCOUNT_MERGE_MALFORMED)
+      // and would never touch the contract anyway. The contract's only
+      // finalization entrypoint is `refund`, which returns the remaining balance
+      // to the recorded depositor and marks the escrow as settled/closed.
+      // `Contract.call` already yields a complete invokeHostFunction operation.
+      tx.addOperation(this.contract.call("refund"));
     } else if (operation === "distribute") {
       // Distribute to multiple recipients (via Soroban call)
       const { recipients } = operationData as {

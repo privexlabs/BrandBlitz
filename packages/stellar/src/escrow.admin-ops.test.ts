@@ -49,12 +49,19 @@ describe("EscrowClient.generateAdminOperationXdr", () => {
     ).rejects.toThrow(/Unsupported admin operation: drain/);
   });
 
-  it("builds close_escrow as an account merge into the admin account", async () => {
-    const { xdrUnsigned } = await client.generateAdminOperationXdr("close_escrow", {}, admin.secret());
+  it("builds close_escrow as a Soroban invocation of the contract's refund entrypoint", async () => {
+    const { xdrUnsigned } = await client.generateAdminOperationXdr(
+      "close_escrow",
+      {},
+      admin.secret()
+    );
     const tx = TransactionBuilder.fromXDR(xdrUnsigned, PASSPHRASE) as any;
     expect(tx.operations).toHaveLength(1);
-    expect(tx.operations[0].type).toBe("accountMerge");
-    expect(tx.operations[0].destination).toBe(admin.publicKey());
+    // Never a classic self-merge of the admin account into itself (#882).
+    expect(tx.operations[0].type).not.toBe("accountMerge");
+    expect(tx.operations[0].type).toBe("invokeHostFunction");
+    const invocation = (tx.operations[0].func as xdr.HostFunction).invokeContract();
+    expect(invocation.functionName().toString()).toBe("refund");
   });
 
   it("builds distribute as a Soroban invocation of the contract's settle entrypoint", async () => {
@@ -69,7 +76,11 @@ describe("EscrowClient.generateAdminOperationXdr", () => {
   });
 
   it("returns an unsigned envelope", async () => {
-    const { xdrUnsigned } = await client.generateAdminOperationXdr("close_escrow", {}, admin.secret());
+    const { xdrUnsigned } = await client.generateAdminOperationXdr(
+      "close_escrow",
+      {},
+      admin.secret()
+    );
     const tx = TransactionBuilder.fromXDR(xdrUnsigned, PASSPHRASE);
     expect(tx.signatures).toHaveLength(0);
   });
@@ -125,7 +136,9 @@ describe("EscrowClient view methods read instance storage", () => {
   });
 
   it("reads Memo from the DataKey::Memo entry", async () => {
-    getContractData.mockResolvedValue({ val: instanceWith({ Memo: xdr.ScVal.scvString("challenge-7") }) });
+    getContractData.mockResolvedValue({
+      val: instanceWith({ Memo: xdr.ScVal.scvString("challenge-7") }),
+    });
     expect(await client.getMemo()).toBe("challenge-7");
   });
 });
@@ -171,6 +184,8 @@ describe("EscrowClient.settle authorization", () => {
       prepareTransaction: vi.fn().mockRejectedValue(new Error("Error(Contract, #5)")),
       sendTransaction: vi.fn(),
     };
-    await expect(client.settle(recipients, signer.secret())).rejects.toThrow(/Settle simulation failed/);
+    await expect(client.settle(recipients, signer.secret())).rejects.toThrow(
+      /Settle simulation failed/
+    );
   });
 });
